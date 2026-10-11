@@ -1,4 +1,5 @@
-import express, { Request, Response } from 'express';
+import express from 'express';
+import type { Request, Response } from 'express';
 import { GoogleGenAI } from '@google/genai';
 import dotenv from 'dotenv';
 import path from 'path';
@@ -17,6 +18,11 @@ app.use(express.json());
 // Inicializar Google Gen AI con API Key del entorno
 const ai = new GoogleGenAI({
   apiKey: process.env.GEMINI_API_KEY,
+});
+
+// Endpoint de salud para Cloud Run / probes
+app.get('/healthz', (_req, res) => {
+  res.status(200).send('OK');
 });
 
 // Endpoint de IA para el Asistente Chatbot de Toque
