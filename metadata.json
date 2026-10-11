@@ -1,0 +1,6 @@
+{
+  "name": "Toque",
+  "description": "Tu cartel, con datos. Plataforma SaaS para carteles NFC + QR con enlace a reseñas de Google.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

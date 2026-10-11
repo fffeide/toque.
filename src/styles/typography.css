@@ -1,0 +1,97 @@
+/**
+ * Toque — Escala Tipográfica (Reglas Apple)
+ * Títulos y números grandes: Sora
+ * Interfaz y texto: Inter
+ * Cifras y códigos de carteles: JetBrains Mono
+ */
+
+body {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  color: var(--text-main);
+  line-height: 1.5;
+  letter-spacing: 0;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Familias Tipográficas */
+.font-display {
+  font-family: 'Sora', sans-serif;
+}
+
+.font-sans {
+  font-family: 'Inter', sans-serif;
+}
+
+.font-mono {
+  font-family: 'JetBrains Mono', monospace;
+}
+
+/* Escala y Tracking según Reglas de Tamaño */
+/* 44px (2.75rem) - Títulos Principales / Héroe */
+.text-hero {
+  font-family: 'Sora', sans-serif;
+  font-size: 2.75rem;
+  line-height: 1.1;
+  letter-spacing: -0.025em;
+  font-weight: 700;
+}
+
+/* 32px (2rem) - Título 1 */
+.text-title-1 {
+  font-family: 'Sora', sans-serif;
+  font-size: 2rem;
+  line-height: 1.15;
+  letter-spacing: -0.02em;
+  font-weight: 600;
+}
+
+/* 24px (1.5rem) - Título 2 */
+.text-title-2 {
+  font-family: 'Sora', sans-serif;
+  font-size: 1.5rem;
+  line-height: 1.25;
+  letter-spacing: -0.018em;
+  font-weight: 600;
+}
+
+/* 20px (1.25rem) - Título 3 */
+.text-title-3 {
+  font-family: 'Sora', sans-serif;
+  font-size: 1.25rem;
+  line-height: 1.35;
+  letter-spacing: -0.012em;
+  font-weight: 600;
+}
+
+/* 16px (1rem) - Cuerpo Base */
+.text-body {
+  font-family: 'Inter', sans-serif;
+  font-size: 1rem;
+  line-height: 1.5;
+  letter-spacing: 0;
+}
+
+/* 14px (0.875rem) - Secundario / Etiquetas */
+.text-small {
+  font-family: 'Inter', sans-serif;
+  font-size: 0.875rem;
+  line-height: 1.45;
+  letter-spacing: +0.005em;
+}
+
+/* 12px (0.75rem) - Micro / Avisos */
+.text-micro {
+  font-family: 'Inter', sans-serif;
+  font-size: 0.75rem;
+  line-height: 1.4;
+  letter-spacing: +0.015em;
+}
+
+/* Cifras y Códigos de Carteles */
+.text-code {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.875rem;
+  letter-spacing: +0.02em;
+  font-weight: 500;
+}

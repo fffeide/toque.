@@ -1,0 +1,6 @@
+{
+  "summary":  "Plan arquitectónico y de interfaz para desacoplar completamente los paneles de Toque (/admin, /fabricante, /resumen) según el rol y usuario autenticado, implementando Role-Based Access Control (RBAC), rutas protegidas dedicadas, menús de navegación exclusivos sin mezcla de herramientas, y confinando el selector de prueba únicamente a la cuenta @pruebas en el Super Admin.",
+  "updatedAt":  "2026-10-11T02:42:17.534915419Z",
+  "requestFeedback":  true,
+  "userFacing":  true
+}

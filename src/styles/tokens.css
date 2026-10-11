@@ -1,0 +1,57 @@
+/**
+ * Toque — Tokens de Diseño (Liquid Glass Aurora Aesthetic)
+ * Paleta sobre fondo atmosférico #04121b con texto blanco puro #ffffff.
+ */
+
+:root {
+  /* Tokens Base Aurora */
+  --ink: #ffffff;
+  --bg-page: #04121b;
+  --bg-card: rgba(255, 255, 255, 0.16);
+  --bg-card-subtle: rgba(255, 255, 255, 0.10);
+  --bg-card-hover: rgba(255, 255, 255, 0.22);
+  --text-main: #ffffff;
+  --text-muted: rgba(255, 255, 255, 0.75);
+  --border-subtle: rgba(255, 255, 255, 0.20);
+  --border-strong: rgba(255, 255, 255, 0.35);
+
+  /* Acentos de Marca */
+  --ultramar: #3A3FE0;
+  --ultramar-hi: #6A6FFF;
+  --tinta: #04121b;
+  --estrella: #FFC21A;
+  --hielo: #04121b;
+  --niebla: rgba(255, 255, 255, 0.20);
+  --pizarra: rgba(255, 255, 255, 0.70);
+  --menta: #19C37D;
+  --ambar: #F59E0B;
+  --coral: #FF5A4E;
+
+  --brand: #3A3FE0;
+  --brand-hi: #6A6FFF;
+  --brand-rgb: 58, 63, 224;
+
+  /* Vidrio Líquido */
+  --glass-bg: rgba(255, 255, 255, 0.155);
+  --glass-border: rgba(255, 255, 255, 0.20);
+  --glass-shadow: 0 16px 40px -10px rgba(4, 16, 24, 0.5);
+  --glass-highlight: rgba(255, 255, 255, 0.35);
+
+  --mesh-gradient: #04121b;
+
+  --radius-sm: 8px;
+  --radius-md: 14px;
+  --radius-lg: 24px;
+  --radius-full: 9999px;
+  --touch-target: 44px;
+}
+
+[data-theme="dark"] {
+  --bg-page: #04121b;
+  --bg-card: rgba(255, 255, 255, 0.14);
+  --bg-card-subtle: rgba(255, 255, 255, 0.08);
+  --text-main: #ffffff;
+  --text-muted: rgba(255, 255, 255, 0.70);
+  --border-subtle: rgba(255, 255, 255, 0.18);
+  --border-strong: rgba(255, 255, 255, 0.30);
+}

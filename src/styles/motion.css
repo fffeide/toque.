@@ -1,0 +1,47 @@
+/**
+ * Toque — Sistema de Movimiento y Accesibilidad de Foco
+ * Reglas de interfaces fluidas (Apple Human Interface Guidelines)
+ */
+
+/* Respuesta Inmediata en Presión (Pointer-down) */
+button,
+[role="button"],
+.interactive-tap {
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+}
+
+button:active:not(:disabled),
+[role="button"]:active:not([aria-disabled="true"]),
+.interactive-tap:active {
+  transform: scale(0.97);
+  transition: transform 100ms ease-out !important;
+}
+
+/* Foco Visible de 2px (Accesibilidad AA/AAA) */
+:focus-visible {
+  outline: 2px solid var(--ultramar) !important;
+  outline-offset: 2px !important;
+}
+
+[data-theme="dark"] :focus-visible {
+  outline-color: var(--ultramar-hi) !important;
+}
+
+/* Reducción de Movimiento del Usuario */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  button:active:not(:disabled),
+  [role="button"]:active:not([aria-disabled="true"]),
+  .interactive-tap:active {
+    transform: none !important;
+  }
+}

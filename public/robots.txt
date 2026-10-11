@@ -1,0 +1,6 @@
+# Toque — robots.txt
+User-agent: *
+Allow: /
+Disallow: /api/
+
+Sitemap: https://toque.com.ar/sitemap.xml
