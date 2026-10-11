@@ -128,7 +128,7 @@ export const CartelDetailModal: React.FC<CartelDetailModalProps> = ({
         {/* Cabecera con código corto y estado */}
         <div className="p-4 rounded-xl bg-black/[0.03] dark:bg-white/[0.04] border border-[var(--border-subtle)] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div>
-            <p className="text-micro uppercase font-semibold text-[var(--text-muted)] tracking-wider">
+            <p className="text-micro font-medium text-[var(--text-muted)]">
               Código corto del cartel
             </p>
             <div className="flex items-center gap-2 mt-0.5">
@@ -265,12 +265,12 @@ export const CartelDetailModal: React.FC<CartelDetailModalProps> = ({
               </div>
 
               <div className="p-3 rounded-xl bg-black/[0.02] dark:bg-white/[0.03] border border-[var(--border-subtle)]">
-                <p className="text-micro text-[var(--text-muted)]">NFC vs QR</p>
-                <p className="font-display text-small font-bold text-[var(--text-main)] mt-1">
-                  NFC {detailStats.totalScans > 0 ? Math.round((detailStats.nfcScans / detailStats.totalScans) * 100) : 0}%
+                <p className="text-micro text-[var(--text-muted)]">Opiniones estimadas</p>
+                <p className="font-display text-title-3 font-bold text-amber-300 mt-0.5">
+                  ~{Math.round(detailStats.totalScans * 0.28)}
                 </p>
                 <p className="text-micro text-[var(--text-muted)]">
-                  QR {detailStats.totalScans > 0 ? 100 - Math.round((detailStats.nfcScans / detailStats.totalScans) * 100) : 0}%
+                  ~28% conversión típica
                 </p>
               </div>
 

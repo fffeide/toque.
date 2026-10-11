@@ -23,7 +23,7 @@ export const Card = forwardRef<HTMLDivElement, CardProps>(({
 }, ref) => {
   const variantClasses = {
     solid: 'aurora-card-glass',
-    subtle: 'bg-white/10 backdrop-blur-md border border-white/15 rounded-2xl text-white',
+    subtle: 'bg-[rgba(14,26,45,0.75)] backdrop-blur-md border border-white/15 rounded-[var(--radius-lg)] text-white',
     glass: 'aurora-card-glass',
   }[variant];
 

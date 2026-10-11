@@ -87,10 +87,10 @@ export const TestCartelModal: React.FC<TestCartelModalProps> = ({
             <select
               value={selectedCartelId}
               onChange={(e) => setSelectedCartelId(e.target.value)}
-              className="w-full px-3.5 py-2.5 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-card)] text-[var(--text-main)] text-small focus:outline-none focus:ring-2 focus:ring-[var(--ring-focus)] transition cursor-pointer"
+              className="w-full px-3.5 py-2.5 rounded-xl border border-white/20 bg-[#0d1b2e] text-white text-small focus:outline-none focus:border-white transition cursor-pointer"
             >
               {carteles.map((cartel) => (
-                <option key={cartel.id} value={cartel.id}>
+                <option key={cartel.id} value={cartel.id} className="bg-[#0a1628] text-white py-2">
                   {cartel.name} ({cartel.shortCode})
                 </option>
               ))}

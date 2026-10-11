@@ -149,12 +149,12 @@ export const PrintKitView: React.FC<PrintKitViewProps> = ({ carteles, businesses
               <select
                 value={selectedCartelId}
                 onChange={(e) => setSelectedCartelId(e.target.value)}
-                className="w-full p-2.5 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-card)] text-small text-[var(--text-main)] focus:outline-none focus:ring-2 focus:ring-[var(--ring-focus)]"
+                className="w-full h-11 px-3.5 rounded-xl border border-white/25 bg-[#0d1b2e] text-white text-sm focus:outline-none focus:border-white focus:ring-1 focus:ring-white/40 cursor-pointer font-medium"
               >
                 {carteles.map((s) => {
                   const biz = businesses.find((b) => b.id === s.businessId)?.name || 'Negocio';
                   return (
-                    <option key={s.id} value={s.id}>
+                    <option key={s.id} value={s.id} className="bg-[#0b1728] text-white py-2">
                       {biz} — {s.name} ({s.shortCode})
                     </option>
                   );

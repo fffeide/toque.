@@ -40,15 +40,15 @@ export const Select = forwardRef<HTMLSelectElement, SelectProps>(({
           ref={ref}
           id={selectId}
           aria-invalid={!!error}
-          className={`w-full h-11 pl-3.5 pr-10 bg-[var(--bg-card)] text-[var(--text-main)] rounded-xl border transition text-small appearance-none cursor-pointer ${
+          className={`w-full h-11 pl-3.5 pr-10 bg-[#0d1b2e] text-white rounded-xl border transition text-small appearance-none cursor-pointer ${
             error
               ? 'border-[var(--coral)]'
-              : 'border-[var(--border-subtle)] hover:border-[var(--border-strong)] focus:border-[var(--brand)]'
+              : 'border-white/20 hover:border-white/40 focus:border-white focus:ring-1 focus:ring-white/40'
           } ${className}`}
           {...props}
         >
           {options.map(opt => (
-            <option key={opt.value} value={opt.value} disabled={opt.disabled} className="bg-[var(--bg-card)] text-[var(--text-main)]">
+            <option key={opt.value} value={opt.value} disabled={opt.disabled} className="bg-[#0b1728] text-white py-2">
               {opt.label}
             </option>
           ))}

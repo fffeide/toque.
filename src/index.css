@@ -26,8 +26,8 @@ html, body, #root {
   min-height: 100%;
 }
 
-h1, .font-headline {
-  font-family: var(--font-inter-tight);
+h1, h2, h3, .font-headline, .font-display {
+  font-family: 'Sora', sans-serif;
 }
 
 /* Área táctil mínima de 44px */

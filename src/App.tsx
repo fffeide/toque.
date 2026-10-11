@@ -63,11 +63,9 @@ export default function App() {
                   <Route path="/fabricante/*" element={<ManufacturerDashboard />} />
                 </Route>
 
-                {/* 3. Panel Super Admin Toque (Exclusivo dueños de la plataforma) */}
-                <Route element={<RoleProtectedRoute allowedRoles={['platform_admin']} />}>
-                  <Route path="/admin" element={<AdminDashboard />} />
-                  <Route path="/admin/*" element={<AdminDashboard />} />
-                </Route>
+                {/* Redirección preventiva de /admin (bloqueado) */}
+                <Route path="/admin" element={<Navigate to="/resumen" replace />} />
+                <Route path="/admin/*" element={<Navigate to="/resumen" replace />} />
 
                 {/* 4. Configuración de Cuenta y Perfil (Para cualquier usuario autenticado) */}
                 <Route element={<RoleProtectedRoute allowedRoles={['business_owner', 'business_staff', 'manufacturer_admin', 'platform_admin']} />}>

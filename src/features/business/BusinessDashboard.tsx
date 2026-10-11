@@ -225,12 +225,12 @@ export const BusinessDashboard: React.FC = () => {
   }
 
   // Métricas
-  const last7Days = stats.scansByDay.slice(-7);
-  const todayScans = last7Days[last7Days.length - 1]?.total || 18;
-  const yesterdayScans = last7Days[last7Days.length - 2]?.total || 14;
+  const last7Days = (stats.scansByDay || []).slice(-7);
+  const todayScans = last7Days[last7Days.length - 1]?.total || 0;
+  const yesterdayScans = last7Days[last7Days.length - 2]?.total || 0;
   const todayTrend = yesterdayScans > 0
     ? `${todayScans >= yesterdayScans ? '+' : ''}${Math.round(((todayScans - yesterdayScans) / yesterdayScans) * 100)}% vs ayer`
-    : '+12% vs ayer';
+    : todayScans > 0 ? '+100% hoy' : 'Sin cambios';
 
   const last7DaysScans = last7Days.reduce((acc, d) => acc + d.total, 0);
   const potentialReviewsThisWeek = Math.max(1, Math.round(last7DaysScans / calibrationFactor));
@@ -268,28 +268,18 @@ export const BusinessDashboard: React.FC = () => {
 
   return (
     <div className="space-y-6">
-      {/* 1. Barra de Herramientas y Acciones */}
+      {/* 1. Barra de Herramientas y Título */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <div className="flex items-center gap-2">
             <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
-            <span className="text-xs font-semibold tracking-wider uppercase text-emerald-300">
-              Panel en Vivo · Mostrador y Salón
+            <span className="text-xs font-medium text-emerald-300">
+              Panel en vivo · Tu local
             </span>
           </div>
-          <h2 className="text-2xl sm:text-3xl font-headline font-bold text-white tracking-tight mt-0.5">
-            {tenant?.name || 'Café & Bistro La Esquina'}
+          <h2 className="text-2xl sm:text-3xl font-display font-bold text-white tracking-tight mt-0.5">
+            {tenant?.name || 'Tu negocio'}
           </h2>
-        </div>
-
-        <div className="flex items-center gap-2.5 flex-wrap">
-          <Button
-            variant="primary"
-            onClick={() => setIsTestModalOpen(true)}
-            icon={<Smartphone className="w-4 h-4 text-slate-900" />}
-          >
-            Probar mi cartel
-          </Button>
         </div>
       </div>
 
@@ -356,7 +346,7 @@ export const BusinessDashboard: React.FC = () => {
                   {todayTrend}
                 </span>
                 <p className="text-xs text-white/60">
-                  Toques NFC y escaneos QR en salón
+                  Visitas directas a tu perfil
                 </p>
               </div>
             </div>
@@ -386,10 +376,10 @@ export const BusinessDashboard: React.FC = () => {
           <div className="flex items-center justify-between flex-wrap gap-2">
             <div>
               <h3 className="text-sm font-semibold text-white">
-                Flujo de Escaneos Semanal
+                Flujo de visitas semanal
               </h3>
               <p className="text-xs text-white/60">
-                Seleccioná un día para inspeccionar el desglose de NFC vs QR.
+                Seleccioná un día para ver la actividad registrada.
               </p>
             </div>
 
@@ -482,20 +472,16 @@ export const BusinessDashboard: React.FC = () => {
             {activeDayData && (
               <div className="absolute top-4 right-4 aurora-chip-glass p-3 rounded-2xl flex items-center gap-4 text-xs shadow-lg">
                 <div>
-                  <span className="text-white/60 block text-[10px]">Día inspeccionado</span>
+                  <span className="text-white/60 block text-[10px]">Día</span>
                   <span className="font-semibold text-white">{activeDayData.date}</span>
                 </div>
                 <div className="border-l border-white/20 pl-3">
-                  <span className="text-white/60 block text-[10px]">NFC</span>
-                  <span className="font-bold text-emerald-300">{activeDayData.nfc}</span>
+                  <span className="text-white/60 block text-[10px]">Visitas</span>
+                  <span className="font-bold text-emerald-300">{activeDayData.total}</span>
                 </div>
                 <div className="border-l border-white/20 pl-3">
-                  <span className="text-white/60 block text-[10px]">QR</span>
-                  <span className="font-bold text-amber-300">{activeDayData.qr}</span>
-                </div>
-                <div className="border-l border-white/20 pl-3">
-                  <span className="text-white/60 block text-[10px]">Total</span>
-                  <span className="font-bold text-white">{activeDayData.total}</span>
+                  <span className="text-white/60 block text-[10px]">Opiniones est.</span>
+                  <span className="font-bold text-amber-300">~{Math.round(activeDayData.total * 0.28)}</span>
                 </div>
               </div>
             )}
@@ -675,14 +661,13 @@ export const BusinessDashboard: React.FC = () => {
             </div>
           </div>
 
-          <Button
-            variant="secondary"
-            className="w-full"
-            onClick={() => setIsTestModalOpen(true)}
-            icon={<Smartphone className="w-4 h-4 text-white" />}
+          <Link
+            to="/carteles"
+            className="w-full inline-flex items-center justify-center gap-2 py-2.5 rounded-xl bg-white/10 hover:bg-white/15 border border-white/15 text-xs text-white font-medium transition cursor-pointer"
           >
-            Simular toque NFC / QR
-          </Button>
+            <span>Ver todos los carteles</span>
+            <ArrowUpRight className="w-3.5 h-3.5" />
+          </Link>
         </Card>
       </div>
 

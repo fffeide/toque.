@@ -1,0 +1,69 @@
+{
+  "entities": {
+    "cartel": {
+      "title": "Cartel",
+      "description": "Cartel físico con NFC y código QR dinámico vinculado a reseñas de Google.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string", "maxLength": 100 },
+        "location": { "type": "string", "maxLength": 100 },
+        "destinationUrl": { "type": "string", "maxLength": 500 },
+        "shortCode": { "type": "string", "maxLength": 32 },
+        "status": { "type": "string", "enum": ["active", "silent", "archived", "trash"] },
+        "tenantId": { "type": "string", "maxLength": 64 },
+        "scansCount": { "type": "number" },
+        "lastScannedAt": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["name", "destinationUrl", "shortCode", "status"]
+    },
+    "scan": {
+      "title": "Scan",
+      "description": "Registro de escaneo o contacto NFC en cartel físico.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "cartelId": { "type": "string" },
+        "shortCode": { "type": "string" },
+        "channel": { "type": "string", "enum": ["nfc", "qr"] },
+        "userAgentDevice": { "type": "string" },
+        "browser": { "type": "string" },
+        "language": { "type": "string" },
+        "platform": { "type": "string" },
+        "timezone": { "type": "string" },
+        "touchSupported": { "type": "boolean" },
+        "timestamp": { "type": "string" }
+      },
+      "required": ["shortCode", "timestamp"]
+    },
+    "tenant": {
+      "title": "Tenant",
+      "description": "Negocio o comercio suscriptor de Toque.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string", "maxLength": 100 },
+        "slug": { "type": "string", "maxLength": 60 },
+        "contactEmail": { "type": "string", "format": "email" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["name"]
+    }
+  },
+  "firestore": {
+    "/carteles/{cartelId}": {
+      "schema": "cartel",
+      "description": "Colección de carteles físicos registrados por el comercio."
+    },
+    "/scans/{scanId}": {
+      "schema": "scan",
+      "description": "Colección de visitas y telemetría de escaneos."
+    },
+    "/tenants/{tenantId}": {
+      "schema": "tenant",
+      "description": "Colección de datos de negocios y comercios."
+    }
+  }
+}

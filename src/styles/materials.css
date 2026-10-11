@@ -159,6 +159,24 @@
   color: var(--ink);
 }
 
+/* Nivel 5: Ventanas Emergentes, Pop-ups, Modales y Hojas Arrastrables (Reemplazo del antiguo 2B) */
+/* Fondo oscuro de alto contraste y opacidad 98%, desenfoque profundo y borde nítido para evitar mezclas con el fondo */
+.aurora-modal-surface,
+.aurora-sheet-surface {
+  background: rgba(10, 20, 36, 0.98);
+  backdrop-filter: blur(28px) saturate(140%);
+  -webkit-backdrop-filter: blur(28px) saturate(140%);
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  box-shadow: 0 25px 60px -15px rgba(0, 0, 0, 0.85);
+  color: #ffffff;
+}
+
+.aurora-modal-scrim {
+  background: rgba(0, 0, 0, 0.72);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+
 /* Pip activo luminoso */
 .aurora-pip {
   position: absolute;

@@ -164,14 +164,14 @@ export const QuickBusinessModal: React.FC<QuickBusinessModalProps> = ({
             <select
               value={category}
               onChange={(e) => setCategory(e.target.value)}
-              className="w-full p-2.5 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-card)] text-small text-[var(--text-main)] focus:outline-none focus:ring-2 focus:ring-[var(--ring-focus)]"
+              className="w-full h-11 px-3.5 rounded-xl border border-white/25 bg-[#0d1b2e] text-white text-sm focus:outline-none focus:border-white focus:ring-1 focus:ring-white/40 cursor-pointer font-medium"
             >
-              <option value="Gastronomía y Cafetería">Gastronomía y Cafetería</option>
-              <option value="Barbería y Estética">Barbería y Estética</option>
-              <option value="Salud y Veterinaria">Salud y Veterinaria</option>
-              <option value="Comercio y Retail">Comercio y Retail</option>
-              <option value="Servicios y Talleres">Servicios y Talleres</option>
-              <option value="Hotelería y Turismo">Hotelería y Turismo</option>
+              <option value="Gastronomía y Cafetería" className="bg-[#0b1728] text-white py-2">Gastronomía y Cafetería</option>
+              <option value="Barbería y Estética" className="bg-[#0b1728] text-white py-2">Barbería y Estética</option>
+              <option value="Salud y Veterinaria" className="bg-[#0b1728] text-white py-2">Salud y Veterinaria</option>
+              <option value="Comercio y Retail" className="bg-[#0b1728] text-white py-2">Comercio y Retail</option>
+              <option value="Servicios y Talleres" className="bg-[#0b1728] text-white py-2">Servicios y Talleres</option>
+              <option value="Hotelería y Turismo" className="bg-[#0b1728] text-white py-2">Hotelería y Turismo</option>
             </select>
           </div>
 

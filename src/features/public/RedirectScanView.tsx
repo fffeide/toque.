@@ -11,6 +11,32 @@ import { useParams, useSearchParams } from 'react-router-dom';
 import { api, Cartel, ScanTelemetry } from '../../api';
 import { ExternalLink, Sparkles, CheckCircle2, ShieldCheck, Zap } from 'lucide-react';
 
+// Ícono de carga animado provisto por el usuario
+function AnimatedScanLoader({ size = 42, className = '', ...props }: React.SVGProps<SVGSVGElement> & { size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      xmlns="http://www.w3.org/2000/svg"
+      viewBox="0 0 24 24"
+      className={className}
+      {...props}
+    >
+      <g fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2">
+        <path strokeDasharray="24" d="M12 20h5c0.5 0 1 -0.5 1 -1v-14M12 20h-5c-0.5 0 -1 -0.5 -1 -1v-14">
+          <animate fill="freeze" attributeName="stroke-dashoffset" dur="0.5s" values="24;0" />
+        </path>
+        <path strokeDasharray="18" strokeDashoffset="18" d="M4 5h16">
+          <animate fill="freeze" attributeName="stroke-dashoffset" begin="0.5s" dur="0.3s" to="0" />
+        </path>
+        <path strokeDasharray="10" strokeDashoffset="10" d="M10 4h4M10 9v7M14 9v7">
+          <animate fill="freeze" attributeName="stroke-dashoffset" begin="0.8s" dur="0.2s" to="0" />
+        </path>
+      </g>
+    </svg>
+  );
+}
+
 export const RedirectScanView: React.FC = () => {
   const { shortCode } = useParams<{ shortCode: string }>();
   const [searchParams] = useSearchParams();
@@ -78,7 +104,9 @@ export const RedirectScanView: React.FC = () => {
         setTargetUrl(result.targetUrl);
         setStatus('redirecting');
 
-        // 3. Redirección automática inmediata sin demora artificial
+        // 3. Pausa breve para permitir ver Toque™ y la animación de recolección de datos
+        await new Promise((resolve) => setTimeout(resolve, 850));
+
         if (result.targetUrl) {
           window.location.replace(result.targetUrl);
         }
@@ -123,32 +151,31 @@ export const RedirectScanView: React.FC = () => {
         <div className="absolute bottom-1/4 left-1/2 -translate-x-1/2 translate-y-1/2 w-[380px] h-[380px] rounded-full bg-emerald-500/20 blur-[130px]" />
       </div>
 
-      <div className="relative z-10 max-w-sm w-full p-8 rounded-3xl bg-white/10 border border-white/20 backdrop-blur-2xl text-center space-y-6 shadow-2xl">
-        {/* Logo / Ondas de Toque */}
-        <div className="flex justify-center">
-          <div className="w-16 h-16 rounded-2xl bg-gradient-to-tr from-blue-600 to-indigo-500 flex items-center justify-center shadow-lg border border-white/30 animate-pulse">
-            <Sparkles className="w-8 h-8 text-white" />
+      <div className="relative z-10 max-w-sm w-full p-8 rounded-3xl bg-[rgba(10,20,36,0.96)] border border-white/20 backdrop-blur-2xl text-center space-y-5 shadow-2xl">
+        {/* Marca Toque™ */}
+        <div className="flex flex-col items-center justify-center">
+          <div className="flex items-center gap-2 mb-1">
+            <span className="font-display text-2xl font-black tracking-tight text-white">
+              Toque™
+            </span>
           </div>
-        </div>
-
-        <div className="space-y-1.5">
-          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-400/30 text-[10px] font-bold uppercase tracking-wider">
-            <Zap className="w-3 h-3 text-emerald-300" />
-            Telemetría de Toque &lt;40ms
+          <span className="text-[11px] font-medium text-white/60">
+            Carteles inteligentes y reseñas en Google
           </span>
-          <h1 className="text-xl sm:text-2xl font-headline font-bold text-white tracking-tight">
-            Conectando con Google Reseñas
-          </h1>
-          <p className="text-xs text-white/75">
-            {cartel?.name || 'Abriendo ficha oficial del salón...'}
-          </p>
         </div>
 
-        {/* Micro-loader animado */}
-        <div className="flex items-center justify-center gap-2 py-1">
-          <div className="w-2.5 h-2.5 rounded-full bg-blue-400 animate-bounce" />
-          <div className="w-2.5 h-2.5 rounded-full bg-indigo-400 animate-bounce [animation-delay:0.15s]" />
-          <div className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-bounce [animation-delay:0.3s]" />
+        {/* Ícono de Carga Animado (Trazo Dinámico SVG) */}
+        <div className="flex justify-center py-2 text-blue-400">
+          <AnimatedScanLoader size={48} className="text-white drop-shadow-md" />
+        </div>
+
+        <div className="space-y-1">
+          <h1 className="text-base sm:text-lg font-display font-semibold text-white tracking-tight">
+            Abriendo Google Reseñas
+          </h1>
+          <p className="text-xs text-white/70">
+            {cartel?.name ? `${cartel.name} • Redirigiendo...` : 'Redirigiendo a la ficha oficial...'}
+          </p>
         </div>
 
         {/* Botón manual si no redirige automáticamente */}

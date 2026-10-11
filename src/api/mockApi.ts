@@ -36,8 +36,8 @@ import {
 } from './types';
 import { validateGoogleReviewUrl } from '../lib/urlValidator';
 
-const STORAGE_KEY = 'toque_mock_db_v1';
-const SESSION_USER_KEY = 'toque_mock_session_user';
+const STORAGE_KEY = 'toque_real_db_v3';
+const SESSION_USER_KEY = 'toque_real_session_user_v3';
 
 // Generador determinista de números pseudoaleatorios (Linear Congruential Generator)
 function pseudoRandom(seed: number): () => number {
@@ -162,93 +162,11 @@ function createInitialDatabase(): MockDatabase {
     'Mostrador de Entrega', 'Mesa 8 — Patio', 'Mesa 6 — Salón VIP', 'Caja Cobro Rápido'
   ];
 
+  // 3. Carteles reales creados por el usuario (sin carteles falsos)
   const carteles: Cartel[] = [];
-  const baseTargetUrl = 'https://search.google.com/local/writereview?placeid=ChIJN1t_tDeuEmsRUsoyG83frY4';
-  let cartelCounter = 100;
 
-  businessNames.forEach(biz => {
-    for (let i = 0; i < biz.cartelesCount; i++) {
-      cartelCounter++;
-      const shortCode = (Math.floor(rand() * 89999) + 10000).toString(36);
-      const locName = cartelLocations[i % cartelLocations.length];
-      carteles.push({
-        id: `cartel-${cartelCounter}`,
-        tenantId: biz.id,
-        businessId: biz.id,
-        manufacturerId: 'tenant-mfg-demo',
-        shortCode,
-        name: `Cartel ${i + 1} — ${locName}`,
-        locationDescription: locName,
-        targetUrl: baseTargetUrl,
-        nfcEnabled: true,
-        qrEnabled: true,
-        status: 'active',
-        createdAt: '2026-06-01T10:00:00Z',
-        lastScannedAt: new Date(Date.now() - Math.floor(rand() * 3600000 * 5)).toISOString(),
-      });
-    }
-  });
-
-  // 4. Escaneos Deterministas para los últimos 90 días
+  // 4. Escaneos reales (sin telemetría simulada inventada)
   const scans: Scan[] = [];
-  const now = new Date();
-  const ninetyDaysAgo = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000);
-
-  // Generamos escaneos para cada día
-  for (let d = 0; d < 90; d++) {
-    const dayDate = new Date(ninetyDaysAgo.getTime() + d * 24 * 60 * 60 * 1000);
-    const dayOfWeek = dayDate.getDay(); // 0 = Domingo, 5 = Viernes, 6 = Sábado
-    const isWeekend = dayOfWeek === 0 || dayOfWeek === 5 || dayOfWeek === 6;
-
-    // Volumen base por día según si es fin de semana
-    const dayVolume = isWeekend ? Math.floor(35 + rand() * 25) : Math.floor(18 + rand() * 15);
-
-    for (let s = 0; s < dayVolume; s++) {
-      // Determinación de la hora con picos: mediodía (12 a 15) y noche (19 a 23)
-      const hourRoll = rand();
-      let hour = 14;
-      if (hourRoll < 0.40) {
-        // Almuerzo: 12 a 15
-        hour = 12 + Math.floor(rand() * 4);
-      } else if (hourRoll < 0.82) {
-        // Cena: 19 a 23
-        hour = 19 + Math.floor(rand() * 5);
-      } else if (hourRoll < 0.95) {
-        // Merienda: 16 a 18
-        hour = 16 + Math.floor(rand() * 3);
-      } else {
-        // Mañana: 9 a 11
-        hour = 9 + Math.floor(rand() * 3);
-      }
-
-      const minute = Math.floor(rand() * 60);
-      const second = Math.floor(rand() * 60);
-      const scanDate = new Date(dayDate);
-      scanDate.setHours(hour, minute, second);
-
-      // Distribuir entre los carteles (mayor peso al negocio demo 'biz-esquina')
-      const targetCartel = rand() < 0.45 
-        ? carteles.filter(st => st.businessId === 'biz-esquina')[Math.floor(rand() * 6)]
-        : carteles[Math.floor(rand() * carteles.length)];
-
-      if (!targetCartel) continue;
-
-      const channelRoll = rand();
-      const channel = channelRoll < 0.58 ? 'nfc' : 'qr';
-      const deviceRoll = rand();
-      const userAgentDevice = deviceRoll < 0.52 ? 'ios' : deviceRoll < 0.95 ? 'android' : 'other';
-
-      scans.push({
-        id: `scan-${scans.length + 1}`,
-        cartelId: targetCartel.id,
-        businessId: targetCartel.businessId,
-        timestamp: scanDate.toISOString(),
-        channel,
-        userAgentDevice,
-        isEstimatedReview: rand() < 0.28, // 28% de conversión estimada
-      });
-    }
-  }
 
   // 5. Alertas
   const alerts: Alert[] = [

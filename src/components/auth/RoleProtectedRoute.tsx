@@ -45,7 +45,7 @@ export const RoleProtectedRoute: React.FC<RoleProtectedRouteProps> = ({
   if (!allowedRoles.includes(user.role)) {
     // Redirigir según el rol del usuario para evitar pantallas mixtas
     if (user.role === 'platform_admin') {
-      return <Navigate to="/admin" replace />;
+      return <Navigate to="/resumen" replace />;
     }
     if (user.role === 'manufacturer_admin') {
       return <Navigate to="/fabricante" replace />;

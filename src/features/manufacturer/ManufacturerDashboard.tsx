@@ -621,11 +621,11 @@ export const ManufacturerDashboard: React.FC = () => {
               <select
                 value={sortOrder}
                 onChange={(e) => setSortOrder(e.target.value as any)}
-                className="py-1.5 px-3 rounded-xl border border-white/20 bg-white/10 backdrop-blur-md text-xs text-white cursor-pointer"
+                className="py-1.5 px-3 rounded-xl border border-white/25 bg-[#0d1b2e] text-xs text-white cursor-pointer font-medium focus:outline-none focus:ring-1 focus:ring-white/40"
               >
-                <option value="name" className="bg-slate-900 text-white">Alfabético (A-Z)</option>
-                <option value="carteles" className="bg-slate-900 text-white">Más carteles</option>
-                <option value="recent" className="bg-slate-900 text-white">Más recientes</option>
+                <option value="name" className="bg-[#0b1728] text-white">Alfabético (A-Z)</option>
+                <option value="carteles" className="bg-[#0b1728] text-white">Más carteles</option>
+                <option value="recent" className="bg-[#0b1728] text-white">Más recientes</option>
               </select>
             </div>
           </div>

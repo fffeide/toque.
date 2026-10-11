@@ -38,6 +38,8 @@ export interface User {
   role: UserRole;
   avatarUrl?: string;
   hasSeenOnboarding?: boolean;
+  hasCompletedOnboarding?: boolean;
+  createdAt?: string;
 }
 
 export type CartelStatus = 'active' | 'inactive' | 'replaced' | 'trash';
@@ -57,7 +59,10 @@ export interface Cartel {
   replacedByCartelId?: string;
   deletedAt?: string; // Para papelera de 30 días
   createdAt: string;
+  updatedAt?: string;
   lastScannedAt?: string;
+  scansCount?: number;
+  estimatedReviewsCount?: number;
 }
 
 export interface Token {
@@ -86,11 +91,11 @@ export interface ScanTelemetry {
 export interface Scan {
   id: string;
   cartelId: string;
-  businessId: string;
+  businessId?: string;
   timestamp: string;
   channel: ScanChannel;
-  userAgentDevice: DeviceType;
-  isEstimatedReview: boolean;
+  userAgentDevice?: DeviceType;
+  isEstimatedReview?: boolean;
   browser?: string;
   platform?: string;
   screenResolution?: string;
@@ -98,6 +103,8 @@ export interface Scan {
   connectionType?: string;
   timezone?: string;
   referrer?: string;
+  telemetry?: ScanTelemetry;
+  status?: string;
 }
 
 export interface LinkCheck {

@@ -86,31 +86,7 @@ export const AppLayout: React.FC = () => {
         </div>
       )}
 
-      {/* 2. Banner de Simulación QA (Exclusivo cuando @pruebas está auditando otros roles desde el Admin) */}
-      {isQaSimulating && (
-        <div className="relative z-20 bg-amber-500/20 backdrop-blur-md text-amber-200 text-xs px-4 sm:px-6 py-2 border-b border-amber-400/30 flex items-center justify-between flex-wrap gap-2">
-          <div className="flex items-center gap-2">
-            <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
-            <span className="font-semibold text-white">
-              🧪 Modo Simulación QA (@pruebas)
-            </span>
-            <span className="text-amber-200/80 hidden sm:inline">
-              • Auditando experiencia como {isManufacturer ? 'Fabricante' : 'Negocio'}
-            </span>
-          </div>
 
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              disabled={isSwitchingRole}
-              onClick={handleReturnToSuperAdmin}
-              className="px-3 py-1 rounded-full text-xs font-bold bg-amber-400 text-slate-950 hover:bg-amber-300 transition cursor-pointer shadow-xs"
-            >
-              Volver a Super Admin (/admin)
-            </button>
-          </div>
-        </div>
-      )}
 
       {/* 3. Estructura Aurora: Sidebar + Header + Área de Contenido */}
       <div className="relative z-10 flex-1 flex flex-col md:flex-row max-w-[1536px] w-full mx-auto p-3 sm:p-5 md:p-6 gap-6">
@@ -128,20 +104,6 @@ export const AppLayout: React.FC = () => {
           <nav className="flex flex-col items-center gap-6 w-full">
             {isAdmin ? (
               <>
-                <NavLink
-                  to="/admin"
-                  className={({ isActive }) =>
-                    `relative p-2.5 rounded-xl transition ${
-                      isActive ? 'text-white bg-white/20' : 'text-white/60 hover:text-white'
-                    }`
-                  }
-                  title="Panel Super Admin"
-                >
-                  {location.pathname.startsWith('/admin') && (
-                    <span className="aurora-pip -left-3 top-1" />
-                  )}
-                  <Shield className="w-5 h-5 text-emerald-300" />
-                </NavLink>
 
                 <NavLink
                   to="/status"
@@ -302,55 +264,24 @@ export const AppLayout: React.FC = () => {
           <header className="flex items-center justify-between py-2 px-1 flex-wrap gap-3">
             <div>
               <div className="flex items-center gap-2">
-                <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${
-                  isAdmin
-                    ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-400/30'
-                    : isManufacturer
-                    ? 'bg-amber-500/20 text-amber-300 border border-amber-400/30'
-                    : 'bg-blue-500/20 text-blue-300 border border-blue-400/30'
+                <span className={`px-2.5 py-0.5 rounded-full text-[11px] font-medium ${
+                  isManufacturer
+                    ? 'bg-amber-500/20 text-amber-200 border border-amber-400/30'
+                    : 'bg-blue-500/20 text-blue-200 border border-blue-400/30'
                 }`}>
-                  {isAdmin
-                    ? 'Super Admin Toque'
-                    : isManufacturer
-                    ? 'Panel Fabricante'
-                    : 'Panel Negocio'}
+                  {isManufacturer ? 'Panel del fabricante' : 'Panel del negocio'}
                 </span>
-                <span className="text-xs text-white/60 font-medium">
+                <span className="text-xs text-white/70 font-normal">
                   {tenant?.name || 'Toque'}
                 </span>
               </div>
-              <h1 className="text-lg sm:text-2xl font-bold tracking-tight text-white font-headline mt-0.5">
+              <h1 className="text-lg sm:text-2xl font-bold tracking-tight text-white font-display mt-0.5">
                 {user?.name || 'Usuario'}
               </h1>
             </div>
 
-            {/* Herramientas Circulares de Vidrio y Selector de Fondo */}
+            {/* Selector de Fondo Predeterminado Líquido y Perfil */}
             <div className="flex items-center gap-2.5 flex-wrap">
-              {/* Acceso a Status en Vivo */}
-              {/* Acceso a Status en Vivo (Exclusivo Super Admin) */}
-              {isAdmin && (
-                <NavLink
-                  to="/status"
-                  className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white/10 hover:bg-white/15 border border-white/15 text-xs text-white transition font-medium"
-                  title="Monitoreo y Estado en Vivo"
-                >
-                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-                  <span>Status</span>
-                </NavLink>
-              )}
-
-              {isAdmin && (
-                <NavLink
-                  to="/admin"
-                  className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-400/30 text-xs text-emerald-200 transition font-medium"
-                  title="Super Admin Toque"
-                >
-                  <Shield className="w-3.5 h-3.5" />
-                  <span>Admin</span>
-                </NavLink>
-              )}
-
-              {/* Selector de Fondo Predeterminado Líquido */}
               <div className="hidden sm:inline-flex rounded-full bg-white/10 p-0.5 border border-white/15 backdrop-blur-md items-center">
                 <button
                   type="button"
@@ -360,7 +291,7 @@ export const AppLayout: React.FC = () => {
                       ? 'bg-[rgba(30,50,90,0.9)] text-white shadow-xs border border-white/20'
                       : 'text-white/70 hover:text-white'
                   }`}
-                  title="Fondo Líquido Azul RIVR"
+                  title="Fondo azul profundo"
                 >
                   Azul RIVR
                 </button>
@@ -372,7 +303,7 @@ export const AppLayout: React.FC = () => {
                       ? 'bg-white/25 text-white shadow-xs border border-white/20'
                       : 'text-white/70 hover:text-white'
                   }`}
-                  title="Fondo Obsidiana Minimal"
+                  title="Fondo obsidiana"
                 >
                   Obsidiana
                 </button>
@@ -384,33 +315,11 @@ export const AppLayout: React.FC = () => {
                       ? 'bg-teal-900/70 text-white shadow-xs border border-white/20'
                       : 'text-white/70 hover:text-white'
                   }`}
-                  title="Fondo Aurora Teal"
+                  title="Fondo verde teal"
                 >
                   Teal
                 </button>
               </div>
-
-              {/* Acceso a Nuevo Cartel (Exclusivo Negocio) */}
-              {isBusiness && (
-                <NavLink
-                  to="/carteles"
-                  className="w-10 h-10 rounded-full aurora-tool-btn flex items-center justify-center cursor-pointer"
-                  title="Nuevo cartel"
-                >
-                  <Plus className="w-4 h-4 text-white" />
-                </NavLink>
-              )}
-
-              {/* Galería UI (Exclusivo Super Admin) */}
-              {isAdmin && (
-                <NavLink
-                  to="/ui"
-                  className="w-10 h-10 rounded-full aurora-tool-btn flex items-center justify-center cursor-pointer"
-                  title="Galería UI"
-                >
-                  <Sparkles className="w-4 h-4 text-amber-300" />
-                </NavLink>
-              )}
 
               {/* Avatar Photo Requerido */}
               <Popover
@@ -474,17 +383,6 @@ export const AppLayout: React.FC = () => {
       <nav className="md:hidden fixed bottom-3 left-4 right-4 z-40 aurora-card-glass py-3 px-6 flex items-center justify-around shadow-2xl">
         {isAdmin ? (
           <>
-            <NavLink
-              to="/admin"
-              className={({ isActive }) =>
-                `flex flex-col items-center gap-1 ${
-                  isActive ? 'text-white' : 'text-white/60'
-                }`
-              }
-            >
-              <Shield className="w-5 h-5 text-emerald-300" />
-              <span className="text-[10px]">Admin</span>
-            </NavLink>
 
             <NavLink
               to="/status"

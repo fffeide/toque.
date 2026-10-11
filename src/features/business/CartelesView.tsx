@@ -221,33 +221,15 @@ export const CartelesView: React.FC = () => {
 
   return (
     <div className="space-y-6">
-      {/* Cabecera y Botón Nuevo */}
+      {/* Cabecera */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl sm:text-3xl font-headline font-bold text-white tracking-tight">
-            Carteles del Negocio
+          <h1 className="text-2xl sm:text-3xl font-display font-bold text-white tracking-tight">
+            Tus carteles
           </h1>
           <p className="text-xs text-white/70 mt-0.5">
-            Carteles físicos en servicio con enlace corto y destino a Google Maps.
+            Carteles físicos activos con enlace dinámico a reseñas de Google.
           </p>
-        </div>
-
-        <div className="flex items-center gap-2.5 flex-wrap">
-          <Button
-            variant="secondary"
-            onClick={() => setTestModalCartel(carteles?.[0] || null)}
-            icon={<Smartphone className="w-4 h-4 text-blue-300" />}
-          >
-            ¿Cómo se escanea el cartel?
-          </Button>
-
-          <Button
-            variant="primary"
-            onClick={() => setIsCreateSheetOpen(true)}
-            icon={<Plus className="w-4 h-4 text-slate-900" />}
-          >
-            Nuevo cartel
-          </Button>
         </div>
       </div>
 
@@ -402,31 +384,23 @@ export const CartelesView: React.FC = () => {
                     </button>
                   </div>
 
-                  {/* Desglose de Escaneos del Mes y NFC vs QR */}
-                  <div className="mt-4 pt-3 border-t border-[var(--border-subtle)]/70 space-y-2 text-micro">
+                  {/* Métrica real de visitas */}
+                  <div className="mt-4 pt-3 border-t border-[var(--border-subtle)]/70 space-y-1.5 text-micro">
                     <div className="flex items-center justify-between text-[var(--text-muted)]">
-                      <span>Último escaneo:</span>
+                      <span>Última visita:</span>
                       <strong className="text-[var(--text-main)]">
-                        {cartel.lastScannedAt ? formatRelativeTime(cartel.lastScannedAt) : 'Sin toques'}
+                        {cartel.lastScannedAt ? formatRelativeTime(cartel.lastScannedAt) : 'Sin visitas registradas'}
                       </strong>
                     </div>
-
-                    {/* Barra visual proporcional NFC vs QR */}
-                    <div className="space-y-1">
-                      <div className="flex items-center justify-between text-[11px] text-[var(--text-muted)]">
-                        <span>Tecnología</span>
-                        <span>NFC (65%) • QR (35%)</span>
-                      </div>
-                      <div className="h-1.5 rounded-full bg-black/10 dark:bg-white/10 overflow-hidden flex">
-                        <div className="bg-[var(--brand)] w-[65%]" title="NFC 65%" />
-                        <div className="bg-[var(--estrella)] w-[35%]" title="QR 35%" />
-                      </div>
+                    <div className="flex items-center justify-between text-[var(--text-muted)]">
+                      <span>Total de toques:</span>
+                      <span className="font-semibold text-white">{cartel.scansCount || 0}</span>
                     </div>
                   </div>
                 </div>
 
-                {/* Acciones principales del cartel */}
-                <div className="pt-3 border-t border-[var(--border-subtle)] flex items-center justify-between gap-1 flex-wrap">
+                {/* Acción única: Ver detalles para acceder a todas las funciones */}
+                <div className="pt-3 border-t border-[var(--border-subtle)] flex items-center justify-between">
                   {cartel.status === 'trash' ? (
                     <Button
                       variant="secondary"
@@ -438,60 +412,15 @@ export const CartelesView: React.FC = () => {
                       Restaurar cartel
                     </Button>
                   ) : (
-                    <>
-                      <div className="flex items-center gap-1">
-                        <Button
-                          variant="secondary"
-                          size="sm"
-                          onClick={() => setDetailCartelTarget(cartel)}
-                          icon={<Eye className="w-3.5 h-3.5" />}
-                          title="Ver detalle y estadísticas"
-                        >
-                          Detalle
-                        </Button>
-
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => setQuickQrCartel(cartel)}
-                          icon={<QrCode className="w-3.5 h-3.5" />}
-                          title="Descargar QR para imprimir"
-                        >
-                          QR
-                        </Button>
-
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => setTestModalCartel(cartel)}
-                          icon={<Smartphone className="w-3.5 h-3.5" />}
-                          title="Probar destino"
-                        >
-                          Probar
-                        </Button>
-                      </div>
-
-                      <div className="flex items-center gap-1">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => setReplaceCartelTarget(cartel)}
-                          title="Reemplazar si se dañó o perdió (no consume cupo)"
-                        >
-                          Reemplazar
-                        </Button>
-
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleDeleteCartel(cartel)}
-                          className="text-[var(--coral)] hover:bg-rose-500/10"
-                          title="Mover a papelera de 30 días"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </Button>
-                      </div>
-                    </>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => setDetailCartelTarget(cartel)}
+                      icon={<Eye className="w-3.5 h-3.5" />}
+                      className="w-full justify-center font-medium"
+                    >
+                      Ver detalles y funciones
+                    </Button>
                   )}
                 </div>
               </Card>

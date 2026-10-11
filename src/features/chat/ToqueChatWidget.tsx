@@ -344,22 +344,25 @@ export const ToqueChatWidget: React.FC = () => {
 
   return (
     <div className="toque-chat-widget fixed bottom-5 right-5 z-50">
-      {/* Botón flotante disparador */}
+      {/* Botón flotante disparador: cerrado por defecto como ícono circular de robot, expandido al pasar el cursor */}
       {!isOpen && (
         <button
           type="button"
           onClick={() => setIsOpen(true)}
-          className="group flex items-center gap-2.5 px-4 py-3 rounded-full bg-[rgba(30,50,90,0.92)] hover:bg-[rgba(20,40,80,1)] text-white shadow-xl border border-white/25 backdrop-blur-xl transition-all hover:scale-105 cursor-pointer"
-          title="Abrir Asistente Toque"
+          className="group relative flex items-center h-12 w-12 hover:w-48 px-3 rounded-full bg-[rgba(14,28,52,0.95)] hover:bg-[rgba(18,36,68,1)] text-white shadow-[0_12px_32px_rgba(0,0,0,0.5)] border border-white/25 backdrop-blur-xl transition-all duration-300 ease-out hover:scale-105 cursor-pointer overflow-hidden"
+          title="Asistente Toque"
+          aria-label="Abrir asistente de IA"
         >
-          <div className="relative">
-            <Bot className="w-5 h-5 text-white animate-pulse" />
-            <span className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-emerald-400 border border-slate-900" />
+          <div className="w-6 h-6 shrink-0 flex items-center justify-center relative">
+            <Bot className="w-5 h-5 text-white transition-transform group-hover:scale-110" />
+            <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-emerald-400 border border-slate-900" />
           </div>
-          <span className="text-xs font-semibold tracking-tight">Asistente Toque</span>
-          <span className="text-[10px] bg-white/20 px-2 py-0.5 rounded-full font-mono">
-            {isManufacturer ? 'Fabricante' : isAdmin ? 'Admin' : 'Negocio'}
-          </span>
+          <div className="opacity-0 max-w-0 group-hover:opacity-100 group-hover:max-w-xs group-hover:ml-2.5 transition-all duration-300 ease-out flex items-center gap-1.5 overflow-hidden whitespace-nowrap">
+            <span className="text-xs font-semibold tracking-tight text-white">Asistente Toque</span>
+            <span className="text-[9px] bg-white/20 px-1.5 py-0.5 rounded-full font-mono text-white/90">
+              {isManufacturer ? 'Taller' : 'Local'}
+            </span>
+          </div>
         </button>
       )}
 

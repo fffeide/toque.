@@ -117,17 +117,17 @@ export const Sheet: React.FC<SheetProps> = ({
     <AnimatePresence>
       {isOpen && (
         <div className="fixed inset-0 z-50 flex justify-center items-end sm:items-center">
-          {/* Scrim Oscuro con desenfoque de fondo */}
+          {/* Scrim Oscuro de Alto Contraste */}
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             transition={{ duration: 0.25 }}
             onClick={onClose}
-            className="fixed inset-0 bg-black/50 backdrop-blur-xs"
+            className="fixed inset-0 aurora-modal-scrim"
           />
 
-          {/* Hoja Deslizable */}
+          {/* Hoja Deslizable (Nivel 5 de Superficie) */}
           <motion.div
             ref={sheetRef}
             initial={{ y: '100%', opacity: 0.9 }}
@@ -137,7 +137,7 @@ export const Sheet: React.FC<SheetProps> = ({
             }}
             exit={{ y: '100%', opacity: 0 }}
             transition={{ type: 'spring', bounce: 0, duration: 0.35 }}
-            className={`relative w-full ${sizeClasses} max-h-[90vh] bg-[var(--bg-card)] rounded-t-3xl sm:rounded-2xl border border-[var(--border-subtle)] shadow-2xl flex flex-col z-10 overflow-hidden`}
+            className={`relative w-full ${sizeClasses} max-h-[90vh] aurora-sheet-surface rounded-t-3xl sm:rounded-[var(--radius-lg,24px)] flex flex-col z-10 overflow-hidden text-white`}
           >
             {/* Manija táctil arrastrable (Drag Handle) */}
             <div

@@ -41,7 +41,7 @@ export const Dialog: React.FC<DialogProps> = ({
             exit={{ opacity: 0 }}
             transition={{ duration: 0.2 }}
             onClick={onClose}
-            className="fixed inset-0 bg-black/60 backdrop-blur-xs"
+            className="fixed inset-0 aurora-modal-scrim"
           />
 
           <motion.div
@@ -49,7 +49,7 @@ export const Dialog: React.FC<DialogProps> = ({
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: 10 }}
             transition={{ type: 'spring', bounce: 0, duration: 0.3 }}
-            className={`relative w-full ${sizeClasses} bg-[var(--bg-card)] rounded-2xl border border-[var(--border-subtle)] shadow-2xl p-6 z-10`}
+            className={`relative w-full ${sizeClasses} aurora-modal-surface rounded-[var(--radius-lg,24px)] p-6 z-10 text-white`}
           >
             <div className="flex items-start justify-between gap-4 mb-4">
               <div>

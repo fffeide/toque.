@@ -247,33 +247,41 @@ export const UiGalleryView: React.FC = () => {
         </Card>
       </section>
 
-      {/* 5. Tarjetas, Materiales y Estadísticas */}
+      {/* 5. Jerarquía de Materiales y Niveles de Elevación */}
       <section className="space-y-4">
         <h2 className="font-display text-title-2 font-semibold text-[var(--text-main)]">
-          5. Tres Niveles de Materiales y Estadísticas (Apple Liquid Glass)
+          5. Niveles de Materiales y Superficies
         </h2>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           <Card variant="solid">
-            <span className="text-micro font-bold text-[var(--brand)] block mb-1">Nivel 2: Casi Sólido</span>
-            <h4 className="font-display text-small font-semibold">Tarjeta de Contenido</h4>
+            <span className="text-micro font-bold text-blue-400 block mb-1">Nivel 1: Escenario</span>
+            <h4 className="font-display text-small font-semibold">Fondo Atmosférico</h4>
             <p className="text-micro text-[var(--text-muted)] mt-1">
-              Máxima legibilidad, borde sutil, sombra suave.
+              Base global oscura (#04121b) con gradiente sutil. Da profundidad a toda la app.
             </p>
           </Card>
 
-          <Card variant="glass">
-            <span className="text-micro font-bold text-[var(--estrella)] block mb-1">Nivel 3: Vidrio</span>
-            <h4 className="font-display text-small font-semibold">Liquid Glass Panel</h4>
+          <Card variant="solid">
+            <span className="text-micro font-bold text-[var(--brand-hi)] block mb-1">Nivel 2: Paneles</span>
+            <h4 className="font-display text-small font-semibold">Tarjetas de Contenido</h4>
             <p className="text-micro text-[var(--text-muted)] mt-1">
-              Desenfoque óptico 20px, saturación 180%, borde iluminado.
+              Superficies satinadas para métricas, listas y carteles. Máxima legibilidad.
             </p>
           </Card>
 
           <Card variant="subtle">
-            <span className="text-micro font-bold text-[var(--menta)] block mb-1">Nivel 2B: Sutil</span>
-            <h4 className="font-display text-small font-semibold">Fondo Translúcido</h4>
+            <span className="text-micro font-bold text-amber-300 block mb-1">Nivel 2B: Sub-bloques</span>
+            <h4 className="font-display text-small font-semibold">Divisiones Internas</h4>
             <p className="text-micro text-[var(--text-muted)] mt-1">
-              Ideal para listas y divisiones secundarias.
+              Bloques contenidos dentro de tarjetas (códigos, filtros, inputs). No se usa para pop-ups.
+            </p>
+          </Card>
+
+          <Card className="bg-[rgba(10,20,38,0.98)] border border-white/20 shadow-xl">
+            <span className="text-micro font-bold text-emerald-300 block mb-1">Nivel 3: Pop-ups & Sheets</span>
+            <h4 className="font-display text-small font-semibold">Modales y Hojas Flotantes</h4>
+            <p className="text-micro text-[var(--text-muted)] mt-1">
+              Superficie opaca de alto contraste con blur. Evita que el fondo se transparente.
             </p>
           </Card>
         </div>
