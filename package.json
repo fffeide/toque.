@@ -2,10 +2,12 @@
   "name": "toque-app",
   "private": true,
   "version": "1.0.0",
+  "packageManager": "bun@1.2.15",
   "type": "module",
   "scripts": {
     "dev": "tsx server.ts",
     "build": "vite build",
+    "deploy": "wrangler deploy",
     "start": "node server.ts",
     "preview": "vite preview",
     "lint": "tsc --noEmit"
