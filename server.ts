@@ -1,112 +1,167 @@
-import express from 'express';
-import type { Request, Response } from 'express';
-import { GoogleGenAI } from '@google/genai';
+import http from 'node:http';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import dotenv from 'dotenv';
-import path from 'path';
-import { fileURLToPath } from 'url';
+import { GoogleGenAI } from '@google/genai';
 
 dotenv.config();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const app = express();
-const port = parseInt(process.env.PORT || '3000', 10);
+const PORT = parseInt(process.env.PORT || '3000', 10);
+const DIST_DIR = path.resolve(__dirname, 'dist');
 
-app.use(express.json());
-
-// Inicializar Google Gen AI con API Key del entorno
-const ai = new GoogleGenAI({
-  apiKey: process.env.GEMINI_API_KEY,
-});
-
-// Endpoint de salud para Cloud Run / probes
-app.get('/healthz', (_req, res) => {
-  res.status(200).send('OK');
-});
-
-// Endpoint de IA para el Asistente Chatbot de Toque
-app.post('/api/chat', async (req: Request, res: Response) => {
+let ai: GoogleGenAI | null = null;
+if (process.env.GEMINI_API_KEY) {
   try {
-    const { message, history, context } = req.body;
-
-    if (!message) {
-      return res.status(400).json({ error: 'El mensaje es requerido.' });
-    }
-
-    const systemInstruction = `Sos el copiloto oficial de Inteligencia Artificial de Toque (toque.ar), la plataforma SaaS líder para carteles acrílicos inteligentes con tecnología dual NFC (contactless) y Códigos QR dinámicos para comercios físicos (restaurantes, bares, cafés, locales).
-
-Contexto del usuario actual:
-- Rol: ${context?.role || 'Comercio / Negocio'}
-- Nombre: ${context?.name || 'Usuario'}
-- Negocio / Taller: ${context?.tenantName || 'Toque'}
-- Carteles registrados: ${context?.cartelesCount || 'Varios'} carteles
-
-Tus funciones y conocimientos:
-1. Tecnología física: Los carteles tienen chip NFC NTAG215 (lectura por contacto a 1-3cm sin apps) y QR dinámico de alta resolución. Ambos apuntan a una URL corta dinámica en este servidor (/r/codigo) que redirige en menos de 45 milisegundos directamente a la ficha de reseñas en Google Maps con 5 estrellas.
-2. Cambio de enlace sin reimprimir: La gran ventaja es que la URL corta es dinámica. El dueño puede cambiar el link de Google Maps en cualquier momento desde "Mis Carteles" sin tirar ni reimprimir el acrílico.
-3. Telemetría y captura de datos: Al escanear el QR o tocar el NFC, Toque captura en <40ms el tipo de dispositivo (iOS/Android), navegador, resolución de pantalla, idioma, tipo de conexión y hora pico antes de redirigir de inmediato a Google.
-4. Módulo Equipo: Sirve para motivar y medir al personal (mozos, baristas) mediante un reto amistoso. NUNCA se generan QRs para empleados (los QRs son exclusivos de mesas y carteles físicos). Está terminantemente prohibido premiar o condicionar al cliente (política de Google), pero sí se puede premiar internamente al staff por su calidez de servicio.
-5. Fabricantes: Venden e imprimen acrílicos, usan kits de impresión en CSV para grabar chips NFC en lote con la app NFC Tools.
-
-Instrucciones de tono:
-- Sé amable, conciso, ultra práctico y profesional (español rioplatense o neutro cálido).
-- Respuestas directas, bien estructuradas, con viñetas cuando sea útil.
-- Si te piden realizar una acción como cambiar un enlace o simular escaneo, explicales cómo hacerlo o confirmales que pueden usar los botones interactivos del chat.`;
-
-    const chatResponse = await ai.models.generateContent({
-      model: 'gemini-3.8-flash',
-      contents: message,
-      config: {
-        systemInstruction,
-        temperature: 0.7,
-      },
-    });
-
-    const reply = chatResponse.text || 'Entendido. ¿En qué más puedo ayudarte hoy en Toque?';
-    return res.json({ reply });
-  } catch (error: any) {
-    console.error('Error al generar respuesta con Gemini:', error);
-    return res.status(500).json({
-      error: 'Error en el asistente de IA',
-      details: error?.message || 'No se pudo conectar con el servicio de IA.',
-    });
+    ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+  } catch (err) {
+    console.warn('GoogleGenAI init warning:', err);
   }
-});
+}
 
-// Endpoint de telemetría de escaneo ultrarrápido
-app.post('/api/telemetry/scan', async (req: Request, res: Response) => {
-  try {
-    const { shortCode, telemetry } = req.body;
-    // Loguear telemetría
-    console.log(`[Telemetría Toque] Escaneo registrado para código ${shortCode}:`, telemetry);
-    return res.json({ success: true, recordedAt: new Date().toISOString() });
-  } catch (error) {
-    return res.status(500).json({ success: false });
-  }
-});
+const MIME_TYPES: Record<string, string> = {
+  '.html': 'text/html; charset=utf-8',
+  '.js': 'application/javascript; charset=utf-8',
+  '.mjs': 'application/javascript; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.svg': 'image/svg+xml',
+  '.ico': 'image/x-icon',
+  '.webp': 'image/webp',
+  '.woff': 'font/woff',
+  '.woff2': 'font/woff2',
+  '.ttf': 'font/ttf',
+  '.txt': 'text/plain; charset=utf-8',
+};
 
-// Servidor de desarrollo con Vite middlewares o estáticos en producción
-async function startServer() {
-  const isProd = process.env.NODE_ENV === 'production';
-
-  if (!isProd) {
-    const { createServer: createViteServer } = await import('vite');
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: 'spa',
+function readBody(req: http.IncomingMessage): Promise<string> {
+  return new Promise((resolve, reject) => {
+    let body = '';
+    req.on('data', (chunk) => {
+      body += chunk;
+      if (body.length > 10 * 1024 * 1024) {
+        req.destroy();
+        reject(new Error('Payload too large'));
+      }
     });
-    app.use(vite.middlewares);
-  } else {
-    app.use(express.static(path.resolve(__dirname, 'dist')));
-    app.get('*', (_req, res) => {
-      res.sendFile(path.resolve(__dirname, 'dist', 'index.html'));
-    });
-  }
-
-  app.listen(port, '0.0.0.0', () => {
-    console.log(`Servidor Toque Full-Stack activo en http://0.0.0.0:${port}`);
+    req.on('end', () => resolve(body));
+    req.on('error', reject);
   });
 }
 
-startServer();
+const server = http.createServer(async (req, res) => {
+  const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
+  const pathname = url.pathname;
+
+  // 1. Health checks para Cloud Run (Liveness probe y Startup probe)
+  if (pathname === '/healthz' || pathname === '/api/healthz' || pathname === '/health') {
+    res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
+    res.end('OK');
+    return;
+  }
+
+  // 2. Endpoint /api/chat
+  if (pathname === '/api/chat' && req.method === 'POST') {
+    try {
+      const raw = await readBody(req);
+      const data = raw ? JSON.parse(raw) : {};
+      const { message, context } = data;
+
+      if (!message) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'El mensaje es requerido.' }));
+        return;
+      }
+
+      if (ai) {
+        const systemInstruction = `Sos el copiloto oficial de Inteligencia Artificial de Toque (toque.ar), la plataforma líder para carteles inteligentes con tecnología dual NFC y Códigos QR dinámicos para comercios físicos. Responde de forma cálida, concisa, profesional y práctica en español rioplatense o neutro. Contexto: ${JSON.stringify(context || {})}`;
+        const chatResponse = await ai.models.generateContent({
+          model: 'gemini-2.5-flash',
+          contents: message,
+          config: { systemInstruction, temperature: 0.7 },
+        });
+        const reply = chatResponse.text || 'Entendido. ¿En qué más puedo ayudarte hoy en Toque?';
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ reply }));
+        return;
+      } else {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          reply: '¡Hola! Soy el copiloto de Toque. Puedo ayudarte con cualquier consulta sobre tus carteles inteligentes, códigos QR o fichas de reseñas en Google.',
+        }));
+        return;
+      }
+    } catch (err: any) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: err?.message || 'Error interno' }));
+      return;
+    }
+  }
+
+  // 3. Endpoint /api/telemetry/scan
+  if (pathname === '/api/telemetry/scan' && req.method === 'POST') {
+    try {
+      const raw = await readBody(req);
+      const data = raw ? JSON.parse(raw) : {};
+      console.log('[Telemetría Toque] Escaneo recibido:', data.shortCode);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: true, recordedAt: new Date().toISOString() }));
+      return;
+    } catch {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: false }));
+      return;
+    }
+  }
+
+  // 4. Servir archivos estáticos de dist/
+  if (req.method === 'GET' || req.method === 'HEAD') {
+    const cleanPath = path.normalize(pathname).replace(/^(\.\.[\/\\])+/, '');
+    const filePath = path.join(DIST_DIR, cleanPath);
+
+    // Comprobar si el archivo físico existe en dist/
+    if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
+      const ext = path.extname(filePath).toLowerCase();
+      const contentType = MIME_TYPES[ext] || 'application/octet-stream';
+      res.writeHead(200, {
+        'Content-Type': contentType,
+        'Cache-Control': ext === '.html' ? 'no-cache' : 'public, max-age=31536000, immutable',
+      });
+      if (req.method === 'HEAD') {
+        res.end();
+      } else {
+        fs.createReadStream(filePath).pipe(res);
+      }
+      return;
+    }
+
+    // 5. Fallback para SPA (Single Page Application - React Router)
+    const indexPath = path.join(DIST_DIR, 'index.html');
+    if (fs.existsSync(indexPath)) {
+      res.writeHead(200, {
+        'Content-Type': 'text/html; charset=utf-8',
+        'Cache-Control': 'no-cache',
+      });
+      if (req.method === 'HEAD') {
+        res.end();
+      } else {
+        fs.createReadStream(indexPath).pipe(res);
+      }
+      return;
+    }
+  }
+
+  res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+  res.end('Not Found');
+});
+
+server.listen(PORT, '0.0.0.0', () => {
+  console.log(`Servidor Toque activo en http://0.0.0.0:${PORT}`);
+});

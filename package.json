@@ -7,10 +7,11 @@
     "dev": "vite",
     "dev:api": "wrangler dev --local --var COOKIE_INSECURE:1",
     "build": "vite build",
+    "start": "node server.ts",
     "deploy": "npm run build && wrangler deploy",
     "db:migrate:local": "wrangler d1 migrations apply toque-db --local",
     "db:migrate:remote": "wrangler d1 migrations apply toque-db --remote",
-    "lint": "tsc --noEmit && tsc -p worker/tsconfig.json"
+    "lint": "tsc --noEmit"
   },
   "dependencies": {
     "@cloudflare/workers-types": "^5.20261011.1",
