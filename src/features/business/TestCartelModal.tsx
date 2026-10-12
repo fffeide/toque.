@@ -57,7 +57,7 @@ export const TestCartelModal: React.FC<TestCartelModalProps> = ({
 
   const handleCopyLink = () => {
     if (!activeCartel) return;
-    const url = `https://toque.ar/${activeCartel.shortCode}`;
+    const url = getShortUrl(activeCartel.shortCode);
     navigator.clipboard.writeText(url);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
@@ -107,7 +107,7 @@ export const TestCartelModal: React.FC<TestCartelModalProps> = ({
                   {activeCartel.name}
                 </p>
                 <p className="text-micro text-[var(--text-muted)] font-mono">
-                  toque.ar/{activeCartel.shortCode}
+                  {getShortUrlDisplay(activeCartel.shortCode)}
                 </p>
               </div>
               <button

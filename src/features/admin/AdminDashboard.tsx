@@ -46,19 +46,22 @@ export const AdminDashboard: React.FC = () => {
 
   const [stats, setStats] = useState<PlatformStats | null>(null);
   const [businesses, setBusinesses] = useState<Tenant[]>([]);
+  const [manufacturers, setManufacturers] = useState<Tenant[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const [activeTab, setActiveTab] = useState<'overview' | 'manufacturers' | 'qa_sandbox'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'manufacturers' | 'verificacion' | 'qa_sandbox'>('overview');
 
   const loadData = async () => {
     setIsLoading(true);
     try {
-      const [platformStats, bizList] = await Promise.all([
+      const [platformStats, bizList, mfgList] = await Promise.all([
         api.getPlatformStats(),
         api.listBusinesses(),
+        api.listManufacturers(),
       ]);
       setStats(platformStats);
       setBusinesses(bizList);
+      setManufacturers(mfgList);
     } catch {
       // fallback
     } finally {
@@ -261,6 +264,19 @@ export const AdminDashboard: React.FC = () => {
           }`}
         >
           Fabricantes & Clientes ({stats.manufacturers.length})
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveTab('verificacion')}
+          className={`px-4 py-2 rounded-xl text-xs font-semibold transition cursor-pointer flex items-center gap-1.5 ${
+            activeTab === 'verificacion'
+              ? 'bg-emerald-400 text-slate-950 font-bold shadow-xs'
+              : 'text-emerald-300 hover:text-emerald-200 hover:bg-emerald-500/10'
+          }`}
+        >
+          <ShieldCheck className="w-4 h-4" />
+          <span>Verificación de Fabricantes</span>
         </button>
 
         {isQaTester && (
@@ -469,6 +485,127 @@ export const AdminDashboard: React.FC = () => {
               ))}
             </div>
           </Card>
+        </div>
+      )}
+
+      {/* PESTAÑA: VERIFICACIÓN DE FABRICANTES (AUDITORÍA, LLAMADAS CON CLIENTES, SELLO OFICIAL) */}
+      {activeTab === 'verificacion' && (
+        <div className="space-y-6">
+          <Card className="p-6 space-y-4 border-emerald-400/30 bg-emerald-500/10 backdrop-blur-xl">
+            <div className="flex items-center gap-2">
+              <ShieldCheck className="w-5 h-5 text-emerald-300" />
+              <h3 className="font-headline text-lg font-bold text-white">
+                Verificación y Homologación de Fabricantes
+              </h3>
+            </div>
+            <p className="text-xs text-white/80 leading-relaxed max-w-2xl">
+              Como administradores de Toque, revisamos la información fiscal y técnica del fabricante, verificamos los materiales utilizados (acrílico, chip NTAG215) y realizamos entrevistas telefónicas con sus comercios clientes antes de otorgar el <strong>Sello de Verificado Toque</strong>.
+            </p>
+          </Card>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {manufacturers.map((mfg) => {
+              const mfgBizCount = businesses.filter(b => b.manufacturerId === mfg.id).length;
+              return (
+                <Card key={mfg.id} className="p-5 space-y-4 border-white/20 bg-white/10 backdrop-blur-md">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <h4 className="font-headline text-base font-bold text-white">{mfg.name}</h4>
+                        <span className="font-mono text-[10px] bg-white/10 px-2 py-0.5 rounded text-white/70">
+                          {mfg.accountCode || 'S/C'}
+                        </span>
+                      </div>
+                      <p className="text-xs text-white/60">{mfg.city || 'Sin ciudad asignada'}</p>
+                    </div>
+
+                    <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${
+                      mfg.isVerified
+                        ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-400/30'
+                        : 'bg-amber-500/20 text-amber-300 border border-amber-400/30'
+                    }`}>
+                      {mfg.isVerified ? '✓ Verificado Toque' : 'Pendiente de auditoría'}
+                    </span>
+                  </div>
+
+                  <div className="p-3 rounded-xl bg-black/30 border border-white/10 space-y-2 text-xs">
+                    <div className="flex justify-between">
+                      <span className="text-white/60">Contacto directo:</span>
+                      <span className="text-white font-mono">{mfg.phone || mfg.contactEmail}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-white/60">Comercios clientes asignados:</span>
+                      <span className="text-cyan-300 font-bold">{mfgBizCount} comercios</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-white/60">Materiales declarados:</span>
+                      <span className="text-white truncate max-w-[200px]">
+                        {(mfg.materials || ['Acrílico', 'NFC NTAG215']).join(', ')}
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-white/60">Estado en la Red Pública:</span>
+                      <span className={mfg.inNetwork !== false ? 'text-emerald-300' : 'text-white/40'}>
+                        {mfg.inNetwork !== false ? 'Publicado' : 'Oculto'}
+                      </span>
+                    </div>
+                  </div>
+
+                  {mfg.verificationNotes && (
+                    <div className="p-2.5 rounded-lg bg-white/5 border border-white/10 text-[11px] text-white/70">
+                      <strong>Nota de auditoría:</strong> {mfg.verificationNotes}
+                    </div>
+                  )}
+
+                  <div className="pt-2 border-t border-white/10 flex items-center justify-between gap-2">
+                    <a
+                      href={`https://wa.me/${(mfg.phone || '').replace(/[^0-9]/g, '')}?text=Hola%20${encodeURIComponent(mfg.name)},%20te%20contactamos%20desde%20Toque%20para%20la%20verificaci%C3%B3n%20de%20tu%20taller.`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold transition"
+                    >
+                      <MessageSquare className="w-3.5 h-3.5" />
+                      <span>Contactar taller</span>
+                    </a>
+
+                    <div className="flex items-center gap-2">
+                      {mfg.isVerified ? (
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          onClick={async () => {
+                            if (api.verifyManufacturer) {
+                              await api.verifyManufacturer(mfg.id, false, 'Verificación pausada por auditoría');
+                            }
+                            success('Verificación retirada', mfg.name);
+                            loadData();
+                          }}
+                          className="text-rose-300 text-[11px]"
+                        >
+                          Revocar
+                        </Button>
+                      ) : (
+                        <Button
+                          variant="primary"
+                          size="sm"
+                          onClick={async () => {
+                            if (api.verifyManufacturer) {
+                              await api.verifyManufacturer(mfg.id, true, 'Auditoría aprobada y clientes consultados');
+                            }
+                            success('¡Fabricante Verificado!', `Se otorgó el sello a ${mfg.name}`);
+                            loadData();
+                          }}
+                          className="bg-emerald-400 text-slate-950 font-bold hover:bg-emerald-300 text-[11px]"
+                        >
+                          Aprobar y Verificar
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                </Card>
+              );
+            })}
+          </div>
         </div>
       )}
 

@@ -6,8 +6,10 @@
 
 const ALLOWED_GOOGLE_DOMAINS = [
   'google.com',
+  'google.com.ar',
   'search.google.com',
   'maps.google.com',
+  'maps.google.com.ar',
   'maps.app.goo.gl',
   'g.page',
   'goo.gl',

@@ -52,6 +52,7 @@ export const Hero: React.FC<HeroProps> = ({
             onBookDemo={onBookDemo}
             menuItems={[
               { label: 'Cómo funciona', href: '#como-funciona', hasDropdown: false },
+              { label: 'Red de Fabricantes', href: '#red-fabricantes', hasDropdown: false },
               { label: 'Para fabricantes', href: '#fabricantes', hasDropdown: false },
               { label: 'Para negocios', href: '#negocios', hasDropdown: false },
               { label: 'Privacidad', href: '#privacidad', hasDropdown: false },

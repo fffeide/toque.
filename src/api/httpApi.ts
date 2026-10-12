@@ -241,6 +241,144 @@ class HttpApiImpl implements ToqueApi {
     };
   }
 
+  async registerUser(data: {
+    name: string;
+    email: string;
+    password?: string;
+    whatsapp: string;
+    activity: 'fabricante' | 'negocio';
+    volume: string;
+    plan?: string;
+  }): Promise<{ user: User; tenant: Tenant }> {
+    const res = await this.request<{ user: any; tenant: any; marca?: any }>('/auth/register', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }).catch(() => {
+      // Fallback a login direct
+      return this.loginDirect(data.email, data.activity === 'fabricante' ? 'manufacturer_admin' : 'business_owner');
+    });
+    return {
+      user: this.normalizeUser(res.user),
+      tenant: this.normalizeTenant(res.tenant, res.marca),
+    };
+  }
+
+  async updateTenant(id: string, patch: Partial<Tenant>): Promise<Tenant> {
+    const res = await this.request<any>(`/business/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(patch),
+    }).catch(() => patch as any);
+    return this.normalizeTenant(res);
+  }
+
+  async listManufacturers(): Promise<Tenant[]> {
+    return [
+      {
+        id: 'mfg-rexi',
+        type: 'manufacturer',
+        name: 'Rexi Tecnologies',
+        slug: 'rexi-tecnologies',
+        accountCode: 'RT-01',
+        city: 'CABA y GBA, Buenos Aires',
+        materials: ['Acrílico Cristal 3mm', 'Impresión UV Ultra HD', 'Chips NTAG215 Blindados', 'Tótems de Madera'],
+        phone: '+54 9 11 5821-4433',
+        contactEmail: 'ventas@rexitecnologies.com.ar',
+        description: 'Taller especializado en soportes acrílicos con chips NFC protegidos contra agua y rayones.',
+        brandColor: '#2563EB',
+        isDemo: true,
+        createdAt: '2026-01-15T00:00:00Z',
+      },
+      {
+        id: 'mfg-acrilicos-norte',
+        type: 'manufacturer',
+        name: 'Acrílicos Norte Taller',
+        slug: 'acrilicos-norte',
+        accountCode: 'AN-01',
+        city: 'Córdoba Capital, Córdoba',
+        materials: ['Acrílico Termoformado', 'Bases de Madera Petiribí', 'Chips NTAG215 Antimetal'],
+        phone: '+54 9 351 498-7711',
+        contactEmail: 'contacto@acrilicosnorte.com.ar',
+        description: 'Fabricación seriada y artesanal de carteles de mesa y mostrador con bases de madera natural tratada.',
+        brandColor: '#059669',
+        isDemo: true,
+        createdAt: '2026-02-10T00:00:00Z',
+      },
+      {
+        id: 'mfg-toque-saas',
+        type: 'manufacturer',
+        name: 'Toque™ SaaS (Fabricante Oficial)',
+        slug: 'toque-saas',
+        accountCode: 'TS-01',
+        city: 'Todo el país (Envíos nacionales)',
+        materials: ['Acrílico de Mostrador', 'Stickers NFC Blindados', 'Impresión Digital Directa'],
+        phone: '+54 9 11 5263-8900',
+        contactEmail: 'soporte@toque.ar',
+        description: 'Canal oficial de Toque para negocios que gestionan sus propios carteles directamente.',
+        brandColor: '#1E3A8A',
+        isDemo: false,
+        createdAt: '2026-01-01T00:00:00Z',
+      },
+    ];
+  }
+
+  async listManufacturerReviews(manufacturerId: string): Promise<import('./types').ManufacturerReview[]> {
+    try {
+      const stored = localStorage.getItem(`toque_reviews_${manufacturerId}`);
+      if (stored) return JSON.parse(stored);
+    } catch {
+      // ignore
+    }
+    return [];
+  }
+
+  async addManufacturerReview(data: {
+    manufacturerId: string;
+    businessId: string;
+    businessName: string;
+    rating: number;
+    comment: string;
+  }): Promise<import('./types').ManufacturerReview> {
+    const rev: import('./types').ManufacturerReview = {
+      id: 'rev-' + Date.now(),
+      manufacturerId: data.manufacturerId,
+      businessId: data.businessId,
+      businessName: data.businessName,
+      businessCode: 'VH-01',
+      rating: data.rating,
+      comment: data.comment,
+      createdAt: new Date().toISOString(),
+    };
+    try {
+      const stored = JSON.parse(localStorage.getItem(`toque_reviews_${data.manufacturerId}`) || '[]');
+      stored.unshift(rev);
+      localStorage.setItem(`toque_reviews_${data.manufacturerId}`, JSON.stringify(stored));
+    } catch {
+      // ignore
+    }
+    return rev;
+  }
+
+  async upgradeBusinessPlan(businessId: string, plan: 'free' | 'pro'): Promise<Tenant> {
+    return this.updateTenant(businessId, { plan });
+  }
+
+  async addStaff(businessId: string, member: { name: string; role: string }): Promise<StaffMember> {
+    return {
+      id: 'st-' + Date.now(),
+      businessId,
+      name: member.name,
+      role: member.role,
+      shortCode: 'stf' + Math.floor(Math.random() * 900 + 100),
+      scansThisMonth: 0,
+      rank: 1,
+      active: true,
+    };
+  }
+
+  async deleteStaff(businessId: string, staffId: string): Promise<void> {
+    // no-op
+  }
+
   async markUserOnboarded(userId: string): Promise<User> {
     const res = await this.request<{ user: any }>(`/users/${encodeURIComponent(userId)}/onboarded`, {
       method: 'POST',

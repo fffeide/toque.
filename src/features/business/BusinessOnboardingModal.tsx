@@ -61,17 +61,10 @@ export const BusinessOnboardingModal: React.FC<BusinessOnboardingModalProps> = (
     validateGoogleReviewUrl(reviewUrl)
   );
 
-  // Paso 4: Reportes
-  const [reportChannel, setReportChannel] = useState<'email' | 'whatsapp' | 'both'>('both');
-  const [reportDay, setReportDay] = useState<'monday' | 'friday'>('monday');
-  const [reportEmail, setReportEmail] = useState(tenant?.contactEmail || 'contacto@cafedelaesquina.ar');
-  const [reportPhone, setReportPhone] = useState('+54 9 11 4455-8899');
-
   const steps = [
-    { id: 'welcome', title: 'Bienvenida', description: 'Presentación del fabricante' },
+    { id: 'welcome', title: 'Bienvenida', description: 'Presentación del cartel' },
     { id: 'data', title: 'Datos', description: 'Información del local' },
     { id: 'link', title: 'Probar link', description: 'Enlace a Google Reviews' },
-    { id: 'reports', title: 'Reportes', description: 'Canal de avisos' },
   ];
 
   const handleUrlChange = (value: string) => {
@@ -222,78 +215,6 @@ export const BusinessOnboardingModal: React.FC<BusinessOnboardingModalProps> = (
                   <span>¡Enlace probado! La ficha de Google abre sin trabas.</span>
                 </div>
               )}
-            </div>
-          </div>
-        )}
-
-        {/* PASO 4: ELEGIR REPORTE */}
-        {currentStep === 3 && (
-          <div className="space-y-5 max-w-md mx-auto py-2">
-            <div>
-              <h3 className="font-display text-title-3 font-semibold text-[var(--text-main)]">
-                ¿Cómo querés recibir el resumen semanal?
-              </h3>
-              <p className="text-small text-[var(--text-muted)] mt-1">
-                Un reporte claro en 3 líneas con una sola acción sugerida. Sin spam.
-              </p>
-            </div>
-
-            {/* Canal */}
-            <div className="grid grid-cols-3 gap-2.5">
-              <button
-                type="button"
-                onClick={() => setReportChannel('email')}
-                className={`p-3 rounded-xl border text-center transition cursor-pointer ${
-                  reportChannel === 'email'
-                    ? 'border-[var(--brand)] bg-[var(--brand)]/10 text-[var(--text-main)] font-semibold'
-                    : 'border-[var(--border-subtle)] text-[var(--text-muted)] hover:bg-black/5 dark:hover:bg-white/5'
-                }`}
-              >
-                <Mail className="w-4 h-4 mx-auto mb-1 text-[var(--brand)]" />
-                <span className="text-micro block">Por Email</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setReportChannel('whatsapp')}
-                className={`p-3 rounded-xl border text-center transition cursor-pointer ${
-                  reportChannel === 'whatsapp'
-                    ? 'border-[var(--brand)] bg-[var(--brand)]/10 text-[var(--text-main)] font-semibold'
-                    : 'border-[var(--border-subtle)] text-[var(--text-muted)] hover:bg-black/5 dark:hover:bg-white/5'
-                }`}
-              >
-                <MessageSquare className="w-4 h-4 mx-auto mb-1 text-[var(--menta)]" />
-                <span className="text-micro block">Por WhatsApp</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setReportChannel('both')}
-                className={`p-3 rounded-xl border text-center transition cursor-pointer ${
-                  reportChannel === 'both'
-                    ? 'border-[var(--brand)] bg-[var(--brand)]/10 text-[var(--text-main)] font-semibold'
-                    : 'border-[var(--border-subtle)] text-[var(--text-muted)] hover:bg-black/5 dark:hover:bg-white/5'
-                }`}
-              >
-                <Smartphone className="w-4 h-4 mx-auto mb-1 text-[var(--estrella)]" />
-                <span className="text-micro block">Ambos</span>
-              </button>
-            </div>
-
-            <div className="space-y-3 pt-1">
-              <Input
-                label="Email de recepción"
-                value={reportEmail}
-                onChange={(e) => setReportEmail(e.target.value)}
-                placeholder="nombre@tudominio.com"
-              />
-
-              <Input
-                label="Número de WhatsApp"
-                value={reportPhone}
-                onChange={(e) => setReportPhone(e.target.value)}
-                placeholder="+54 9 11 ..."
-              />
             </div>
           </div>
         )}

@@ -28,6 +28,7 @@ import {
   Settings,
   Shield,
   Activity,
+  Factory,
 } from 'lucide-react';
 import { useAuth } from '../../lib/authContext';
 import { UserRole } from '../../api/types';
@@ -69,8 +70,8 @@ export const AppLayout: React.FC = () => {
     }
   };
 
-  const isManufacturer = user?.role === 'manufacturer_admin';
-  const isAdmin = user?.role === 'platform_admin';
+  const isManufacturer = user?.role === 'manufacturer_admin' || tenant?.type === 'manufacturer';
+  const isAdmin = user?.role === 'platform_admin' || tenant?.type === 'platform';
   const isBusiness = !isManufacturer && !isAdmin;
 
   return (
@@ -104,6 +105,20 @@ export const AppLayout: React.FC = () => {
           <nav className="flex flex-col items-center gap-6 w-full">
             {isAdmin ? (
               <>
+                <NavLink
+                  to="/admin"
+                  className={({ isActive }) =>
+                    `relative p-2.5 rounded-xl transition ${
+                      isActive ? 'text-white bg-white/20' : 'text-white/60 hover:text-white'
+                    }`
+                  }
+                  title="Panel Super Admin (/admin)"
+                >
+                  {location.pathname === '/admin' && (
+                    <span className="aurora-pip -left-3 top-1" />
+                  )}
+                  <Shield className="w-5 h-5 text-purple-300" />
+                </NavLink>
 
                 <NavLink
                   to="/status"
@@ -228,6 +243,21 @@ export const AppLayout: React.FC = () => {
                   )}
                   <Users className="w-5 h-5 text-purple-300" />
                 </NavLink>
+
+                <NavLink
+                  to="/fabricantes"
+                  className={({ isActive }) =>
+                    `relative p-2.5 rounded-xl transition ${
+                      isActive ? 'text-white bg-white/20' : 'text-white/60 hover:text-white'
+                    }`
+                  }
+                  title="Red de Fabricantes"
+                >
+                  {location.pathname === '/fabricantes' && (
+                    <span className="aurora-pip -left-3 top-1" />
+                  )}
+                  <Factory className="w-5 h-5 text-amber-300" />
+                </NavLink>
               </>
             )}
 
@@ -280,46 +310,16 @@ export const AppLayout: React.FC = () => {
               </h1>
             </div>
 
-            {/* Selector de Fondo Predeterminado Líquido y Perfil */}
-            <div className="flex items-center gap-2.5 flex-wrap">
-              <div className="hidden sm:inline-flex rounded-full bg-white/10 p-0.5 border border-white/15 backdrop-blur-md items-center">
-                <button
-                  type="button"
-                  onClick={() => setPanelBg('navy')}
-                  className={`px-2.5 py-1 rounded-full text-[11px] font-medium transition cursor-pointer ${
-                    panelBg === 'navy'
-                      ? 'bg-[rgba(30,50,90,0.9)] text-white shadow-xs border border-white/20'
-                      : 'text-white/70 hover:text-white'
-                  }`}
-                  title="Fondo azul profundo"
-                >
-                  Azul RIVR
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setPanelBg('obsidian')}
-                  className={`px-2.5 py-1 rounded-full text-[11px] font-medium transition cursor-pointer ${
-                    panelBg === 'obsidian'
-                      ? 'bg-white/25 text-white shadow-xs border border-white/20'
-                      : 'text-white/70 hover:text-white'
-                  }`}
-                  title="Fondo obsidiana"
-                >
-                  Obsidiana
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setPanelBg('teal')}
-                  className={`px-2.5 py-1 rounded-full text-[11px] font-medium transition cursor-pointer ${
-                    panelBg === 'teal'
-                      ? 'bg-teal-900/70 text-white shadow-xs border border-white/20'
-                      : 'text-white/70 hover:text-white'
-                  }`}
-                  title="Fondo verde teal"
-                >
-                  Teal
-                </button>
-              </div>
+            {/* Perfil y Avatar (La selección de acento de marca se encuentra en /cuenta según especificación) */}
+            <div className="flex items-center gap-2.5">
+              <NavLink
+                to="/cuenta"
+                className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white/10 hover:bg-white/15 border border-white/15 text-xs text-white/80 transition"
+                title="Configuración de cuenta y colores"
+              >
+                <Settings className="w-3.5 h-3.5" />
+                <span>Configuración</span>
+              </NavLink>
 
               {/* Avatar Photo Requerido */}
               <Popover

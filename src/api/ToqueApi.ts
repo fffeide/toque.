@@ -36,6 +36,15 @@ export interface ToqueApi {
   verifyMagicLink(token: string): Promise<{ user: User; tenant: Tenant }>;
   loginDirect(email: string, role?: UserRole): Promise<{ user: User; tenant: Tenant }>;
   loginWithCredentials(user: string, pass: string): Promise<{ user: User; tenant: Tenant }>;
+  registerUser(data: {
+    name: string;
+    email: string;
+    password?: string;
+    whatsapp: string;
+    activity: 'fabricante' | 'negocio';
+    volume: string;
+    plan?: string;
+  }): Promise<{ user: User; tenant: Tenant }>;
   markUserOnboarded(userId: string): Promise<User>;
   getCurrentUser(): Promise<{ user: User; tenant: Tenant } | null>;
   logout(): Promise<void>;
@@ -43,8 +52,21 @@ export interface ToqueApi {
 
   // --- Tenants y Marca Blanca ---
   getTenant(id: string): Promise<Tenant>;
+  updateTenant(id: string, patch: Partial<Tenant>): Promise<Tenant>;
   updateTenantBrand(id: string, brand: { brandColor?: string; brandLogo?: string; name?: string }): Promise<Tenant>;
   listBusinesses(manufacturerId?: string): Promise<Tenant[]>;
+  listManufacturers(): Promise<Tenant[]>;
+  listManufacturerReviews(manufacturerId: string): Promise<import('./types').ManufacturerReview[]>;
+  addManufacturerReview(data: {
+    manufacturerId: string;
+    businessId: string;
+    businessName: string;
+    rating: number;
+    comment: string;
+  }): Promise<import('./types').ManufacturerReview>;
+  upgradeBusinessPlan?(businessId: string, plan: 'free' | 'pro'): Promise<Tenant>;
+  updateManufacturerNetwork?(manufacturerId: string, profile: Partial<Tenant>): Promise<Tenant>;
+  verifyManufacturer?(manufacturerId: string, verified: boolean, notes?: string): Promise<Tenant>;
 
   // --- Carteles (stands en backend) ---
   listCarteles(businessId?: string, includeTrash?: boolean): Promise<Cartel[]>;
@@ -64,6 +86,7 @@ export interface ToqueApi {
     name: string;
     locationDescription: string;
     targetUrl?: string;
+    reason?: string;
   }): Promise<{ oldCartel: Cartel; newCartel: Cartel }>;
   testCartelLink?(cartelId: string): Promise<{ valid: boolean; httpStatus: number; finalUrl: string }>;
   getCartelQr?(cartelId: string, size?: number): Promise<{ qrUrl: string }>;
@@ -94,6 +117,9 @@ export interface ToqueApi {
   // --- Canales y Personal (Feature flags) ---
   listChannels(businessId: string): Promise<ChannelMetric[]>;
   listStaff(businessId: string): Promise<StaffMember[]>;
+  addStaff?(businessId: string, member: { name: string; role: string }): Promise<StaffMember>;
+  updateStaff?(businessId: string, staffId: string, patch: { name?: string; role?: string }): Promise<StaffMember>;
+  deleteStaff?(businessId: string, staffId: string): Promise<void>;
 
   // --- Panel del Fabricante ---
   getManufacturerSummary?(): Promise<{

@@ -35,6 +35,7 @@ import {
   SystemHealthItem,
 } from './types';
 import { validateGoogleReviewUrl } from '../lib/urlValidator';
+import { generateAccountCode, generateCartelCode } from '../lib/codeGenerator';
 
 const STORAGE_KEY = 'toque_real_db_v3';
 const SESSION_USER_KEY = 'toque_real_session_user_v3';
@@ -490,6 +491,16 @@ class MockApiImpl implements ToqueApi {
       return this.currentUser;
     }
 
+    if (cleanUser === 'admin@toque.ar' || cleanUser === 'admin') {
+      return this.switchDemoRole('platform_admin');
+    }
+    if (cleanUser === 'fabricante@toque.ar' || cleanUser === 'fabricante') {
+      return this.switchDemoRole('manufacturer_admin');
+    }
+    if (cleanUser === 'negocio@toque.ar' || cleanUser === 'negocio') {
+      return this.switchDemoRole('business_owner');
+    }
+
     // Si coincide con usuario existente por email
     const foundUser = this.db.users.find(u => u.email.toLowerCase() === cleanUser);
     if (foundUser) {
@@ -499,7 +510,65 @@ class MockApiImpl implements ToqueApi {
       return this.currentUser;
     }
 
-    throw new Error('Credenciales incorrectas. Para el entorno de pruebas usá usuario: @pruebas y contraseña: ¿ToQuE123!');
+    // Si no existe, crear sesión directa para testing sin bloquear
+    return this.loginDirect(cleanUser.includes('@') ? cleanUser : `${cleanUser}@toque.ar`);
+  }
+
+  async registerUser(data: {
+    name: string;
+    email: string;
+    password?: string;
+    whatsapp: string;
+    activity: 'fabricante' | 'negocio';
+    volume: string;
+    plan?: string;
+  }): Promise<{ user: User; tenant: Tenant }> {
+    const cleanEmail = data.email.trim().toLowerCase();
+    const cleanName = data.name.trim();
+    const isMfg = data.activity === 'fabricante';
+    const role: UserRole = isMfg ? 'manufacturer_admin' : 'business_owner';
+    const tenantType: TenantType = isMfg ? 'manufacturer' : 'business';
+
+    const existingCount = this.db.tenants.filter(t => t.type === tenantType).length + 1;
+    const accountCode = generateAccountCode(cleanName, existingCount);
+
+    const tenant: Tenant = {
+      id: `${isMfg ? 'mfg' : 'biz'}-${Date.now()}`,
+      type: tenantType,
+      name: cleanName,
+      slug: cleanName.toLowerCase().replace(/[^a-z0-9]/g, '-'),
+      accountCode,
+      contactEmail: cleanEmail,
+      phone: data.whatsapp.trim(),
+      plan: data.plan || (isMfg ? 'taller' : 'free'),
+      manufacturerId: isMfg ? undefined : 'mfg-toque-saas',
+      assignedManufacturerName: isMfg ? undefined : 'Toque™ SaaS',
+      isDemo: false,
+      features: {
+        channels: true,
+        staff: true,
+      },
+      createdAt: new Date().toISOString(),
+    };
+
+    const user: User = {
+      id: `usr-${Date.now()}`,
+      tenantId: tenant.id,
+      email: cleanEmail,
+      name: cleanName,
+      role,
+      hasSeenOnboarding: false,
+      hasCompletedOnboarding: false,
+      createdAt: new Date().toISOString(),
+    };
+
+    this.db.tenants.push(tenant);
+    this.db.users.push(user);
+    this.saveDatabase(this.db);
+
+    this.currentUser = { user, tenant };
+    this.saveSession();
+    return this.currentUser;
   }
 
   async markUserOnboarded(userId: string): Promise<User> {
@@ -559,13 +628,14 @@ class MockApiImpl implements ToqueApi {
     return t;
   }
 
-  async updateTenantBrand(id: string, brand: { brandColor?: string; brandLogo?: string; name?: string }): Promise<Tenant> {
+  async updateTenant(id: string, patch: Partial<Tenant>): Promise<Tenant> {
     const idx = this.db.tenants.findIndex(item => item.id === id);
     if (idx === -1) throw new Error('Tenant no encontrado.');
 
     const updated = {
       ...this.db.tenants[idx],
-      ...brand,
+      ...patch,
+      id,
     };
     this.db.tenants[idx] = updated;
     this.saveDatabase(this.db);
@@ -577,8 +647,143 @@ class MockApiImpl implements ToqueApi {
     return updated;
   }
 
+  async updateTenantBrand(id: string, brand: { brandColor?: string; brandLogo?: string; name?: string }): Promise<Tenant> {
+    return this.updateTenant(id, brand);
+  }
+
   async listBusinesses(manufacturerId?: string): Promise<Tenant[]> {
     return this.db.tenants.filter(t => t.type === 'business' && (!manufacturerId || t.manufacturerId === manufacturerId));
+  }
+
+  async listManufacturers(): Promise<Tenant[]> {
+    const defaultMfgs: Tenant[] = [
+      {
+        id: 'mfg-rexi',
+        type: 'manufacturer',
+        name: 'Rexi Tecnologies',
+        slug: 'rexi-tecnologies',
+        accountCode: 'RT-01',
+        city: 'CABA y GBA, Buenos Aires',
+        materials: ['Acrílico Cristal 3mm', 'Impresión UV Ultra HD', 'Chips NTAG215 Blindados', 'Tótems de Madera'],
+        phone: '+54 9 11 5821-4433',
+        contactEmail: 'ventas@rexitecnologies.com.ar',
+        description: 'Taller especializado en soportes acrílicos con chips NFC protegidos contra agua y rayones.',
+        brandColor: '#2563EB',
+        isDemo: true,
+        createdAt: '2026-01-15T00:00:00Z',
+      },
+      {
+        id: 'mfg-acrilicos-norte',
+        type: 'manufacturer',
+        name: 'Acrílicos Norte Taller',
+        slug: 'acrilicos-norte',
+        accountCode: 'AN-01',
+        city: 'Córdoba Capital, Córdoba',
+        materials: ['Acrílico Termoformado', 'Bases de Madera Petiribí', 'Chips NTAG215 Antimetal'],
+        phone: '+54 9 351 498-7711',
+        contactEmail: 'contacto@acrilicosnorte.com.ar',
+        description: 'Fabricación artesanal y seriada de carteles de mesa y mostrador con bases de madera natural tratada.',
+        brandColor: '#059669',
+        isDemo: true,
+        createdAt: '2026-02-10T00:00:00Z',
+      },
+      {
+        id: 'mfg-grafica-rosario',
+        type: 'manufacturer',
+        name: 'Imprenta Gráfica Rosario',
+        slug: 'grafica-rosario',
+        accountCode: 'GR-01',
+        city: 'Rosario, Santa Fe',
+        materials: ['Acrílico Esmerilado', 'Vinilo UV Alta Resistencia', 'Aluminio Anodizado'],
+        phone: '+54 9 341 622-1100',
+        contactEmail: 'pedidos@graficarosario.com.ar',
+        description: 'Especialistas en cartelería para gastronomía, cartas con QR y soportes NFC resistentes al alcohol y limpieza frecuente.',
+        brandColor: '#7C3AED',
+        isDemo: true,
+        createdAt: '2026-02-20T00:00:00Z',
+      },
+      {
+        id: 'mfg-toque-saas',
+        type: 'manufacturer',
+        name: 'Toque™ SaaS (Fabricante Oficial)',
+        slug: 'toque-saas',
+        accountCode: 'TS-01',
+        city: 'Todo el país (Envíos nacionales)',
+        materials: ['Acrílico de Mostrador', 'Stickers NFC Blindados', 'Impresión Digital Directa'],
+        phone: '+54 9 11 5263-8900',
+        contactEmail: 'soporte@toque.ar',
+        description: 'Canal oficial de Toque para negocios que gestionan sus propios carteles directamente.',
+        brandColor: '#1E3A8A',
+        isDemo: false,
+        createdAt: '2026-01-01T00:00:00Z',
+      },
+    ];
+
+    const dbMfgs = this.db.tenants.filter(t => t.type === 'manufacturer');
+    for (const m of defaultMfgs) {
+      if (!dbMfgs.some(item => item.id === m.id || item.accountCode === m.accountCode)) {
+        dbMfgs.push(m);
+      }
+    }
+    return dbMfgs;
+  }
+
+  async listManufacturerReviews(manufacturerId: string): Promise<import('./types').ManufacturerReview[]> {
+    try {
+      const stored = localStorage.getItem(`toque_reviews_${manufacturerId}`);
+      if (stored) return JSON.parse(stored);
+    } catch {
+      // ignore
+    }
+    return [];
+  }
+
+  async addManufacturerReview(data: {
+    manufacturerId: string;
+    businessId: string;
+    businessName: string;
+    rating: number;
+    comment: string;
+  }): Promise<import('./types').ManufacturerReview> {
+    const rev: import('./types').ManufacturerReview = {
+      id: 'rev-' + Date.now(),
+      manufacturerId: data.manufacturerId,
+      businessId: data.businessId,
+      businessName: data.businessName,
+      businessCode: this.currentUser?.tenant.accountCode || 'VH-01',
+      rating: Math.max(1, Math.min(5, data.rating)),
+      comment: data.comment.trim(),
+      createdAt: new Date().toISOString(),
+    };
+    try {
+      const stored = JSON.parse(localStorage.getItem(`toque_reviews_${data.manufacturerId}`) || '[]');
+      stored.unshift(rev);
+      localStorage.setItem(`toque_reviews_${data.manufacturerId}`, JSON.stringify(stored));
+    } catch {
+      // ignore
+    }
+    return rev;
+  }
+
+  async upgradeBusinessPlan(businessId: string, plan: 'free' | 'pro'): Promise<Tenant> {
+    return this.updateTenant(businessId, { plan });
+  }
+
+  async updateManufacturerNetwork(manufacturerId: string, profile: Partial<Tenant>): Promise<Tenant> {
+    const updated = await this.updateTenant(manufacturerId, {
+      ...profile,
+      inNetwork: profile.inNetwork ?? true,
+    });
+    return updated;
+  }
+
+  async verifyManufacturer(manufacturerId: string, verified: boolean, notes?: string): Promise<Tenant> {
+    const updated = await this.updateTenant(manufacturerId, {
+      isVerified: verified,
+      verifiedAt: verified ? new Date().toISOString() : undefined,
+      verificationNotes: notes,
+    });
+    return updated;
   }
 
   // --- Carteles ---
@@ -609,11 +814,20 @@ class MockApiImpl implements ToqueApi {
     }
 
     const shortCode = Math.random().toString(36).substring(2, 7);
+
+    const bizTenant = this.db.tenants.find(t => t.id === data.businessId);
+    const mfgTenant = bizTenant?.manufacturerId ? this.db.tenants.find(t => t.id === bizTenant.manufacturerId) : null;
+    const mfgCode = mfgTenant?.accountCode || 'TS-01';
+    const bizCode = bizTenant?.accountCode || (bizTenant?.name ? generateAccountCode(bizTenant.name, 1) : 'CL-01');
+    const existingCount = this.db.carteles.filter(c => c.businessId === data.businessId).length + 1;
+    const code = generateCartelCode(mfgCode, bizCode, existingCount);
+
     const newCartel: Cartel = {
       id: `cartel-${Date.now()}`,
       tenantId: data.businessId,
       businessId: data.businessId,
-      manufacturerId: 'tenant-mfg-demo',
+      manufacturerId: bizTenant?.manufacturerId || 'mfg-toque-saas',
+      code,
       shortCode,
       name: data.name.trim(),
       locationDescription: data.locationDescription.trim(),
@@ -621,6 +835,8 @@ class MockApiImpl implements ToqueApi {
       nfcEnabled: data.nfcEnabled ?? true,
       qrEnabled: data.qrEnabled ?? true,
       status: 'active',
+      scansCount: 0,
+      estimatedReviewsCount: 0,
       createdAt: new Date().toISOString(),
     };
 
@@ -673,18 +889,29 @@ class MockApiImpl implements ToqueApi {
     name: string;
     locationDescription: string;
     targetUrl?: string;
+    reason?: string;
   }): Promise<{ oldCartel: Cartel; newCartel: Cartel }> {
     const oldIdx = this.db.carteles.findIndex(s => s.id === oldCartelId);
     if (oldIdx === -1) throw new Error('Cartel original no encontrado.');
 
     const oldCartel = this.db.carteles[oldIdx];
     const newShortCode = Math.random().toString(36).substring(2, 7);
+    const reason = newCartelData.reason || 'Reemplazo de cartel físico';
+    const now = new Date().toISOString();
+
+    const bizTenant = this.db.tenants.find(t => t.id === oldCartel.businessId);
+    const mfgTenant = bizTenant?.manufacturerId ? this.db.tenants.find(t => t.id === bizTenant.manufacturerId) : null;
+    const mfgCode = mfgTenant?.accountCode || 'TS-01';
+    const bizCode = bizTenant?.accountCode || (bizTenant?.name ? generateAccountCode(bizTenant.name, 1) : 'CL-01');
+    const totalCount = this.db.carteles.filter(c => c.businessId === oldCartel.businessId).length + 1;
+    const newCode = generateCartelCode(mfgCode, bizCode, totalCount);
 
     const newCartel: Cartel = {
       id: `cartel-${Date.now()}`,
       tenantId: oldCartel.tenantId,
       businessId: oldCartel.businessId,
       manufacturerId: oldCartel.manufacturerId,
+      code: newCode,
       shortCode: newShortCode,
       name: newCartelData.name.trim(),
       locationDescription: newCartelData.locationDescription.trim(),
@@ -692,16 +919,23 @@ class MockApiImpl implements ToqueApi {
       nfcEnabled: true,
       qrEnabled: true,
       status: 'active',
-      createdAt: new Date().toISOString(),
+      replacedCartelId: oldCartel.id,
+      replacementReason: reason,
+      scansCount: oldCartel.scansCount || 0,
+      estimatedReviewsCount: oldCartel.estimatedReviewsCount || 0,
+      createdAt: now,
     };
 
     const updatedOld: Cartel = {
       ...oldCartel,
       status: 'replaced',
       replacedByCartelId: newCartel.id,
+      replacementReason: reason,
+      updatedAt: now,
     };
 
-    this.db.carteles[oldIdx] = updatedOld;
+    // Eliminar el cartel viejo reemplazado para que no quede duplicado ni figure en la lista activa
+    this.db.carteles.splice(oldIdx, 1);
     this.db.carteles.unshift(newCartel);
     this.saveDatabase(this.db);
 
@@ -1056,7 +1290,15 @@ class MockApiImpl implements ToqueApi {
   }
 
   async listStaff(businessId: string): Promise<StaffMember[]> {
-    return [
+    const key = `toque_mock_staff_${businessId}`;
+    try {
+      const stored = localStorage.getItem(key);
+      if (stored) return JSON.parse(stored);
+    } catch {
+      // ignore
+    }
+
+    const initial = [
       {
         id: 'staff-1',
         name: 'Sofía R.',
@@ -1090,6 +1332,51 @@ class MockApiImpl implements ToqueApi {
         rank: 4,
       },
     ];
+    try {
+      localStorage.setItem(key, JSON.stringify(initial));
+    } catch {
+      // ignore
+    }
+    return initial;
+  }
+
+  async addStaff(businessId: string, member: { name: string; role: string }): Promise<StaffMember> {
+    const key = `toque_mock_staff_${businessId}`;
+    const list = await this.listStaff(businessId);
+    const shortCode = member.name.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 4) + Math.floor(Math.random() * 90 + 10);
+    const newMember: StaffMember = {
+      id: 'staff-' + Date.now(),
+      name: member.name.trim(),
+      role: member.role.trim(),
+      shortCode,
+      scansThisMonth: 0,
+      rank: list.length + 1,
+    };
+    list.push(newMember);
+    localStorage.setItem(key, JSON.stringify(list));
+    return newMember;
+  }
+
+  async updateStaff(businessId: string, staffId: string, patch: { name?: string; role?: string }): Promise<StaffMember> {
+    const key = `toque_mock_staff_${businessId}`;
+    const list = await this.listStaff(businessId);
+    const idx = list.findIndex(s => s.id === staffId);
+    if (idx === -1) throw new Error('Colaborador no encontrado');
+    const updated = {
+      ...list[idx],
+      name: patch.name ? patch.name.trim() : list[idx].name,
+      role: patch.role ? patch.role.trim() : list[idx].role,
+    };
+    list[idx] = updated;
+    localStorage.setItem(key, JSON.stringify(list));
+    return updated;
+  }
+
+  async deleteStaff(businessId: string, staffId: string): Promise<void> {
+    const key = `toque_mock_staff_${businessId}`;
+    const list = await this.listStaff(businessId);
+    const filtered = list.filter((s) => s.id !== staffId).map((s, idx) => ({ ...s, rank: idx + 1 }));
+    localStorage.setItem(key, JSON.stringify(filtered));
   }
 
   // --- Métodos del Panel del Fabricante ---

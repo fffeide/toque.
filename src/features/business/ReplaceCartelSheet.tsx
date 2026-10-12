@@ -25,6 +25,8 @@ import {
   ExternalLink,
 } from 'lucide-react';
 
+import { getShortUrl, getShortUrlDisplay } from '../../lib/urls';
+
 interface ReplaceCartelSheetProps {
   isOpen: boolean;
   onClose: () => void;
@@ -66,12 +68,13 @@ export const ReplaceCartelSheet: React.FC<ReplaceCartelSheetProps> = ({
       const result = await api.replaceCartel(cartel.id, {
         name: newName || cartel.name,
         locationDescription: newLocation || cartel.locationDescription,
+        reason,
       });
 
       setReplacedCartel(result.newCartel);
       success(
         'Reemplazo generado con éxito',
-        `El nuevo cartel hereda todo el historial de "${cartel.name}".`
+        `El nuevo cartel (${result.newCartel.code || result.newCartel.shortCode}) hereda todo el historial de "${cartel.name}".`
       );
       if (onSuccess) onSuccess();
     } catch (err) {
@@ -84,9 +87,9 @@ export const ReplaceCartelSheet: React.FC<ReplaceCartelSheetProps> = ({
     }
   };
 
-  const shortUrl = replacedCartel
-    ? `https://toque.ar/${replacedCartel.shortCode}`
-    : `https://toque.ar/${cartel.shortCode}`;
+  const activeCartel = replacedCartel || cartel;
+  const shortUrl = getShortUrl(activeCartel.shortCode);
+  const shortUrlDisplay = getShortUrlDisplay(activeCartel.shortCode);
 
   const handleCopyLink = () => {
     navigator.clipboard.writeText(shortUrl);

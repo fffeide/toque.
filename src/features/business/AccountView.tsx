@@ -1,12 +1,12 @@
 /**
  * Toque — Mi Cuenta y Preferencias (AccountView)
  * Características:
- * - Datos del negocio
- * - Marca del fabricante visible con soporte directo a su WhatsApp
- * - Apariencia: tema (claro/oscuro/sistema), color de acento, densidad, tamaño de texto
- * - Preferencias de notificaciones
- * - Exportar mis datos (descarga en CSV/JSON)
- * - Botón para repasar el tutorial de bienvenida (Onboarding)
+ * - Datos del negocio editables y guardables (Nombre, Rubro, WhatsApp, Ciudad, Dirección, Enlace de Google Reviews)
+ * - Si es fabricante: No muestra "Fabricante oficial asignado" (ellos son el fabricante)
+ * - Si es negocio: Muestra fabricante asignado con WhatsApp directo
+ * - Selector de color de acento con paleta visual y campo directo de HEX (#RRGGBB)
+ * - Módulos opcionales eliminados de configuraciones (punto 9 y 12)
+ * - Exportar datos (JSON)
  * - Cerrar sesión
  */
 
@@ -19,13 +19,12 @@ import { Card } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
 import { ThemeToggle } from '../../components/ui/ThemeToggle';
 import { SegmentedControl } from '../../components/ui/SegmentedControl';
-import { Avatar, BrandLogo } from '../../components/ui/Avatar';
+import { BrandLogo } from '../../components/ui/Avatar';
 import { BusinessOnboardingModal } from './BusinessOnboardingModal';
 import { useToast } from '../../components/ui/Toast';
+import { validateGoogleReviewUrl } from '../../lib/urlValidator';
 import {
-  User,
   Sun,
-  Sliders,
   Building,
   LogOut,
   Check,
@@ -33,32 +32,64 @@ import {
   Download,
   Bell,
   Sparkles,
-  ExternalLink,
-  ShieldCheck,
-  Type,
-  Palette,
   Phone,
   Edit2,
+  MapPin,
+  Globe,
+  Tag,
+  Save,
+  ShieldCheck,
 } from 'lucide-react';
 
 export const AccountView: React.FC = () => {
-  const { user, tenant, logout } = useAuth();
+  const { user, tenant, logout, updateTenantState } = useAuth();
   const navigate = useNavigate();
   const { density, setDensity, brandColor, setBrandColor, contrastInfo } = useTheme();
-  const { success } = useToast();
+  const { success, error: toastError } = useToast();
+
+  const isManufacturer = 
+    tenant?.type === 'manufacturer' || 
+    user?.role === 'manufacturer_admin' || 
+    user?.email?.toLowerCase().includes('fabricante') ||
+    location.pathname.startsWith('/fabricante');
 
   const [isOnboardingOpen, setIsOnboardingOpen] = useState(false);
   const [textSize, setTextSize] = useState<'normal' | 'large'>('normal');
+
+  // Datos editables del comercio / cuenta
+  const [bizName, setBizName] = useState(tenant?.name || '');
+  const [bizCategory, setBizCategory] = useState(tenant?.category || 'Gastronomía y Cafetería');
+  const [bizPhone, setBizPhone] = useState(tenant?.phone || '');
+  const [bizCity, setBizCity] = useState(tenant?.city || 'Buenos Aires, Argentina');
+  const [bizAddress, setBizAddress] = useState(tenant?.address || '');
+  const [bizReviewUrl, setBizReviewUrl] = useState(tenant?.reviewUrl || '');
+  const [isSavingBiz, setIsSavingBiz] = useState(false);
+  const [hexInput, setHexInput] = useState(brandColor || '#3A3FE0');
+
+  useEffect(() => {
+    if (tenant) {
+      setBizName(tenant.name || '');
+      setBizCategory(tenant.category || 'Gastronomía y Cafetería');
+      setBizPhone(tenant.phone || '');
+      setBizCity(tenant.city || 'Buenos Aires, Argentina');
+      setBizAddress(tenant.address || '');
+      setBizReviewUrl(tenant.reviewUrl || '');
+    }
+  }, [tenant]);
+
+  useEffect(() => {
+    if (brandColor) setHexInput(brandColor);
+  }, [brandColor]);
+
+  // Soporte de fabricante asignado (solo para negocios)
   const [assignedMfg, setAssignedMfg] = useState<{
     name: string;
     phone: string;
     city: string;
-    email: string;
   }>({
-    name: 'Red Oficial Toque Fabricantes — Taller Buenos Aires',
+    name: tenant?.assignedManufacturerName || 'Toque™ SaaS (Fabricante Oficial)',
     phone: '+54 9 11 5263-8900',
-    city: 'CABA y GBA, Argentina',
-    email: 'fabricantes@toque.ar',
+    city: 'Envíos a todo el país',
   });
   const [isEditingMfg, setIsEditingMfg] = useState(false);
 
@@ -72,43 +103,40 @@ export const AccountView: React.FC = () => {
     }
   };
 
-  // Notificaciones
-  const [notifyInactivity, setNotifyInactivity] = useState(true);
-  const [notifyWeeklyReport, setNotifyWeeklyReport] = useState(true);
+  // Guardar datos comerciales editables
+  const handleSaveBusinessData = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!tenant?.id) return;
 
-  // Funcionalidades opcionales (Feature flags: channels, staff)
-  const [featureChannels, setFeatureChannels] = useState<boolean>(() => {
-    const saved = localStorage.getItem(`toque_flag_channels_${tenant?.id || 'default'}`);
-    return saved !== null ? saved === 'true' : (tenant?.features?.channels ?? true);
-  });
-  const [featureStaff, setFeatureStaff] = useState<boolean>(() => {
-    const saved = localStorage.getItem(`toque_flag_staff_${tenant?.id || 'default'}`);
-    return saved !== null ? saved === 'true' : (tenant?.features?.staff ?? true);
-  });
-
-  const handleToggleFeature = (feature: 'channels' | 'staff', value: boolean) => {
-    if (feature === 'channels') {
-      setFeatureChannels(value);
-      localStorage.setItem(`toque_flag_channels_${tenant?.id || 'default'}`, String(value));
-      if (tenant) {
-        if (!tenant.features) tenant.features = {};
-        tenant.features.channels = value;
+    if (bizReviewUrl.trim()) {
+      const val = validateGoogleReviewUrl(bizReviewUrl.trim());
+      if (!val.isValid) {
+        toastError('Enlace inválido', val.error || 'Verificá el enlace de Google Maps');
+        return;
       }
-      success(value ? 'Módulo Canales activado' : 'Módulo Canales desactivado');
-    } else {
-      setFeatureStaff(value);
-      localStorage.setItem(`toque_flag_staff_${tenant?.id || 'default'}`, String(value));
-      if (tenant) {
-        if (!tenant.features) tenant.features = {};
-        tenant.features.staff = value;
-      }
-      success(value ? 'Módulo Equipo activado' : 'Módulo Equipo desactivado');
     }
-    // Disparar evento para actualizar barra de navegación
-    window.dispatchEvent(new Event('storage'));
+
+    setIsSavingBiz(true);
+    try {
+      const patch = {
+        name: bizName.trim(),
+        category: bizCategory.trim(),
+        phone: bizPhone.trim(),
+        city: bizCity.trim(),
+        address: bizAddress.trim(),
+        reviewUrl: bizReviewUrl.trim(),
+      };
+      await api.updateTenant(tenant.id, patch);
+      updateTenantState(patch);
+      success('Datos guardados', 'Los datos comerciales se actualizaron con éxito.');
+    } catch (err) {
+      toastError('Error al guardar', err instanceof Error ? err.message : 'Error inesperado');
+    } finally {
+      setIsSavingBiz(false);
+    }
   };
 
-  // Paleta de acentos sugeridos con contraste garantizado
+  // Paleta de colores sugeridos
   const accentColors = [
     { name: 'Ultramar Toque', hex: '#3A3FE0' },
     { name: 'Zafiro Profundo', hex: '#1E3A8A' },
@@ -116,7 +144,19 @@ export const AccountView: React.FC = () => {
     { name: 'Índigo Real', hex: '#4338CA' },
     { name: 'Vino Tinto', hex: '#881337' },
     { name: 'Carbón', hex: '#1E293B' },
+    { name: 'Ámbar Cálido', hex: '#D97706' },
   ];
+
+  const handleApplyHex = (val: string) => {
+    setHexInput(val);
+    if (/^#([0-9A-F]{3}){1,2}$/i.test(val)) {
+      setBrandColor(val);
+      if (tenant?.id) {
+        api.updateTenant(tenant.id, { brandColor: val }).catch(() => {});
+        updateTenantState({ brandColor: val });
+      }
+    }
+  };
 
   const handleExportData = async () => {
     try {
@@ -128,7 +168,7 @@ export const AccountView: React.FC = () => {
         total_carteles: carteles.length,
         carteles: carteles.map((s) => ({
           nombre: s.name,
-          codigo: s.shortCode,
+          codigo: s.code || s.shortCode,
           ubicacion: s.locationDescription,
           url_google: s.targetUrl,
           ultimo_escaneo: s.lastScannedAt,
@@ -139,172 +179,320 @@ export const AccountView: React.FC = () => {
       const dataStr = 'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(exportPayload, null, 2));
       const downloadAnchor = document.createElement('a');
       downloadAnchor.setAttribute('href', dataStr);
-      downloadAnchor.setAttribute('download', `datos-toque-${tenant?.slug || 'negocio'}.json`);
+      downloadAnchor.setAttribute('download', `datos-toque-${tenant?.slug || 'cuenta'}.json`);
       document.body.appendChild(downloadAnchor);
       downloadAnchor.click();
       downloadAnchor.remove();
 
-      success('Datos exportados', 'Se descargó el archivo JSON con tu historial de carteles y métricas.');
+      success('Datos exportados', 'Se descargó el archivo JSON con tu historial.');
     } catch {
       // fallback
     }
   };
 
   return (
-    <div className="max-w-3xl mx-auto space-y-6 text-white">
+    <div className="max-w-3xl mx-auto space-y-6 text-white pb-12">
       {/* Encabezado */}
       <div>
         <h1 className="text-2xl sm:text-3xl font-headline font-bold text-white tracking-tight">
           Mi Cuenta y Preferencias
         </h1>
         <p className="text-xs text-white/70 mt-0.5">
-          Configuración visual, datos de tu comercio y asistencia técnica.
+          Configuración visual, datos de contacto comercial y personalización de marca.
         </p>
       </div>
 
-      {/* 1. MARCA DEL FABRICANTE Y SOPORTE DIRECTO (Verificado y Vinculado) */}
-      <Card className="p-6 border-white/20 bg-white/10 backdrop-blur-md space-y-4">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <div className="p-2.5 rounded-2xl bg-white/15 border border-white/20">
-              <BrandLogo
-                name={assignedMfg.name}
-                size="md"
-                showToqueBadge={false}
-              />
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <span className="text-[11px] font-semibold uppercase tracking-wider text-emerald-300 block">
-                  Fabricante oficial asignado
-                </span>
-                <span className="text-[10px] font-mono bg-emerald-500/20 text-emerald-300 px-2 py-0.5 rounded-full">
-                  ✓ Verificado Toque
-                </span>
-              </div>
-              <h3 className="font-headline text-base font-bold text-white mt-0.5">
-                {assignedMfg.name}
-              </h3>
-              <p className="text-xs text-white/70 mt-0.5">
-                Ubicación: {assignedMfg.city} • Garantía física de acrílico y chip NTAG215.
-              </p>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2 flex-wrap">
-            <a
-              href={`https://wa.me/${assignedMfg.phone.replace(/[^0-9]/g, '')}?text=Hola,%20necesito%20soporte%20sobre%20mis%20carteles%20de%20Toque%20para%20${encodeURIComponent(tenant?.name || 'mi negocio')}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-medium text-xs transition shadow-xs cursor-pointer shrink-0"
-            >
-              <MessageSquare className="w-4 h-4" />
-              <span>WhatsApp de Soporte</span>
-            </a>
-
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={() => setIsEditingMfg(!isEditingMfg)}
-              icon={<Edit2 className="w-3.5 h-3.5" />}
-              className="text-xs"
-            >
-              {isEditingMfg ? 'Cerrar' : 'Vincular otro'}
-            </Button>
-          </div>
-        </div>
-
-        {/* Editor / Vinculador de Fabricante */}
-        {isEditingMfg && (
-          <div className="p-4 rounded-xl bg-black/30 border border-white/15 space-y-3 pt-3 animate-in fade-in">
-            <h4 className="text-xs font-bold text-white">
-              Vincular o cambiar mi fabricante de carteles
-            </h4>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
-              <div>
-                <label className="block text-white/70 mb-1">Nombre o Taller</label>
-                <input
-                  type="text"
-                  value={assignedMfg.name}
-                  onChange={(e) => setAssignedMfg({ ...assignedMfg, name: e.target.value })}
-                  className="w-full px-3 py-2 rounded-lg bg-black/40 border border-white/20 text-white text-xs"
+      {/* 1. SECCIÓN FABRICANTE ASIGNADO (Solo visible si es negocio) O PERFIL DE TALLER (Si es fabricante) */}
+      {!isManufacturer ? (
+        <Card className="p-6 border-white/20 bg-white/10 backdrop-blur-md space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <div className="p-2.5 rounded-2xl bg-white/15 border border-white/20">
+                <BrandLogo
+                  name={assignedMfg.name}
+                  size="md"
+                  showToqueBadge={false}
                 />
               </div>
               <div>
-                <label className="block text-white/70 mb-1">WhatsApp oficial</label>
-                <input
-                  type="text"
-                  value={assignedMfg.phone}
-                  onChange={(e) => setAssignedMfg({ ...assignedMfg, phone: e.target.value })}
-                  className="w-full px-3 py-2 rounded-lg bg-black/40 border border-white/20 text-white text-xs"
-                />
+                <div className="flex items-center gap-2">
+                  <span className="text-[11px] font-semibold uppercase tracking-wider text-emerald-300 block">
+                    Fabricante oficial asignado
+                  </span>
+                  <span className="text-[10px] font-mono bg-emerald-500/20 text-emerald-300 px-2 py-0.5 rounded-full">
+                    ✓ Verificado Toque
+                  </span>
+                </div>
+                <h3 className="font-headline text-base font-bold text-white mt-0.5">
+                  {assignedMfg.name}
+                </h3>
+                <p className="text-xs text-white/70 mt-0.5">
+                  Ubicación: {assignedMfg.city} • Garantía física de acrílico y chip NTAG215.
+                </p>
               </div>
             </div>
-            <div className="flex justify-end gap-2 pt-1">
-              <Button
-                variant="primary"
-                size="sm"
-                onClick={() => {
-                  setIsEditingMfg(false);
-                  success('Fabricante actualizado', 'Se guardaron los datos del fabricante para tu negocio.');
-                }}
+
+            <div className="flex items-center gap-2 flex-wrap">
+              <a
+                href={`https://wa.me/${assignedMfg.phone.replace(/[^0-9]/g, '')}?text=Hola,%20necesito%20soporte%20sobre%20mis%20carteles%20de%20Toque%20para%20${encodeURIComponent(tenant?.name || 'mi negocio')}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-medium text-xs transition shadow-xs cursor-pointer shrink-0"
               >
-                Guardar fabricante
+                <MessageSquare className="w-4 h-4" />
+                <span>WhatsApp de Soporte</span>
+              </a>
+
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => setIsEditingMfg(!isEditingMfg)}
+                icon={<Edit2 className="w-3.5 h-3.5" />}
+                className="text-xs"
+              >
+                {isEditingMfg ? 'Cerrar' : 'Vincular otro'}
               </Button>
             </div>
           </div>
-        )}
+
+          {isEditingMfg && (
+            <div className="p-4 rounded-xl bg-black/30 border border-white/15 space-y-3 pt-3 animate-in fade-in">
+              <h4 className="text-xs font-bold text-white">
+                Vincular o cambiar fabricante de carteles
+              </h4>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                <div>
+                  <label className="block text-white/70 mb-1">Nombre o Taller</label>
+                  <input
+                    type="text"
+                    value={assignedMfg.name}
+                    onChange={(e) => setAssignedMfg({ ...assignedMfg, name: e.target.value })}
+                    className="w-full px-3 py-2 rounded-lg bg-black/40 border border-white/20 text-white text-xs"
+                  />
+                </div>
+                <div>
+                  <label className="block text-white/70 mb-1">WhatsApp oficial</label>
+                  <input
+                    type="text"
+                    value={assignedMfg.phone}
+                    onChange={(e) => setAssignedMfg({ ...assignedMfg, phone: e.target.value })}
+                    className="w-full px-3 py-2 rounded-lg bg-black/40 border border-white/20 text-white text-xs"
+                  />
+                </div>
+              </div>
+              <div className="flex justify-end gap-2 pt-1">
+                <Button
+                  variant="primary"
+                  size="sm"
+                  onClick={() => {
+                    setIsEditingMfg(false);
+                    success('Fabricante actualizado', 'Se guardaron los datos del fabricante asignado.');
+                  }}
+                >
+                  Guardar fabricante
+                </Button>
+              </div>
+            </div>
+          )}
+        </Card>
+      ) : (
+        <Card className="p-6 border-white/20 bg-white/10 backdrop-blur-md space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <div className="p-2.5 rounded-2xl bg-blue-500/20 border border-blue-400/30 text-blue-300">
+                <Factory className="w-6 h-6" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="text-[11px] font-semibold uppercase tracking-wider text-blue-300 block">
+                    Tu Cuenta de Fabricante / Taller Productor
+                  </span>
+                  <span className="text-[10px] font-mono bg-blue-500/20 text-blue-300 px-2 py-0.5 rounded-full">
+                    {tenant?.accountCode || 'RT-01'}
+                  </span>
+                </div>
+                <h3 className="font-headline text-base font-bold text-white mt-0.5">
+                  {tenant?.name || 'Taller de Cartelería'}
+                </h3>
+                <p className="text-xs text-white/70 mt-0.5">
+                  Sos fabricante homologado en Toque. Comercializás carteles con chips NFC y QR para tus comercios clientes.
+                </p>
+              </div>
+            </div>
+
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={() => navigate('/fabricante')}
+              icon={<Factory className="w-4 h-4 text-slate-900" />}
+              className="bg-white text-slate-900 hover:bg-slate-100 font-semibold text-xs"
+            >
+              Ir a Panel de Fabricante
+            </Button>
+          </div>
+        </Card>
+      )}
+
+      {/* 2. DATOS DEL COMERCIO EDITABLES Y GUARDABLES (Punto 10 y 13) */}
+      <Card className="p-6 space-y-5 border-white/20 bg-white/10 backdrop-blur-md">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Building className="w-5 h-5 text-cyan-300" />
+            <h3 className="font-headline text-base font-bold text-white">
+              {isManufacturer ? 'Datos del Taller / Fábrica' : 'Datos del Comercio'}
+            </h3>
+          </div>
+          <span className="text-[11px] font-mono text-white/50">
+            Código: {tenant?.accountCode || 'S/C'}
+          </span>
+        </div>
+
+        <form onSubmit={handleSaveBusinessData} className="space-y-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-medium text-white/80 mb-1">
+                Nombre comercial *
+              </label>
+              <input
+                type="text"
+                required
+                value={bizName}
+                onChange={(e) => setBizName(e.target.value)}
+                placeholder="Ej. Vanish Helados"
+                className="w-full px-3 py-2 rounded-xl bg-black/30 border border-white/20 text-white text-xs focus:outline-none focus:ring-1 focus:ring-cyan-400"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-white/80 mb-1">
+                Rubro o Categoría
+              </label>
+              <input
+                type="text"
+                value={bizCategory}
+                onChange={(e) => setBizCategory(e.target.value)}
+                placeholder="Ej. Heladería Artesanal, Cafetería, Bar"
+                className="w-full px-3 py-2 rounded-xl bg-black/30 border border-white/20 text-white text-xs focus:outline-none focus:ring-1 focus:ring-cyan-400"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-white/80 mb-1">
+                Teléfono / WhatsApp de contacto
+              </label>
+              <input
+                type="text"
+                value={bizPhone}
+                onChange={(e) => setBizPhone(e.target.value)}
+                placeholder="+54 9 11 5263-8900"
+                className="w-full px-3 py-2 rounded-xl bg-black/30 border border-white/20 text-white text-xs focus:outline-none focus:ring-1 focus:ring-cyan-400"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-white/80 mb-1">
+                Ciudad y Provincia
+              </label>
+              <input
+                type="text"
+                value={bizCity}
+                onChange={(e) => setBizCity(e.target.value)}
+                placeholder="Buenos Aires, Argentina"
+                className="w-full px-3 py-2 rounded-xl bg-black/30 border border-white/20 text-white text-xs focus:outline-none focus:ring-1 focus:ring-cyan-400"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium text-white/80 mb-1">
+              Dirección física del local
+            </label>
+            <input
+              type="text"
+              value={bizAddress}
+              onChange={(e) => setBizAddress(e.target.value)}
+              placeholder="Av. Corrientes 1540, CABA"
+              className="w-full px-3 py-2 rounded-xl bg-black/30 border border-white/20 text-white text-xs focus:outline-none focus:ring-1 focus:ring-cyan-400"
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium text-white/80 mb-1">
+              Enlace directo de reseñas en Google Maps
+            </label>
+            <input
+              type="url"
+              value={bizReviewUrl}
+              onChange={(e) => setBizReviewUrl(e.target.value)}
+              placeholder="https://search.google.com/local/writereview?placeid=..."
+              className="w-full px-3 py-2 rounded-xl bg-black/30 border border-white/20 text-white text-xs focus:outline-none focus:ring-1 focus:ring-cyan-400 font-mono text-[11px]"
+            />
+            <p className="text-[11px] text-white/50 mt-1">
+              URL donde los carteles redirigen a los comensales cuando apoyan el móvil en la mesa.
+            </p>
+          </div>
+
+          <div className="pt-2 flex justify-end">
+            <Button
+              type="submit"
+              variant="primary"
+              isLoading={isSavingBiz}
+              icon={<Save className="w-4 h-4 text-slate-900" />}
+              className="bg-white text-slate-900 hover:bg-slate-100 font-semibold"
+            >
+              Guardar datos del comercio
+            </Button>
+          </div>
+        </form>
       </Card>
 
-      {/* 2. APARIENCIA Y VISUALIZACIÓN */}
-      <Card className="p-6 space-y-6">
-        <h3 className="font-display text-small font-semibold text-[var(--text-main)] flex items-center gap-2">
-          <Sun className="w-4 h-4 text-[var(--text-muted)]" />
-          <span>Apariencia y Accesibilidad</span>
+      {/* 3. COLOR DE ACENTO DE MARCA CON PICKER Y HEX (Puntos 14) */}
+      <Card className="p-6 space-y-6 border-white/20 bg-white/10 backdrop-blur-md">
+        <h3 className="font-headline text-base font-bold text-white flex items-center gap-2">
+          <Sun className="w-4 h-4 text-amber-300" />
+          <span>Apariencia y Color de Acento de Marca</span>
         </h3>
 
         {/* Modo Claro / Oscuro / Sistema */}
         <div className="flex items-center justify-between gap-4">
           <div>
-            <label className="text-small font-medium text-[var(--text-main)] block">
+            <label className="text-small font-medium text-white block">
               Tema de color
             </label>
-            <span className="text-micro text-[var(--text-muted)]">
+            <span className="text-micro text-white/60">
               Claro, oscuro o sincronizado con tu sistema operativo.
             </span>
           </div>
           <ThemeToggle />
         </div>
 
-        {/* Color de Acento Personalizado */}
-        <div className="pt-4 border-t border-[var(--border-subtle)] space-y-3">
+        {/* Selector de color con paleta y campo HEX */}
+        <div className="pt-4 border-t border-white/10 space-y-3">
           <div className="flex items-center justify-between">
             <div>
-              <label className="text-small font-medium text-[var(--text-main)] block">
+              <label className="text-small font-medium text-white block">
                 Color de acento de marca
               </label>
-              <span className="text-micro text-[var(--text-muted)]">
-                Elegí el tono principal de la interfaz con contraste validado.
+              <span className="text-micro text-white/60">
+                Elegí una muestra o escribí el código HEX exacto de tu marca (#RRGGBB).
               </span>
             </div>
 
-            <span className={`text-micro font-medium px-2 py-0.5 rounded-full ${contrastInfo.passesAA ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300' : 'bg-rose-50 text-rose-700'}`}>
+            <span className={`text-micro font-medium px-2 py-0.5 rounded-full ${contrastInfo.passesAA ? 'bg-emerald-500/20 text-emerald-300' : 'bg-rose-500/20 text-rose-300'}`}>
               {contrastInfo.passesAA ? 'Contraste AA Seguro' : 'Ajustar contraste'}
             </span>
           </div>
 
+          {/* Paleta rápida */}
           <div className="flex items-center gap-2.5 flex-wrap">
             {accentColors.map((color) => (
               <button
                 key={color.hex}
                 type="button"
-                onClick={() => {
-                  setBrandColor(color.hex);
-                  success('Color de marca actualizado', color.name);
-                }}
+                onClick={() => handleApplyHex(color.hex)}
                 className={`w-9 h-9 rounded-xl flex items-center justify-center transition cursor-pointer shadow-xs ${
                   brandColor.toLowerCase() === color.hex.toLowerCase()
-                    ? 'ring-2 ring-offset-2 ring-[var(--brand)] scale-105'
+                    ? 'ring-2 ring-offset-2 ring-white scale-105'
                     : 'opacity-85 hover:opacity-100'
                 }`}
                 style={{ backgroundColor: color.hex }}
@@ -316,184 +504,58 @@ export const AccountView: React.FC = () => {
               </button>
             ))}
           </div>
-        </div>
 
-        {/* Densidad de Pantalla */}
-        <div className="pt-4 border-t border-[var(--border-subtle)] flex items-center justify-between gap-4">
-          <div>
-            <label className="text-small font-medium text-[var(--text-main)] block">
-              Densidad de pantalla
-            </label>
-            <span className="text-micro text-[var(--text-muted)]">
-              Ajusta el espaciado para ver más elementos a la vez.
-            </span>
+          {/* Entrada de Color HEX y Color Picker Nativo Integrado */}
+          <div className="flex items-center gap-3 pt-2">
+            <div className="relative flex items-center gap-2 px-3 py-2 rounded-xl bg-black/40 border border-white/20">
+              <input
+                type="color"
+                value={brandColor}
+                onChange={(e) => handleApplyHex(e.target.value)}
+                className="w-7 h-7 rounded-lg cursor-pointer bg-transparent border-0 p-0"
+                title="Seleccionar en la paleta"
+              />
+              <span className="text-xs text-white/60 font-mono">HEX:</span>
+              <input
+                type="text"
+                value={hexInput}
+                onChange={(e) => handleApplyHex(e.target.value)}
+                placeholder="#3A3FE0"
+                className="w-24 text-xs font-mono font-bold uppercase text-white bg-transparent focus:outline-none"
+              />
+            </div>
+            <div
+              className="h-9 w-9 rounded-xl border border-white/20 shrink-0"
+              style={{ backgroundColor: brandColor }}
+              title="Vista previa del acento"
+            />
           </div>
-          <SegmentedControl
-            value={density}
-            onChange={(d) => {
-              setDensity(d);
-              success('Preferencia de densidad actualizada');
-            }}
-            size="sm"
-            options={[
-              { value: 'comfortable', label: 'Cómoda' },
-              { value: 'compact', label: 'Compacta' },
-            ]}
-          />
-        </div>
-
-        {/* Tamaño de Texto */}
-        <div className="pt-4 border-t border-[var(--border-subtle)] flex items-center justify-between gap-4">
-          <div>
-            <label className="text-small font-medium text-[var(--text-main)] block">
-              Tamaño de tipografía
-            </label>
-            <span className="text-micro text-[var(--text-muted)]">
-              Escala de lectura general de la interfaz.
-            </span>
-          </div>
-          <SegmentedControl
-            value={textSize}
-            onChange={(s) => {
-              setTextSize(s);
-              document.documentElement.style.fontSize = s === 'large' ? '18px' : '16px';
-              success('Tamaño de texto actualizado');
-            }}
-            size="sm"
-            options={[
-              { value: 'normal', label: 'Normal' },
-              { value: 'large', label: 'Grande' },
-            ]}
-          />
         </div>
       </Card>
 
-      {/* 3. PREFERENCIAS DE NOTIFICACIONES */}
-      <Card className="p-6 space-y-4">
-        <h3 className="font-display text-small font-semibold text-[var(--text-main)] flex items-center gap-2">
-          <Bell className="w-4 h-4 text-[var(--text-muted)]" />
-          <span>Alertas y Notificaciones</span>
-        </h3>
-
-        <div className="space-y-3">
-          <label className="flex items-center justify-between p-3 rounded-xl border border-[var(--border-subtle)] cursor-pointer">
-            <div>
-              <p className="font-medium text-small text-[var(--text-main)]">
-                Aviso de carteles silenciosos
-              </p>
-              <p className="text-micro text-[var(--text-muted)]">
-                Te avisamos si un cartel pasa más de 14 días sin recibir ningún toque.
-              </p>
-            </div>
-            <input
-              type="checkbox"
-              checked={notifyInactivity}
-              onChange={(e) => setNotifyInactivity(e.target.checked)}
-              className="w-4 h-4 text-[var(--brand)] rounded focus:ring-[var(--brand)] cursor-pointer"
-            />
-          </label>
-
-          <label className="flex items-center justify-between p-3 rounded-xl border border-[var(--border-subtle)] cursor-pointer">
-            <div>
-              <p className="font-medium text-small text-[var(--text-main)]">
-                Resumen semanal condensado
-              </p>
-              <p className="text-micro text-[var(--text-muted)]">
-                Reporte de 3 líneas con una sugerencia accionable cada semana.
-              </p>
-            </div>
-            <input
-              type="checkbox"
-              checked={notifyWeeklyReport}
-              onChange={(e) => setNotifyWeeklyReport(e.target.checked)}
-              className="w-4 h-4 text-[var(--brand)] rounded focus:ring-[var(--brand)] cursor-pointer"
-            />
-          </label>
-        </div>
-      </Card>
-
-      {/* 4. FUNCIONALIDADES AVANZADAS (FEATURE FLAGS) */}
-      <Card className="p-6 space-y-4">
-        <h3 className="font-display text-small font-semibold text-[var(--text-main)] flex items-center gap-2">
-          <Sliders className="w-4 h-4 text-[var(--text-muted)]" />
-          <span>Módulos y Funcionalidades Opcionales (Feature Flags)</span>
-        </h3>
-
-        <div className="space-y-3">
-          <label className="flex items-center justify-between p-3 rounded-xl border border-[var(--border-subtle)] cursor-pointer">
-            <div>
-              <p className="font-medium text-small text-[var(--text-main)]">
-                Canales de escaneo (WhatsApp, Ticket, Instagram, Mesa)
-              </p>
-              <p className="text-micro text-[var(--text-muted)]">
-                Permite medir y comparar qué canal genera más reseñas en Google.
-              </p>
-            </div>
-            <input
-              type="checkbox"
-              checked={featureChannels}
-              onChange={(e) => handleToggleFeature('channels', e.target.checked)}
-              className="w-4 h-4 text-[var(--brand)] rounded focus:ring-[var(--brand)] cursor-pointer"
-            />
-          </label>
-
-          <label className="flex items-center justify-between p-3 rounded-xl border border-[var(--border-subtle)] cursor-pointer">
-            <div>
-              <p className="font-medium text-small text-[var(--text-main)]">
-                Equipo y reto del mes (Staff)
-              </p>
-              <p className="text-micro text-[var(--text-muted)]">
-                QR y enlace por empleado con ranking amigable para incentivar al equipo.
-              </p>
-            </div>
-            <input
-              type="checkbox"
-              checked={featureStaff}
-              onChange={(e) => handleToggleFeature('staff', e.target.checked)}
-              className="w-4 h-4 text-[var(--brand)] rounded focus:ring-[var(--brand)] cursor-pointer"
-            />
-          </label>
-        </div>
-      </Card>
-
-      {/* 5. DATOS DEL COMERCIO Y ASISTENTE */}
-      <Card className="p-6 space-y-4">
+      {/* 4. EXPORTAR DATOS Y ACCIONES */}
+      <Card className="p-6 space-y-4 border-white/20 bg-white/10 backdrop-blur-md">
         <div className="flex items-center justify-between">
-          <h3 className="font-display text-small font-semibold text-[var(--text-main)] flex items-center gap-2">
-            <Building className="w-4 h-4 text-[var(--text-muted)]" />
-            <span>Datos del Comercio</span>
+          <h3 className="font-headline text-base font-bold text-white flex items-center gap-2">
+            <Download className="w-4 h-4 text-cyan-300" />
+            <span>Copia de Seguridad y Exportación</span>
           </h3>
 
           <Button
             variant="ghost"
             size="sm"
             onClick={() => setIsOnboardingOpen(true)}
-            icon={<Sparkles className="w-3.5 h-3.5 text-[var(--estrella)]" />}
+            icon={<Sparkles className="w-3.5 h-3.5 text-amber-300" />}
           >
             Repasar bienvenida
           </Button>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-small">
-          <div>
-            <span className="text-micro text-[var(--text-muted)] block">Nombre comercial</span>
-            <span className="font-medium text-[var(--text-main)]">{tenant?.name}</span>
-          </div>
-          <div>
-            <span className="text-micro text-[var(--text-muted)] block">Correo de contacto</span>
-            <span className="font-medium text-[var(--text-main)]">{tenant?.contactEmail}</span>
-          </div>
-          <div>
-            <span className="text-micro text-[var(--text-muted)] block">Identificador de cuenta</span>
-            <span className="font-mono text-micro text-[var(--text-muted)]">{tenant?.id}</span>
-          </div>
-          <div>
-            <span className="text-micro text-[var(--text-muted)] block">Estado del servicio</span>
-            <span className="font-medium text-[var(--menta)]">Activo y con datos</span>
-          </div>
-        </div>
+        <p className="text-xs text-white/70">
+          Podés descargar una copia completa de tus carteles, identificadores únicos y métricas de escaneos en formato JSON estándar.
+        </p>
 
-        <div className="pt-3 border-t border-[var(--border-subtle)] flex items-center justify-between flex-wrap gap-2">
+        <div className="pt-2 flex items-center justify-between flex-wrap gap-2">
           <Button
             variant="secondary"
             size="sm"

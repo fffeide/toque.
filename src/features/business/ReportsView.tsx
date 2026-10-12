@@ -139,18 +139,8 @@ export const ReportsView: React.FC = () => {
             Reportes del Negocio
           </h1>
           <p className="text-xs text-white/70 mt-0.5">
-            Resumen semanal condensado y rendimiento histórico mensual.
+            Resumen semanal condensado y rendimiento histórico mensual. Los reportes se consultan directamente en esta pantalla.
           </p>
-        </div>
-
-        <div className="flex items-center gap-2.5">
-          <Button
-            variant="secondary"
-            onClick={() => setIsConfigOpen(true)}
-            icon={<Settings className="w-4 h-4 text-white" />}
-          >
-            Configurar envíos
-          </Button>
         </div>
       </div>
 
@@ -345,117 +335,7 @@ export const ReportsView: React.FC = () => {
         </Dialog>
       )}
 
-      {/* MODAL 2: CONFIGURACIÓN DE ENVÍOS */}
-      <Dialog
-        isOpen={isConfigOpen}
-        onClose={() => setIsConfigOpen(false)}
-        title="Configurar entrega del reporte"
-        description="Elegí cuándo y cómo querés que te llegue el resumen a tu celular o casilla."
-        size="md"
-      >
-        <form onSubmit={handleSaveConfig} className="space-y-4 pt-2">
-          {/* Día de la semana */}
-          <div>
-            <label className="block text-small font-medium text-[var(--text-main)] mb-1.5">
-              Día de entrega
-            </label>
-            <div className="grid grid-cols-3 gap-2">
-              {[
-                { id: 'monday', label: 'Lunes' },
-                { id: 'friday', label: 'Viernes' },
-                { id: 'sunday', label: 'Domingo' },
-              ].map((d) => (
-                <button
-                  key={d.id}
-                  type="button"
-                  onClick={() => setDeliveryDay(d.id as any)}
-                  className={`py-2 px-3 rounded-xl border text-small font-medium transition cursor-pointer ${
-                    deliveryDay === d.id
-                      ? 'border-[var(--brand)] bg-[var(--brand)]/10 text-[var(--text-main)] font-semibold'
-                      : 'border-[var(--border-subtle)] text-[var(--text-muted)] hover:bg-black/5 dark:hover:bg-white/5'
-                  }`}
-                >
-                  {d.label}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Horario */}
-          <Input
-            label="Hora de entrega"
-            type="time"
-            value={deliveryHour}
-            onChange={(e) => setDeliveryHour(e.target.value)}
-          />
-
-          {/* Canal de entrega */}
-          <div>
-            <label className="block text-small font-medium text-[var(--text-main)] mb-1.5">
-              Medio de notificación
-            </label>
-            <div className="grid grid-cols-3 gap-2">
-              {[
-                { id: 'email', label: 'Email', icon: Mail },
-                { id: 'whatsapp', label: 'WhatsApp', icon: MessageSquare },
-                { id: 'both', label: 'Ambos', icon: Smartphone },
-              ].map((c) => {
-                const Icon = c.icon;
-                return (
-                  <button
-                    key={c.id}
-                    type="button"
-                    onClick={() => setChannel(c.id as any)}
-                    className={`py-2 px-3 rounded-xl border text-small font-medium flex items-center justify-center gap-1.5 transition cursor-pointer ${
-                      channel === c.id
-                        ? 'border-[var(--brand)] bg-[var(--brand)]/10 text-[var(--text-main)] font-semibold'
-                        : 'border-[var(--border-subtle)] text-[var(--text-muted)] hover:bg-black/5 dark:hover:bg-white/5'
-                    }`}
-                  >
-                    <Icon className="w-3.5 h-3.5" />
-                    <span>{c.label}</span>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          {(channel === 'email' || channel === 'both') && (
-            <Input
-              label="Email de entrega"
-              type="email"
-              value={emailRecipient}
-              onChange={(e) => setEmailRecipient(e.target.value)}
-              placeholder="dueño@minegocio.ar"
-              required
-            />
-          )}
-
-          {(channel === 'whatsapp' || channel === 'both') && (
-            <Input
-              label="WhatsApp de entrega"
-              type="tel"
-              value={whatsappPhone}
-              onChange={(e) => setWhatsappPhone(e.target.value)}
-              placeholder="+54 9 11 4455-8899"
-              required
-            />
-          )}
-
-          <div className="pt-3 border-t border-[var(--border-subtle)] flex items-center justify-end gap-3">
-            <Button type="button" variant="ghost" onClick={() => setIsConfigOpen(false)}>
-              Cancelar
-            </Button>
-            <Button
-              type="submit"
-              variant="primary"
-              isLoading={isSavingConfig}
-            >
-              Guardar configuración
-            </Button>
-          </div>
-        </form>
-      </Dialog>
+      {/* MODAL DE VISTA PREVIA IMPRIMIBLE (PDF) CERRADO */}
     </div>
   );
 };

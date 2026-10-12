@@ -44,6 +44,7 @@ import { ManufacturerBillingView } from './ManufacturerBillingView';
 import { ManufacturerStaffView } from './ManufacturerStaffView';
 import { ManufacturerHelpView } from './ManufacturerHelpView';
 import { ManufacturerOnboardingWizard } from './ManufacturerOnboardingWizard';
+import { ManufacturerNetworkSection } from './ManufacturerNetworkSection';
 import { ReplaceCartelSheet } from '../business/ReplaceCartelSheet';
 
 import {
@@ -74,11 +75,15 @@ import {
   TrendingUp,
   Radio,
   Layers,
+  Globe,
+  MapPin,
+  Tag,
 } from 'lucide-react';
 
 type ManufacturerTab =
   | 'tablero'
   | 'negocios'
+  | 'red_fabricantes'
   | 'kit_impresion'
   | 'marca'
   | 'plan_facturacion'
@@ -115,8 +120,15 @@ export const ManufacturerDashboard: React.FC = () => {
   const [brandLogoInput, setBrandLogoInput] = useState(tenant?.brandLogo || '');
   const [supportPhoneInput, setSupportPhoneInput] = useState('+54 9 11 4455-8899');
   const [supportEmailInput, setSupportEmailInput] = useState('soporte@carteleriademo.com.ar');
-  const [customDomainInput, setCustomDomainInput] = useState('carteles.carteleriademo.com.ar');
   const [isSavingBrand, setIsSavingBrand] = useState(false);
+
+  // Disparar onboarding paso a paso si llega con welcome=1
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('welcome') === '1') {
+      setIsOnboardingOpen(true);
+    }
+  }, []);
 
   // 1. Negocios clientes
   const {
@@ -296,6 +308,7 @@ export const ManufacturerDashboard: React.FC = () => {
         {[
           { id: 'tablero', label: 'Tablero', icon: Store },
           { id: 'negocios', label: `Negocios (${businesses?.length || 12})`, icon: Factory },
+          { id: 'red_fabricantes', label: 'Red de Fabricantes', icon: Globe },
           { id: 'kit_impresion', label: 'Kit de impresión', icon: Printer },
           { id: 'marca', label: 'Marca blanca', icon: Palette },
           { id: 'plan_facturacion', label: 'Plan y cupo', icon: CreditCard },
@@ -749,6 +762,19 @@ export const ManufacturerDashboard: React.FC = () => {
             </div>
           )}
         </div>
+      )}
+
+      {/* ============================================================== */}
+      {/* VISTA 2.5: RED DE FABRICANTES (SUBIRSE, CATALOGO, PRODUCTOS)   */}
+      {/* ============================================================== */}
+      {activeTab === 'red_fabricantes' && (
+        <ManufacturerNetworkSection
+          tenant={tenant}
+          onUpdated={() => {
+            refetchBiz();
+            refetchCarteles();
+          }}
+        />
       )}
 
       {/* ============================================================== */}

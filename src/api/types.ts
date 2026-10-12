@@ -10,15 +10,44 @@ export interface TenantFeatures {
   staff?: boolean;
 }
 
+export type BusinessPlan = 'free' | 'pro';
+export type ManufacturerPlanType = 'taller' | 'fabrica';
+
 export interface Tenant {
   id: string;
   type: TenantType;
   name: string;
   slug: string;
+  accountCode?: string; // ej. 'VH-01' para Vanish Helados o 'RT-01' para Rexi Tecnologies
+  plan?: BusinessPlan | ManufacturerPlanType | string;
   brandColor?: string; // Formato hex, ej. #3A3FE0
   brandLogo?: string;  // URL o SVG base64
   contactEmail: string;
-  manufacturerId?: string; // Si es 'business', a qué fabricante pertenece
+  phone?: string;
+  address?: string;
+  category?: string;
+  reviewUrl?: string;
+  materials?: string[]; // Para fabricantes: acrílico, madera, metal, etc.
+  formats?: string[];   // Formatos: pirámide, placa de mostrador, base de madera, colgante, etc.
+  city?: string;
+  description?: string;
+  website?: string;
+  inNetwork?: boolean; // Si el fabricante está subido a la red de fabricantes
+  isVerified?: boolean; // Si Toque verificó su calidad y clientes
+  verifiedAt?: string;
+  verificationNotes?: string;
+  leadTime?: string; // Tiempos estimados ej. "48 a 72 hs hábiles"
+  products?: {
+    id: string;
+    name: string;
+    format: string;
+    material: string;
+    price: number;
+    description: string;
+    estimatedDays: number;
+  }[];
+  manufacturerId?: string; // Si es 'business', a qué fabricante pertenece (ej. 'TS-01' o 'RT-01')
+  assignedManufacturerName?: string;
   isDemo: boolean;
   features?: TenantFeatures;
   createdAt: string;
@@ -49,6 +78,7 @@ export interface Cartel {
   tenantId: string;
   businessId: string;
   manufacturerId?: string;
+  code?: string;      // Código único de tracking, ej: 'RT-VH-01' o 'TQ-VH-01'
   shortCode: string; // ej. 'k7m2p'
   name: string;      // ej. 'Mesa 4 - Salón Principal'
   locationDescription: string;
@@ -57,12 +87,25 @@ export interface Cartel {
   qrEnabled: boolean;
   status: CartelStatus;
   replacedByCartelId?: string;
+  replacedCartelId?: string;
+  replacementReason?: string;
   deletedAt?: string; // Para papelera de 30 días
   createdAt: string;
   updatedAt?: string;
   lastScannedAt?: string;
   scansCount?: number;
   estimatedReviewsCount?: number;
+}
+
+export interface ManufacturerReview {
+  id: string;
+  manufacturerId: string;
+  businessId: string;
+  businessName: string;
+  businessCode: string;
+  rating: number; // 1-5
+  comment: string;
+  createdAt: string;
 }
 
 export interface Token {

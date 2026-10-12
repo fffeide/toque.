@@ -37,11 +37,16 @@ import {
 } from 'lucide-react';
 import { Hero } from '../../components/Hero';
 import { CookieBanner } from './CookieBanner';
+import { HomeManufacturersSection } from './HomeManufacturersSection';
+import { useAuth } from '../../lib/authContext';
+import { useToast } from '../../components/ui/Toast';
 import { formatCurrency } from '../../lib/formatters';
 import { LEGAL_CONFIG } from '../../config/legal';
 
 export const LandingView: React.FC = () => {
   const navigate = useNavigate();
+  const { registerUser } = useAuth();
+  const { success, error: toastError } = useToast();
 
   // Estado para la Demo Interactiva del Cartel
   const [demoScans, setDemoScans] = useState(142);
@@ -58,6 +63,7 @@ export const LandingView: React.FC = () => {
 
   // Selector de período de facturación: mensual o anual (10 meses)
   const [billingPeriod, setBillingPeriod] = useState<'monthly' | 'yearly'>('monthly');
+  const [pricingTarget, setPricingTarget] = useState<'business' | 'manufacturer'>('business');
 
   // Estado para la Calculadora de Reventa del Fabricante
   const [calcPricePerBusiness, setCalcPricePerBusiness] = useState(4500);
@@ -161,10 +167,28 @@ export const LandingView: React.FC = () => {
     setBetaErrors({});
     setBetaSubmitting(true);
 
-    setTimeout(() => {
+    try {
+      const res = await registerUser({
+        name: betaForm.nombre.trim(),
+        email: betaForm.email.trim(),
+        password: 'Password123!',
+        whatsapp: betaForm.whatsapp.trim(),
+        activity: betaForm.tipo,
+        volume: betaForm.volumen,
+      });
+
+      success('¡Lugar reservado con éxito!', `Bienvenido a Toque, ${res.user.name}. Ingresando a tu panel...`);
+
+      if (betaForm.tipo === 'fabricante') {
+        navigate('/fabricante?welcome=1', { replace: true });
+      } else {
+        navigate('/resumen?welcome=1', { replace: true });
+      }
+    } catch (err) {
+      toastError('No pudimos procesar la reserva', err instanceof Error ? err.message : 'Error inesperado');
+    } finally {
       setBetaSubmitting(false);
-      setBetaSuccess(true);
-    }, 700);
+    }
   };
 
   const scrollToSection = (id: string) => {
@@ -484,6 +508,9 @@ export const LandingView: React.FC = () => {
           </div>
         </section>
 
+        {/* 3. RED NACIONAL DE FABRICANTES (#red-fabricantes) */}
+        <HomeManufacturersSection />
+
         {/* 4. PARA FABRICANTES (#fabricantes) + CALCULADORA */}
         <section id="fabricantes" className="scroll-mt-6">
           <div className="bg-white rounded-[2rem] sm:rounded-[2.5rem] border border-black/5 shadow-xs p-6 sm:p-10 md:p-14">
@@ -739,215 +766,334 @@ export const LandingView: React.FC = () => {
         {/* 7. PRECIOS (#precios) */}
         <section id="precios" className="scroll-mt-6">
           <div className="bg-white rounded-[2rem] sm:rounded-[2.5rem] border border-black/5 shadow-xs p-6 sm:p-10 md:p-14">
-            <div className="max-w-3xl mx-auto text-center mb-10">
+            <div className="max-w-3xl mx-auto text-center mb-8">
               <span className="text-xs font-semibold tracking-wider uppercase text-[rgba(30,50,90,0.8)]">
-                Tarifas en pesos argentinos (ARS)
+                Tarifas transparentes en pesos argentinos (ARS)
               </span>
               <h2 className="text-3xl sm:text-4xl md:text-5xl font-normal text-slate-900 tracking-tight font-headline mt-1 mb-3">
-                Planes claros y transparentes
+                Planes adaptados a tu actividad
               </h2>
               <p className="text-sm sm:text-base text-slate-600 mb-6">
-                Sin comisiones sorpresa. Gratis durante la etapa de beta abierta.
+                Elegí según si sos dueño de un comercio o fabricante de cartelería. Al elegir un plan te registrás en la página dedicada sin formularios escondidos debajo.
               </p>
 
+              {/* Selector de Tipo de Cliente */}
+              <div className="flex flex-wrap items-center justify-center gap-2 mb-4">
+                <button
+                  type="button"
+                  onClick={() => setPricingTarget('business')}
+                  className={`px-5 py-2.5 rounded-full text-xs font-bold transition cursor-pointer flex items-center gap-2 border ${
+                    pricingTarget === 'business'
+                      ? 'bg-[rgba(30,50,90,0.9)] text-white border-[rgba(30,50,90,0.9)] shadow-sm'
+                      : 'bg-slate-100 text-slate-700 border-slate-200 hover:bg-slate-200'
+                  }`}
+                >
+                  <Store className="w-4 h-4" />
+                  <span>Soy dueño de comercio / local</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPricingTarget('manufacturer')}
+                  className={`px-5 py-2.5 rounded-full text-xs font-bold transition cursor-pointer flex items-center gap-2 border ${
+                    pricingTarget === 'manufacturer'
+                      ? 'bg-[rgba(30,50,90,0.9)] text-white border-[rgba(30,50,90,0.9)] shadow-sm'
+                      : 'bg-slate-100 text-slate-700 border-slate-200 hover:bg-slate-200'
+                  }`}
+                >
+                  <Factory className="w-4 h-4" />
+                  <span>Soy fabricante / taller de carteles</span>
+                </button>
+              </div>
+
+              {/* Selector de Período */}
               <div className="inline-flex items-center p-1.5 rounded-full bg-slate-100 border border-slate-200">
                 <button
                   type="button"
                   onClick={() => setBillingPeriod('monthly')}
-                  className={`px-4 py-2 rounded-full text-xs font-medium transition cursor-pointer ${
+                  className={`px-4 py-1.5 rounded-full text-xs font-medium transition cursor-pointer ${
                     billingPeriod === 'monthly'
                       ? 'bg-white text-slate-900 shadow-xs'
                       : 'text-slate-600 hover:text-slate-900'
                   }`}
                 >
-                  Pago Mensual
+                  Mensual
                 </button>
                 <button
                   type="button"
                   onClick={() => setBillingPeriod('yearly')}
-                  className={`px-4 py-2 rounded-full text-xs font-medium transition flex items-center gap-1.5 cursor-pointer ${
+                  className={`px-4 py-1.5 rounded-full text-xs font-medium transition flex items-center gap-1.5 cursor-pointer ${
                     billingPeriod === 'yearly'
                       ? 'bg-white text-slate-900 shadow-xs'
                       : 'text-slate-600 hover:text-slate-900'
                   }`}
                 >
-                  <span>Pago Anual</span>
-                  <span className="text-[11px] font-bold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full">
+                  <span>Anual</span>
+                  <span className="text-[10px] font-bold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full">
                     2 meses gratis
                   </span>
                 </button>
               </div>
-              {/* Aviso de Todas las Funciones Incluidas */}
-              <div className="mt-4 mb-8 inline-flex items-center gap-2 px-4 py-2 rounded-full bg-emerald-50 border border-emerald-200 text-xs font-semibold text-emerald-800">
-                <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                <span>100% de las funciones incluidas en todos los planes. La única diferencia es la cantidad de carteles activos.</span>
-              </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-              {/* Plan Arranque */}
-              <div className="p-8 rounded-[2rem] bg-slate-50 border border-slate-200/80 flex flex-col justify-between">
-                <div>
-                  <span className="text-xs font-bold uppercase tracking-wider text-slate-500">
-                    Arranque
-                  </span>
-                  <div className="flex items-baseline gap-1 my-3">
-                    <span className="text-3xl sm:text-4xl font-normal font-mono font-headline text-slate-900 font-bold">
-                      {billingPeriod === 'monthly' ? '$11.899' : '$118.990'}
-                    </span>
-                    <span className="text-xs text-slate-500 font-mono">
-                      {billingPeriod === 'monthly' ? '/mes' : '/año'}
-                    </span>
-                  </div>
-                  <p className="text-xs text-slate-600 mb-6">
-                    Para talleres iniciales o negocios con hasta 15 carteles activos.
-                  </p>
-
-                  <ul className="space-y-3 text-xs text-slate-700 mb-6">
-                    <li className="flex items-center gap-2 font-semibold text-slate-900">
-                      <Check className="w-4 h-4 text-emerald-600 shrink-0" />
-                      <span>Hasta 15 carteles activos</span>
-                    </li>
-                    <li className="flex items-center gap-2">
-                      <Check className="w-4 h-4 text-emerald-600 shrink-0" />
-                      <span>Todas las funciones de plataforma</span>
-                    </li>
-                    <li className="flex items-center gap-2">
-                      <Check className="w-4 h-4 text-emerald-600 shrink-0" />
-                      <span>Escaneos y toques ilimitados</span>
-                    </li>
-                    <li className="flex items-center gap-2">
-                      <Check className="w-4 h-4 text-emerald-600 shrink-0" />
-                      <span>Marca blanca y kit de impresión</span>
-                    </li>
-                    <li className="flex items-center gap-2">
-                      <Check className="w-4 h-4 text-emerald-600 shrink-0" />
-                      <span>Cambio de URL en vivo sin reimprimir</span>
-                    </li>
-                  </ul>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() => scrollToSection('beta')}
-                  className="w-full py-2.5 rounded-full bg-white hover:bg-slate-100 border border-slate-200 text-slate-900 text-xs font-medium transition cursor-pointer shadow-2xs"
-                >
-                  Empezar gratis en beta
-                </button>
-              </div>
-
-              {/* Plan Taller */}
-              <div className="p-8 rounded-[2rem] bg-white border-2 border-[rgba(30,50,90,0.8)] relative flex flex-col justify-between shadow-lg">
-                <div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-xs font-bold uppercase tracking-wider text-[rgba(30,50,90,0.9)]">
-                      Taller
-                    </span>
-                    <span className="text-[10px] font-bold uppercase tracking-wider bg-[rgba(30,50,90,0.9)] text-white px-2 py-0.5 rounded-full">
-                      Más elegido
-                    </span>
-                  </div>
-                  <div className="flex items-baseline gap-1 my-3">
-                    <span className="text-3xl sm:text-4xl font-normal font-mono font-headline text-slate-900 font-bold">
-                      {billingPeriod === 'monthly' ? '$24.899' : '$248.990'}
-                    </span>
-                    <span className="text-xs text-slate-500 font-mono">
-                      {billingPeriod === 'monthly' ? '/mes' : '/año'}
-                    </span>
-                  </div>
-                  <p className="text-xs text-slate-600 mb-6">
-                    Para imprentas y talleres en crecimiento con clientes recurrentes.
-                  </p>
-
-                  <ul className="space-y-3 text-xs text-slate-700 mb-6">
-                    <li className="flex items-center gap-2 font-semibold text-slate-900">
-                      <Check className="w-4 h-4 text-emerald-600 shrink-0" />
-                      <span>Hasta 50 carteles activos</span>
-                    </li>
-                    <li className="flex items-center gap-2">
-                      <Check className="w-4 h-4 text-emerald-600 shrink-0" />
-                      <span>Todas las funciones desbloqueadas</span>
-                    </li>
-                    <li className="flex items-center gap-2">
-                      <Check className="w-4 h-4 text-emerald-600 shrink-0" />
-                      <span>Marca blanca y CSV para chips NFC</span>
-                    </li>
-                    <li className="flex items-center gap-2">
-                      <Check className="w-4 h-4 text-emerald-600 shrink-0" />
-                      <span>Alertas de inactividad automáticas</span>
-                    </li>
-                    <li className="flex items-center gap-2">
-                      <Check className="w-4 h-4 text-emerald-600 shrink-0" />
-                      <span>Módulo equipo y reportes semanales</span>
-                    </li>
-                  </ul>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() => scrollToSection('beta')}
-                  className="w-full py-2.5 rounded-full bg-[rgba(30,50,90,0.9)] hover:bg-[rgba(30,50,90,1)] text-white text-xs font-semibold shadow-md transition cursor-pointer"
-                >
-                  Elegir Taller (Beta gratuita)
-                </button>
-              </div>
-
-              {/* Plan Fábrica */}
-              <div className="p-8 rounded-[2rem] bg-slate-50 border border-slate-200/80 flex flex-col justify-between">
-                <div>
-                  <div className="flex justify-between items-center">
+            {/* TABLA DE PLANES PARA COMERCIOS */}
+            {pricingTarget === 'business' ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 max-w-4xl mx-auto mb-8">
+                {/* Plan Gratis Negocio */}
+                <div className="p-8 rounded-[2rem] bg-slate-50 border border-slate-200/80 flex flex-col justify-between">
+                  <div>
                     <span className="text-xs font-bold uppercase tracking-wider text-slate-500">
-                      Fábrica
+                      Plan Inicial
                     </span>
-                    <span className="text-[10px] font-bold uppercase tracking-wider bg-slate-200 text-slate-800 px-2 py-0.5 rounded-full">
-                      Empresarial
-                    </span>
-                  </div>
-                  <div className="flex items-baseline gap-1 my-3">
-                    <span className="text-3xl sm:text-4xl font-normal font-mono font-headline text-slate-900 font-bold">
-                      {billingPeriod === 'monthly' ? '$44.899' : '$448.990'}
-                    </span>
-                    <span className="text-xs text-slate-500 font-mono">
-                      {billingPeriod === 'monthly' ? '/mes' : '/año'}
-                    </span>
-                  </div>
-                  <p className="text-xs text-slate-600 mb-6">
-                    Producción masiva y distribuidores con red nacional.
-                  </p>
+                    <div className="flex items-baseline gap-1 my-3">
+                      <span className="text-3xl sm:text-4xl font-normal font-mono font-headline text-slate-900 font-bold">
+                        $0
+                      </span>
+                      <span className="text-xs text-slate-500 font-mono">/mes para siempre</span>
+                    </div>
+                    <p className="text-xs text-slate-600 mb-6">
+                      Para locales que inician y quieren probar el impacto del cartel físico.
+                    </p>
 
-                  <ul className="space-y-3 text-xs text-slate-700 mb-6">
-                    <li className="flex items-center gap-2 font-semibold text-slate-900">
-                      <Check className="w-4 h-4 text-emerald-600 shrink-0" />
-                      <span>Hasta 150 carteles activos</span>
-                    </li>
-                    <li className="flex items-center gap-2">
-                      <Check className="w-4 h-4 text-emerald-600 shrink-0" />
-                      <span>Todas las funciones sin límite</span>
-                    </li>
-                    <li className="flex items-center gap-2 font-medium text-[rgba(30,50,90,0.9)]">
-                      <Check className="w-4 h-4 text-emerald-600 shrink-0" />
-                      <span>SSO Empresarial (SAML / Okta / Azure AD)</span>
-                    </li>
-                    <li className="flex items-center gap-2">
-                      <Check className="w-4 h-4 text-emerald-600 shrink-0" />
-                      <span>Importación masiva por lotes CSV</span>
-                    </li>
-                    <li className="flex items-center gap-2">
-                      <Check className="w-4 h-4 text-emerald-600 shrink-0" />
-                      <span>Soporte prioritario 24/7 vía WhatsApp</span>
-                    </li>
-                  </ul>
+                    <ul className="space-y-3 text-xs text-slate-700 mb-6">
+                      <li className="flex items-center gap-2 font-semibold text-slate-900">
+                        <Check className="w-4 h-4 text-emerald-600 shrink-0" />
+                        <span>Hasta 3 carteles activos</span>
+                      </li>
+                      <li className="flex items-center gap-2">
+                        <Check className="w-4 h-4 text-emerald-600 shrink-0" />
+                        <span>Fabricante oficial asignado: Toque™ SaaS</span>
+                      </li>
+                      <li className="flex items-center gap-2">
+                        <Check className="w-4 h-4 text-emerald-600 shrink-0" />
+                        <span>Redirección rápida a Google Reviews en &lt;45ms</span>
+                      </li>
+                      <li className="flex items-center gap-2">
+                        <Check className="w-4 h-4 text-emerald-600 shrink-0" />
+                        <span>Sin comisiones ni costos sorpresa</span>
+                      </li>
+                    </ul>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => navigate('/registro?plan=gratis&tipo=negocio')}
+                    className="w-full py-3 rounded-full bg-white hover:bg-slate-100 border border-slate-300 text-slate-900 text-xs font-bold transition cursor-pointer shadow-2xs"
+                  >
+                    Elegir Plan Gratis
+                  </button>
                 </div>
 
-                <button
-                  type="button"
-                  onClick={() => scrollToSection('beta')}
-                  className="w-full py-2.5 rounded-full bg-white hover:bg-slate-100 border border-slate-200 text-slate-900 text-xs font-medium transition cursor-pointer shadow-2xs"
-                >
-                  Empezar gratis en beta
-                </button>
+                {/* Plan Comercio Pro */}
+                <div className="p-8 rounded-[2rem] bg-white border-2 border-[rgba(30,50,90,0.85)] relative flex flex-col justify-between shadow-xl">
+                  <div>
+                    <div className="flex justify-between items-center">
+                      <span className="text-xs font-bold uppercase tracking-wider text-[rgba(30,50,90,0.9)]">
+                        Comercio Pro
+                      </span>
+                      <span className="text-[10px] font-bold uppercase tracking-wider bg-[rgba(30,50,90,0.9)] text-white px-2 py-0.5 rounded-full">
+                        Recomendado
+                      </span>
+                    </div>
+                    <div className="flex items-baseline gap-1 my-3">
+                      <span className="text-3xl sm:text-4xl font-normal font-mono font-headline text-slate-900 font-bold">
+                        {billingPeriod === 'monthly' ? '$4.899' : '$48.990'}
+                      </span>
+                      <span className="text-xs text-slate-500 font-mono">
+                        {billingPeriod === 'monthly' ? '/mes' : '/año'}
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-600 mb-6">
+                      Para restaurantes, cafeterías y negocios consolidados que quieren escalar sus reseñas.
+                    </p>
+
+                    <ul className="space-y-3 text-xs text-slate-700 mb-6">
+                      <li className="flex items-center gap-2 font-bold text-slate-900">
+                        <Check className="w-4 h-4 text-emerald-600 shrink-0" />
+                        <span>Carteles físicos ilimitados</span>
+                      </li>
+                      <li className="flex items-center gap-2">
+                        <Check className="w-4 h-4 text-emerald-600 shrink-0" />
+                        <span>Múltiples canales de escaneo (Mesa, Barra, Mostrador)</span>
+                      </li>
+                      <li className="flex items-center gap-2">
+                        <Check className="w-4 h-4 text-emerald-600 shrink-0" />
+                        <span>Acceso completo a Equipo y Reto del Mes</span>
+                      </li>
+                      <li className="flex items-center gap-2">
+                        <Check className="w-4 h-4 text-emerald-600 shrink-0" />
+                        <span>Reportes detallados y análisis de picos horarios</span>
+                      </li>
+                      <li className="flex items-center gap-2">
+                        <Check className="w-4 h-4 text-emerald-600 shrink-0" />
+                        <span>Soporte prioritario por WhatsApp</span>
+                      </li>
+                    </ul>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => navigate('/registro?plan=comercio_pro&tipo=negocio')}
+                    className="w-full py-3 rounded-full bg-[rgba(30,50,90,0.9)] hover:bg-[rgba(30,50,90,1)] text-white text-xs font-bold shadow-md transition cursor-pointer"
+                  >
+                    Elegir Comercio Pro
+                  </button>
+                </div>
               </div>
-            </div>
+            ) : (
+              /* TABLA DE PLANES PARA FABRICANTES */
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+                {/* Plan Arranque */}
+                <div className="p-8 rounded-[2rem] bg-slate-50 border border-slate-200/80 flex flex-col justify-between">
+                  <div>
+                    <span className="text-xs font-bold uppercase tracking-wider text-slate-500">
+                      Arranque
+                    </span>
+                    <div className="flex items-baseline gap-1 my-3">
+                      <span className="text-3xl sm:text-4xl font-normal font-mono font-headline text-slate-900 font-bold">
+                        {billingPeriod === 'monthly' ? '$11.899' : '$118.990'}
+                      </span>
+                      <span className="text-xs text-slate-500 font-mono">
+                        {billingPeriod === 'monthly' ? '/mes' : '/año'}
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-600 mb-6">
+                      Para talleres iniciales con hasta 15 carteles activos.
+                    </p>
+
+                    <ul className="space-y-3 text-xs text-slate-700 mb-6">
+                      <li className="flex items-center gap-2 font-semibold text-slate-900">
+                        <Check className="w-4 h-4 text-emerald-600 shrink-0" />
+                        <span>Hasta 15 carteles activos</span>
+                      </li>
+                      <li className="flex items-center gap-2">
+                        <Check className="w-4 h-4 text-emerald-600 shrink-0" />
+                        <span>Kit de impresión y CSV para chips NFC</span>
+                      </li>
+                      <li className="flex items-center gap-2">
+                        <Check className="w-4 h-4 text-emerald-600 shrink-0" />
+                        <span>Gestión de clientes en tiempo real</span>
+                      </li>
+                      <li className="flex items-center gap-2">
+                        <Check className="w-4 h-4 text-emerald-600 shrink-0" />
+                        <span>Cambio de URL en vivo sin reimprimir</span>
+                      </li>
+                    </ul>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => navigate('/registro?plan=arranque&tipo=fabricante')}
+                    className="w-full py-2.5 rounded-full bg-white hover:bg-slate-100 border border-slate-200 text-slate-900 text-xs font-medium transition cursor-pointer shadow-2xs"
+                  >
+                    Elegir Arranque
+                  </button>
+                </div>
+
+                {/* Plan Taller */}
+                <div className="p-8 rounded-[2rem] bg-white border-2 border-[rgba(30,50,90,0.8)] relative flex flex-col justify-between shadow-lg">
+                  <div>
+                    <div className="flex justify-between items-center">
+                      <span className="text-xs font-bold uppercase tracking-wider text-[rgba(30,50,90,0.9)]">
+                        Taller
+                      </span>
+                      <span className="text-[10px] font-bold uppercase tracking-wider bg-[rgba(30,50,90,0.9)] text-white px-2 py-0.5 rounded-full">
+                        Más elegido
+                      </span>
+                    </div>
+                    <div className="flex items-baseline gap-1 my-3">
+                      <span className="text-3xl sm:text-4xl font-normal font-mono font-headline text-slate-900 font-bold">
+                        {billingPeriod === 'monthly' ? '$24.899' : '$248.990'}
+                      </span>
+                      <span className="text-xs text-slate-500 font-mono">
+                        {billingPeriod === 'monthly' ? '/mes' : '/año'}
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-600 mb-6">
+                      Para imprentas y talleres en crecimiento con clientes recurrentes.
+                    </p>
+
+                    <ul className="space-y-3 text-xs text-slate-700 mb-6">
+                      <li className="flex items-center gap-2 font-semibold text-slate-900">
+                        <Check className="w-4 h-4 text-emerald-600 shrink-0" />
+                        <span>Hasta 50 carteles activos</span>
+                      </li>
+                      <li className="flex items-center gap-2">
+                        <Check className="w-4 h-4 text-emerald-600 shrink-0" />
+                        <span>Publicación en la Red Oficial de Fabricantes</span>
+                      </li>
+                      <li className="flex items-center gap-2">
+                        <Check className="w-4 h-4 text-emerald-600 shrink-0" />
+                        <span>Alertas de clientes inactivos automáticas</span>
+                      </li>
+                      <li className="flex items-center gap-2">
+                        <Check className="w-4 h-4 text-emerald-600 shrink-0" />
+                        <span>Módulo de equipo y reportes consolidados</span>
+                      </li>
+                    </ul>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => navigate('/registro?plan=taller&tipo=fabricante')}
+                    className="w-full py-2.5 rounded-full bg-[rgba(30,50,90,0.9)] hover:bg-[rgba(30,50,90,1)] text-white text-xs font-semibold shadow-md transition cursor-pointer"
+                  >
+                    Elegir Taller
+                  </button>
+                </div>
+
+                {/* Plan Fábrica */}
+                <div className="p-8 rounded-[2rem] bg-slate-50 border border-slate-200/80 flex flex-col justify-between">
+                  <div>
+                    <div className="flex justify-between items-center">
+                      <span className="text-xs font-bold uppercase tracking-wider text-slate-500">
+                        Fábrica
+                      </span>
+                      <span className="text-[10px] font-bold uppercase tracking-wider bg-slate-200 text-slate-800 px-2 py-0.5 rounded-full">
+                        Empresarial
+                      </span>
+                    </div>
+                    <div className="flex items-baseline gap-1 my-3">
+                      <span className="text-3xl sm:text-4xl font-normal font-mono font-headline text-slate-900 font-bold">
+                        {billingPeriod === 'monthly' ? '$44.899' : '$448.990'}
+                      </span>
+                      <span className="text-xs text-slate-500 font-mono">
+                        {billingPeriod === 'monthly' ? '/mes' : '/año'}
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-600 mb-6">
+                      Producción masiva y distribuidores con red nacional.
+                    </p>
+
+                    <ul className="space-y-3 text-xs text-slate-700 mb-6">
+                      <li className="flex items-center gap-2 font-semibold text-slate-900">
+                        <Check className="w-4 h-4 text-emerald-600 shrink-0" />
+                        <span>Hasta 150 carteles activos</span>
+                      </li>
+                      <li className="flex items-center gap-2">
+                        <Check className="w-4 h-4 text-emerald-600 shrink-0" />
+                        <span>Presencia destacada en la Red de Fabricantes</span>
+                      </li>
+                      <li className="flex items-center gap-2">
+                        <Check className="w-4 h-4 text-emerald-600 shrink-0" />
+                        <span>Importación masiva por lotes CSV</span>
+                      </li>
+                      <li className="flex items-center gap-2">
+                        <Check className="w-4 h-4 text-emerald-600 shrink-0" />
+                        <span>Soporte prioritario 24/7 vía WhatsApp</span>
+                      </li>
+                    </ul>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => navigate('/registro?plan=fabrica&tipo=fabricante')}
+                    className="w-full py-2.5 rounded-full bg-white hover:bg-slate-100 border border-slate-200 text-slate-900 text-xs font-medium transition cursor-pointer shadow-2xs"
+                  >
+                    Elegir Fábrica
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </section>
 
@@ -1035,57 +1181,6 @@ export const LandingView: React.FC = () => {
               </p>
             </div>
 
-            {betaSuccess ? (
-              <div className="p-8 rounded-[2rem] bg-emerald-50 border border-emerald-200 text-center animate-in fade-in">
-                <div className="w-14 h-14 rounded-full bg-emerald-100 text-emerald-700 mx-auto flex items-center justify-center mb-4">
-                  <CheckCircle2 className="w-7 h-7" />
-                </div>
-                <h3 className="text-2xl font-bold text-slate-900 font-headline mb-2">
-                  ¡Lugar reservado!
-                </h3>
-                <p className="text-xs text-slate-600 max-w-md mx-auto mb-6">
-                  Te enviamos la confirmación a <strong>{betaForm.email}</strong> y nos contactaremos a la brevedad por WhatsApp para coordinar tu onboarding.
-                </p>
-
-                <div className="p-4 rounded-xl bg-white border border-emerald-200 max-w-xs mx-auto mb-6 text-left text-xs font-mono space-y-1">
-                  <div className="flex justify-between">
-                    <span className="text-slate-500">Posición:</span>
-                    <span className="font-bold text-slate-900">#048 de 100 cupos</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-slate-500">Actividad:</span>
-                    <span className="capitalize text-slate-900">{betaForm.tipo}</span>
-                  </div>
-                </div>
-
-                <div className="flex justify-center gap-3">
-                  <Link to="/resumen">
-                    <button
-                      type="button"
-                      className="px-5 py-2.5 rounded-full bg-[rgba(30,50,90,0.9)] text-white text-xs font-medium hover:bg-[rgba(30,50,90,1)] transition cursor-pointer shadow-xs"
-                    >
-                      Explorar paneles de prueba
-                    </button>
-                  </Link>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setBetaSuccess(false);
-                      setBetaForm({
-                        nombre: '',
-                        email: '',
-                        whatsapp: '',
-                        tipo: 'fabricante',
-                        volumen: '11-50',
-                      });
-                    }}
-                    className="px-5 py-2.5 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-medium transition cursor-pointer"
-                  >
-                    Cargar otro contacto
-                  </button>
-                </div>
-              </div>
-            ) : (
               <form onSubmit={handleBetaSubmit} className="space-y-4">
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
@@ -1197,7 +1292,6 @@ export const LandingView: React.FC = () => {
                   . Sin tarjetas ni letra chica.
                 </p>
               </form>
-            )}
           </div>
         </section>
 
@@ -1218,6 +1312,7 @@ export const LandingView: React.FC = () => {
               <div className="font-semibold text-slate-900 mb-3">Plataforma</div>
               <ul className="space-y-2">
                 <li><a href="#como-funciona" className="hover:text-slate-900">Cómo funciona</a></li>
+                <li><a href="#red-fabricantes" className="hover:text-slate-900 font-semibold text-blue-700">Red de Fabricantes</a></li>
                 <li><a href="#fabricantes" className="hover:text-slate-900">Para fabricantes</a></li>
                 <li><a href="#negocios" className="hover:text-slate-900">Para negocios</a></li>
                 <li><a href="#privacidad" className="hover:text-slate-900">Privacidad</a></li>

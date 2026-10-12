@@ -77,9 +77,10 @@ export const BusinessDashboard: React.FC = () => {
     return localStorage.getItem(`toque_onboarded_${businessId}`) === 'true';
   });
 
-  // Disparar onboarding automático solo en el primer acceso del usuario
+  // Disparar onboarding automático en bienvenida o primer acceso del usuario
   useEffect(() => {
-    if (user && user.hasSeenOnboarding === false) {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('welcome') === '1' || (user && user.hasSeenOnboarding === false)) {
       setIsOnboardingOpen(true);
     }
   }, [user]);
@@ -218,8 +219,8 @@ export const BusinessDashboard: React.FC = () => {
         icon={<Smartphone className="w-8 h-8 text-white" />}
         title="Todavía no tenés carteles activos"
         description="Agregá tu primer cartel con NFC y QR para empezar a medir cuántos clientes llegan a tus reseñas en Google Maps."
-        actionLabel="Agregar mi primer cartel"
-        onAction={() => window.location.assign('/carteles')}
+        actionLabel="Crear mi primer cartel"
+        onAction={() => window.location.assign('/carteles?crear=1')}
       />
     );
   }

@@ -15,7 +15,7 @@ import { Button } from '../../components/ui/Button';
 import { Skeleton } from '../../components/ui/Skeleton';
 import { ErrorState } from '../../components/ui/ErrorState';
 import { Dialog } from '../../components/ui/Dialog';
-import { OneTimeInfoModal } from '../../components/ui/OneTimeInfoModal';
+import { Input } from '../../components/ui/Input';
 import { QRPreview } from '../../components/ui/QRPreview';
 import { formatNumber } from '../../lib/formatters';
 import { useToast } from '../../components/ui/Toast';
@@ -29,14 +29,27 @@ import {
   Check,
   Award,
   Sparkles,
+  Plus,
+  Edit2,
+  Trash2,
+  UserPlus,
 } from 'lucide-react';
 
 export const StaffView: React.FC = () => {
   const { tenant } = useAuth();
-  const { success } = useToast();
+  const { success, error: toastError } = useToast();
   const businessId = tenant?.type === 'business' ? tenant.id : 'biz-esquina';
   const [selectedStaffForQr, setSelectedStaffForQr] = useState<StaffMember | null>(null);
   const [copiedCode, setCopiedCode] = useState(false);
+
+  // Estados para agregar / editar colaborador
+  const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [editingStaff, setEditingStaff] = useState<StaffMember | null>(null);
+  const [staffToDelete, setStaffToDelete] = useState<StaffMember | null>(null);
+  const [staffName, setStaffName] = useState('');
+  const [staffRole, setStaffRole] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   const {
     data: staffList,
@@ -83,62 +96,47 @@ export const StaffView: React.FC = () => {
 
   return (
     <div className="space-y-6 text-white">
-      {/* Cabecera y aclaración ética */}
-      <div>
-        <div className="flex items-center gap-2">
-          <Trophy className="w-5 h-5 text-amber-300" />
-          <h1 className="text-2xl sm:text-3xl font-headline font-bold text-white tracking-tight">
-            Equipo y Reto del Mes
-          </h1>
+      {/* Cabecera con botón de agregar */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <div className="flex items-center gap-2">
+            <Trophy className="w-5 h-5 text-amber-300" />
+            <h1 className="text-2xl sm:text-3xl font-headline font-bold text-white tracking-tight">
+              Equipo y Reto del Mes
+            </h1>
+          </div>
+          <p className="text-xs text-white/70 mt-1">
+            Cada colaborador tiene su enlace o QR personal para medir a quién felicitan más los clientes.
+          </p>
         </div>
-        <p className="text-xs text-white/70 mt-1">
-          Cada colaborador tiene su enlace o QR personal para medir a quién felicitan más los clientes.
-        </p>
+
+        <Button
+          variant="primary"
+          onClick={() => {
+            setEditingStaff(null);
+            setStaffName('');
+            setStaffRole('');
+            setIsAddModalOpen(true);
+          }}
+          icon={<UserPlus className="w-4 h-4 text-slate-900" />}
+          className="bg-white text-slate-900 hover:bg-slate-100 font-semibold"
+        >
+          Agregar colaborador
+        </Button>
       </div>
 
-      {/* Pop-up Informativo: ¿Cómo funciona el módulo Equipo en Toque? */}
-      <OneTimeInfoModal
-        id="staff_module_guide_info"
-        title="¿Cómo funciona el módulo Equipo en Toque?"
-        icon={<Users className="w-5 h-5 text-cyan-400" />}
-      >
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
-          <div className="p-3 rounded-xl bg-black/5 dark:bg-white/5 border border-slate-200 dark:border-white/10 space-y-1">
-            <span className="font-semibold text-cyan-400">1. Identificador propio</span>
-            <p className="text-[11px] leading-relaxed text-[var(--text-muted)]">
-              Cada mesero, cajero o colaborador tiene su propio código o enlace personal para su delantal o gafete.
-            </p>
-          </div>
-          <div className="p-3 rounded-xl bg-black/5 dark:bg-white/5 border border-slate-200 dark:border-white/10 space-y-1">
-            <span className="font-semibold text-emerald-400">2. Métrica individual</span>
-            <p className="text-[11px] leading-relaxed text-[var(--text-muted)]">
-              Cuando el cliente califica en Google, el sistema registra a quién le pertenece el toque sin alterar la experiencia del cliente.
-            </p>
-          </div>
-          <div className="p-3 rounded-xl bg-black/5 dark:bg-white/5 border border-slate-200 dark:border-white/10 space-y-1">
-            <span className="font-semibold text-amber-400">3. Reto y motivación</span>
-            <p className="text-[11px] leading-relaxed text-[var(--text-muted)]">
-              A fin de mes podés premiar al colaborador con mayor cantidad de reseñas conseguidas cordialmente.
+      {/* Regla ética y guía consolidada */}
+      <div className="p-4 rounded-2xl bg-white/10 border border-white/15 backdrop-blur-md flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+        <div className="flex items-start gap-3">
+          <Award className="w-5 h-5 text-amber-300 shrink-0 mt-0.5" />
+          <div>
+            <p className="font-semibold text-white">Regla ética de Google y Toque</p>
+            <p className="text-white/70 text-[11px] leading-relaxed">
+              Incentivá y premiá internamente a tu equipo por invitar cordialmente a opinar, pero nunca condiciones ni des regalos al cliente por 5 estrellas.
             </p>
           </div>
         </div>
-      </OneTimeInfoModal>
-
-      {/* Pop-up Informativo: Regla Ética Obligatoria */}
-      <OneTimeInfoModal
-        id="staff_ethical_rule_info"
-        title="Regla ética fundamental de Toque"
-        icon={<Award className="w-5 h-5 text-amber-400" />}
-      >
-        <div className="text-xs text-[var(--text-main)] leading-relaxed space-y-2">
-          <p>
-            <strong>Regla ética de Toque:</strong> Se puede premiar y motivar al staff por invitar cordialmente a dejar una reseña en Google, pero está <strong className="text-amber-400">terminantemente prohibido premiar o condicionar al cliente</strong> con descuentos o regalos a cambio de 5 estrellas (estricta política de Google).
-          </p>
-          <p className="text-micro text-[var(--text-muted)]">
-            Cuidamos la reputación y la permanencia de tu ficha en Google Maps.
-          </p>
-        </div>
-      </OneTimeInfoModal>
+      </div>
 
       {/* Lista del Ranking */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -180,9 +178,31 @@ export const StaffView: React.FC = () => {
                   size="sm"
                   onClick={() => setSelectedStaffForQr(member)}
                   icon={<QrCode className="w-3.5 h-3.5" />}
+                  title="Ver código QR personal"
                 >
-                  Ver QR
+                  QR
                 </Button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEditingStaff(member);
+                    setStaffName(member.name);
+                    setStaffRole(member.role);
+                    setIsAddModalOpen(true);
+                  }}
+                  className="p-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white/80 hover:text-white transition cursor-pointer"
+                  title="Editar datos"
+                >
+                  <Edit2 className="w-3.5 h-3.5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setStaffToDelete(member)}
+                  className="p-1.5 rounded-lg bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 transition cursor-pointer"
+                  title="Eliminar colaborador"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
               </div>
             </div>
           </Card>
@@ -226,6 +246,139 @@ export const StaffView: React.FC = () => {
             <div className="pt-2 flex justify-end">
               <Button variant="ghost" onClick={() => setSelectedStaffForQr(null)}>
                 Cerrar
+              </Button>
+            </div>
+          </div>
+        </Dialog>
+      )}
+
+      {/* Modal de Agregar / Editar Colaborador */}
+      {isAddModalOpen && (
+        <Dialog
+          isOpen={isAddModalOpen}
+          onClose={() => setIsAddModalOpen(false)}
+          title={editingStaff ? 'Editar Colaborador' : 'Agregar Colaborador al Equipo'}
+          size="sm"
+        >
+          <form
+            onSubmit={async (e) => {
+              e.preventDefault();
+              if (!staffName.trim()) {
+                toastError('Nombre requerido', 'Ingresá el nombre del colaborador.');
+                return;
+              }
+              setIsSubmitting(true);
+              try {
+                if (editingStaff) {
+                  if (api.updateStaff) {
+                    await api.updateStaff(businessId, editingStaff.id, {
+                      name: staffName,
+                      role: staffRole || 'Atención',
+                    });
+                  }
+                  success('Colaborador actualizado', staffName);
+                } else {
+                  if (api.addStaff) {
+                    await api.addStaff(businessId, {
+                      name: staffName,
+                      role: staffRole || 'Atención',
+                    });
+                  }
+                  success('Colaborador agregado', staffName);
+                }
+                setIsAddModalOpen(false);
+                refetch();
+              } catch (err) {
+                toastError('Error', err instanceof Error ? err.message : 'No se pudo guardar');
+              } finally {
+                setIsSubmitting(false);
+              }
+            }}
+            className="space-y-4 pt-2"
+          >
+            <div>
+              <label className="block text-xs font-medium text-[var(--text-main)] mb-1">
+                Nombre y Apellido o Apodo *
+              </label>
+              <input
+                type="text"
+                required
+                value={staffName}
+                onChange={(e) => setStaffName(e.target.value)}
+                placeholder="Ej. Sofía R."
+                className="w-full px-3 py-2 rounded-xl bg-black/5 dark:bg-white/10 border border-[var(--border-subtle)] text-small text-[var(--text-main)] focus:outline-none focus:ring-1 focus:ring-[var(--brand)]"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-[var(--text-main)] mb-1">
+                Puesto o Rol
+              </label>
+              <input
+                type="text"
+                value={staffRole}
+                onChange={(e) => setStaffRole(e.target.value)}
+                placeholder="Ej. Moza Salón, Cajero, Barista"
+                className="w-full px-3 py-2 rounded-xl bg-black/5 dark:bg-white/10 border border-[var(--border-subtle)] text-small text-[var(--text-main)] focus:outline-none focus:ring-1 focus:ring-[var(--brand)]"
+              />
+            </div>
+
+            <div className="pt-3 border-t border-[var(--border-subtle)] flex items-center justify-end gap-2">
+              <Button type="button" variant="ghost" onClick={() => setIsAddModalOpen(false)}>
+                Cancelar
+              </Button>
+              <Button type="submit" variant="primary" isLoading={isSubmitting}>
+                {editingStaff ? 'Guardar Cambios' : 'Crear Colaborador'}
+              </Button>
+            </div>
+          </form>
+        </Dialog>
+      )}
+
+      {/* Modal de Confirmación de Eliminación */}
+      {staffToDelete && (
+        <Dialog
+          isOpen={!!staffToDelete}
+          onClose={() => setStaffToDelete(null)}
+          title="Eliminar Colaborador"
+          size="sm"
+        >
+          <div className="space-y-4 pt-2">
+            <p className="text-small text-[var(--text-main)] leading-relaxed">
+              ¿Estás seguro de que querés eliminar a <strong>{staffToDelete.name}</strong> del equipo?
+            </p>
+            <p className="text-micro text-[var(--text-muted)]">
+              Se eliminará su enlace personal y no sumará más toques al reto del mes.
+            </p>
+
+            <div className="pt-3 border-t border-[var(--border-subtle)] flex items-center justify-end gap-2">
+              <Button
+                variant="ghost"
+                onClick={() => setStaffToDelete(null)}
+                disabled={isDeleting}
+              >
+                Cancelar
+              </Button>
+              <Button
+                variant="danger"
+                isLoading={isDeleting}
+                onClick={async () => {
+                  setIsDeleting(true);
+                  try {
+                    if (api.deleteStaff) {
+                      await api.deleteStaff(businessId, staffToDelete.id);
+                    }
+                    success('Colaborador eliminado', staffToDelete.name);
+                    setStaffToDelete(null);
+                    refetch();
+                  } catch {
+                    toastError('Error', 'No se pudo eliminar al colaborador');
+                  } finally {
+                    setIsDeleting(false);
+                  }
+                }}
+              >
+                Eliminar definitivamente
               </Button>
             </div>
           </div>

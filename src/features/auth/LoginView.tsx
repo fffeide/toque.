@@ -1,8 +1,13 @@
 /**
  * Toque — Pantalla de Ingreso (LoginView)
- * - Inicio de sesión con correo / usuario y contraseña limpios (sin pre-escritura)
- * - Opción de ingreso con Google
- * - Sin SSO y sin accesos a /admin
+ * Características:
+ * - Título claro: Iniciar sesión (para usuarios registrados)
+ * - Enlace directo a "Crear cuenta nueva / Registrarse" (/registro)
+ * - Redirección según rol:
+ *     platform_admin -> /admin
+ *     manufacturer_admin -> /fabricante
+ *     business_owner / business_staff -> /resumen
+ * - Accesos rápidos para probar cada rol con 1 toque.
  */
 
 import React, { useState, useEffect } from 'react';
@@ -17,6 +22,8 @@ import {
   ArrowRight,
   Store,
   Factory,
+  Shield,
+  UserPlus,
 } from 'lucide-react';
 import { useToast } from '../../components/ui/Toast';
 
@@ -34,11 +41,13 @@ export const LoginView: React.FC = () => {
   useEffect(() => {
     if (isAuthenticated && user && !isSubmitting) {
       const from = searchParams.get('from');
-      if (from && !from.startsWith('/admin')) {
+      if (from) {
         navigate(from, { replace: true });
         return;
       }
-      if (user.role === 'manufacturer_admin') {
+      if (user.role === 'platform_admin') {
+        navigate('/admin', { replace: true });
+      } else if (user.role === 'manufacturer_admin') {
         navigate('/fabricante', { replace: true });
       } else {
         navigate('/resumen', { replace: true });
@@ -60,13 +69,35 @@ export const LoginView: React.FC = () => {
     try {
       const res = await loginWithCredentials(cleanId, cleanPass);
       success('Acceso correcto', `Hola, ${res.user.name}`);
-      if (res.user.role === 'manufacturer_admin') {
+      if (res.user.role === 'platform_admin') {
+        navigate('/admin');
+      } else if (res.user.role === 'manufacturer_admin') {
         navigate('/fabricante');
       } else {
         navigate('/resumen');
       }
     } catch (err) {
       toastError('No pudimos iniciar sesión', err instanceof Error ? err.message : 'Verificá los datos ingresados');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleQuickDemoAccess = async (role: 'business_owner' | 'manufacturer_admin' | 'platform_admin') => {
+    setIsSubmitting(true);
+    try {
+      const email = role === 'platform_admin' ? 'admin@toque.ar' : role === 'manufacturer_admin' ? 'fabricante@toque.ar' : 'negocio@toque.ar';
+      const res = await loginDirect(email, role);
+      success('Acceso demo iniciado', `Sesión iniciada como ${res.user.name}`);
+      if (role === 'platform_admin') {
+        navigate('/admin');
+      } else if (role === 'manufacturer_admin') {
+        navigate('/fabricante');
+      } else {
+        navigate('/resumen');
+      }
+    } catch {
+      toastError('Error al iniciar demo', 'Intentá con credenciales');
     } finally {
       setIsSubmitting(false);
     }
@@ -82,10 +113,10 @@ export const LoginView: React.FC = () => {
             </Link>
           </div>
           <h1 className="font-display text-2xl sm:text-3xl font-bold text-white tracking-tight">
-            Ingresar a tu cuenta
+            Iniciar sesión en Toque
           </h1>
           <p className="text-xs text-white/70 max-w-sm mx-auto">
-            Accedé a tus carteles, métricas y configuración de Toque.
+            Ingresá a tu cuenta registrada para gestionar carteles, métricas y reseñas.
           </p>
         </div>
 
@@ -141,6 +172,58 @@ export const LoginView: React.FC = () => {
               Iniciar sesión
             </Button>
           </form>
+
+          {/* Enlace claro para registrarse si es nuevo */}
+          <div className="pt-3 border-t border-white/10 text-center space-y-2">
+            <p className="text-xs text-white/60">
+              ¿No tenés una cuenta en Toque?
+            </p>
+            <Link
+              to="/registro"
+              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-white/10 hover:bg-white/15 border border-white/20 text-xs font-semibold text-white transition"
+            >
+              <UserPlus className="w-3.5 h-3.5 text-emerald-400" />
+              <span>Registrate aquí gratis</span>
+            </Link>
+          </div>
+
+          {/* Accesos rápidos de prueba */}
+          <div className="pt-3 border-t border-white/10">
+            <p className="text-[11px] font-medium text-white/50 uppercase tracking-wider text-center mb-2">
+              Ingreso directo de prueba
+            </p>
+            <div className="grid grid-cols-3 gap-2">
+              <button
+                type="button"
+                onClick={() => handleQuickDemoAccess('business_owner')}
+                className="p-2 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-400/30 text-center transition cursor-pointer"
+                title="Acceder como Dueño de Comercio"
+              >
+                <Store className="w-3.5 h-3.5 text-emerald-300 mx-auto mb-1" />
+                <span className="text-[10px] text-emerald-200 font-medium block">Negocio</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handleQuickDemoAccess('manufacturer_admin')}
+                className="p-2 rounded-lg bg-blue-500/15 hover:bg-blue-500/25 border border-blue-400/30 text-center transition cursor-pointer"
+                title="Acceder como Fabricante"
+              >
+                <Factory className="w-3.5 h-3.5 text-blue-300 mx-auto mb-1" />
+                <span className="text-[10px] text-blue-200 font-medium block">Fabricante</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handleQuickDemoAccess('platform_admin')}
+                className="p-2 rounded-lg bg-purple-500/15 hover:bg-purple-500/25 border border-purple-400/30 text-center transition cursor-pointer"
+                title="Acceder como Super Administrador"
+              >
+                <Shield className="w-3.5 h-3.5 text-purple-300 mx-auto mb-1" />
+                <span className="text-[10px] text-purple-200 font-medium block">Admin</span>
+              </button>
+            </div>
+          </div>
         </Card>
 
         <p className="text-center text-xs text-white/50">

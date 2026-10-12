@@ -16,6 +16,16 @@ interface AuthContextType {
   verifyToken: (token: string) => Promise<void>;
   loginDirect: (email: string, role?: UserRole) => Promise<{ user: User; tenant: Tenant }>;
   loginWithCredentials: (username: string, pass: string) => Promise<{ user: User; tenant: Tenant }>;
+  registerUser: (data: {
+    name: string;
+    email: string;
+    password?: string;
+    whatsapp: string;
+    activity: 'fabricante' | 'negocio';
+    volume: string;
+    plan?: string;
+  }) => Promise<{ user: User; tenant: Tenant }>;
+  updateTenantState: (patch: Partial<Tenant>) => void;
   markUserOnboarded: (userId?: string) => Promise<void>;
   logout: () => Promise<void>;
   switchRole: (role: UserRole) => Promise<void>;
@@ -124,6 +134,32 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
   };
 
+  const registerUser = async (data: {
+    name: string;
+    email: string;
+    password?: string;
+    whatsapp: string;
+    activity: 'fabricante' | 'negocio';
+    volume: string;
+    plan?: string;
+  }) => {
+    setIsLoading(true);
+    try {
+      const res = await api.registerUser(data);
+      setUser(res.user);
+      setTenant(res.tenant);
+      return res;
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const updateTenantState = (patch: Partial<Tenant>) => {
+    if (tenant) {
+      setTenant({ ...tenant, ...patch });
+    }
+  };
+
   return (
     <AuthContext.Provider
       value={{
@@ -135,6 +171,8 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         verifyToken,
         loginDirect,
         loginWithCredentials,
+        registerUser,
+        updateTenantState,
         markUserOnboarded,
         logout,
         switchRole,

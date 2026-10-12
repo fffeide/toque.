@@ -68,11 +68,16 @@ export const CartelesView: React.FC = () => {
   // Formulario nuevo cartel
   const [newName, setNewName] = useState('');
   const [newLocation, setNewLocation] = useState('');
-  const [newTargetUrl, setNewTargetUrl] = useState(
-    'https://search.google.com/local/writereview?placeid=ChIJN1t_tDeuEmsRUsoyG83frY4'
-  );
+  const [newTargetUrl, setNewTargetUrl] = useState('');
   const [urlError, setUrlError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Auto-abrir si viene con ?crear=1
+  React.useEffect(() => {
+    if (typeof window !== 'undefined' && window.location.search.includes('crear')) {
+      setIsCreateSheetOpen(true);
+    }
+  }, []);
 
   // Consulta de carteles
   const {
@@ -142,9 +147,10 @@ export const CartelesView: React.FC = () => {
     }
   };
 
-  // Calcular estado del cartel: activo / silencioso / con problema
+  // Calcular estado del cartel: activo / silencioso / con problema / reemplazado
   const getCartelState = (cartel: Cartel) => {
     if (cartel.status === 'trash') return { type: 'trash', label: 'En papelera', color: 'text-slate-400' };
+    if (cartel.status === 'replaced') return { type: 'replaced', label: 'Reemplazado', color: 'text-slate-400', icon: RotateCcw };
     if (!cartel.lastScannedAt) {
       return {
         type: 'silent',
@@ -179,10 +185,13 @@ export const CartelesView: React.FC = () => {
     if (!carteles) return [];
     return carteles.filter((cartel) => {
       const isTrash = cartel.status === 'trash';
+      const isReplaced = cartel.status === 'replaced';
+
       if (selectedFilter === 'trash') {
         if (!isTrash) return false;
       } else {
-        if (isTrash) return false;
+        // En vista normal, los carteles reemplazados/dados de baja no se muestran como activos duplicados
+        if (isTrash || isReplaced) return false;
         if (selectedFilter === 'active') {
           const state = getCartelState(cartel);
           if (state.type !== 'active') return false;
@@ -260,7 +269,7 @@ export const CartelesView: React.FC = () => {
                 : 'text-white/70 hover:text-white'
             }`}
           >
-            Todos ({carteles?.filter(s => s.status !== 'trash').length || 0})
+            Todos ({carteles?.filter(s => s.status !== 'trash' && s.status !== 'replaced').length || 0})
           </button>
 
           <button

@@ -1,12 +1,13 @@
 import React from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
-import { AuthProvider } from './lib/authContext';
+import { AuthProvider, useAuth } from './lib/authContext';
 import { ThemeProvider } from './lib/themeContext';
 import { ToastProvider } from './components/ui/Toast';
 
 import { AppLayout } from './components/layout/AppLayout';
 import { LandingView } from './features/public/LandingView';
 import { LoginView } from './features/auth/LoginView';
+import { RegisterView } from './features/auth/RegisterView';
 import { ArrepentimientoView } from './features/public/ArrepentimientoView';
 import { UiGalleryView } from './features/public/UiGalleryView';
 import { LegalPageView } from './features/public/LegalPageView';
@@ -22,6 +23,7 @@ import { ChannelsView } from './features/business/ChannelsView';
 import { ReportsView } from './features/business/ReportsView';
 import { StaffView } from './features/business/StaffView';
 import { AccountView } from './features/business/AccountView';
+import { ManufacturersDirectoryView } from './features/business/ManufacturersDirectoryView';
 
 // Manufacturer view (wrapped inside AppLayout)
 import { ManufacturerDashboard } from './features/manufacturer/ManufacturerDashboard';
@@ -29,6 +31,14 @@ import { ManufacturerDashboard } from './features/manufacturer/ManufacturerDashb
 // Super Admin & Status views
 import { AdminDashboard } from './features/admin/AdminDashboard';
 import { StatusPageView } from './features/status/StatusPageView';
+
+// Redirección dinámica según el rol del usuario
+const DynamicPanelRedirect: React.FC = () => {
+  const { user } = useAuth();
+  if (user?.role === 'platform_admin') return <Navigate to="/admin" replace />;
+  if (user?.role === 'manufacturer_admin') return <Navigate to="/fabricante" replace />;
+  return <Navigate to="/resumen" replace />;
+};
 
 export default function App() {
   return (
@@ -40,13 +50,15 @@ export default function App() {
               {/* Página Principal (Home con Hero RIVR + Secciones Toque) */}
               <Route path="/" element={<LandingView />} />
 
-              {/* Acceso y autenticación */}
+              {/* Registro y autenticación */}
               <Route path="/login" element={<LoginView />} />
+              <Route path="/registro" element={<RegisterView />} />
+              <Route path="/comenzar" element={<RegisterView />} />
 
               {/* Redirección rápida de escaneo de cartel físico (/r/:shortCode) */}
               <Route path="/r/:shortCode" element={<RedirectScanView />} />
 
-              {/* Rutas de Paneles con Liquid Glass montadas sobre AppLayout con protección estricta por rol */}
+              {/* Rutas de Paneles montadas sobre AppLayout */}
               <Route element={<AppLayout />}>
                 {/* 1. Panel de Negocio (Exclusivo comercios y staff) */}
                 <Route element={<RoleProtectedRoute allowedRoles={['business_owner', 'business_staff']} />}>
@@ -55,6 +67,7 @@ export default function App() {
                   <Route path="/canales" element={<ChannelsView />} />
                   <Route path="/reportes" element={<ReportsView />} />
                   <Route path="/equipo" element={<StaffView />} />
+                  <Route path="/fabricantes" element={<ManufacturersDirectoryView />} />
                 </Route>
 
                 {/* 2. Panel de Fabricante (Exclusivo imprentas y talleres) */}
@@ -63,9 +76,11 @@ export default function App() {
                   <Route path="/fabricante/*" element={<ManufacturerDashboard />} />
                 </Route>
 
-                {/* Redirección preventiva de /admin (bloqueado) */}
-                <Route path="/admin" element={<Navigate to="/resumen" replace />} />
-                <Route path="/admin/*" element={<Navigate to="/resumen" replace />} />
+                {/* 3. Panel de Super Admin (Exclusivo administradores de plataforma) */}
+                <Route element={<RoleProtectedRoute allowedRoles={['platform_admin']} />}>
+                  <Route path="/admin" element={<AdminDashboard />} />
+                  <Route path="/admin/*" element={<AdminDashboard />} />
+                </Route>
 
                 {/* 4. Configuración de Cuenta y Perfil (Para cualquier usuario autenticado) */}
                 <Route element={<RoleProtectedRoute allowedRoles={['business_owner', 'business_staff', 'manufacturer_admin', 'platform_admin']} />}>
@@ -73,12 +88,12 @@ export default function App() {
                 </Route>
               </Route>
 
-              {/* Redirecciones canónicas auxiliares */}
+              {/* Redirecciones canónicas que respetan el rol */}
               <Route
                 path="/panel"
                 element={
                   <RoleProtectedRoute allowedRoles={['business_owner', 'business_staff', 'manufacturer_admin', 'platform_admin']}>
-                    <Navigate to="/resumen" replace />
+                    <DynamicPanelRedirect />
                   </RoleProtectedRoute>
                 }
               />
@@ -86,7 +101,7 @@ export default function App() {
                 path="/dashboard"
                 element={
                   <RoleProtectedRoute allowedRoles={['business_owner', 'business_staff', 'manufacturer_admin', 'platform_admin']}>
-                    <Navigate to="/resumen" replace />
+                    <DynamicPanelRedirect />
                   </RoleProtectedRoute>
                 }
               />
@@ -94,17 +109,16 @@ export default function App() {
               {/* Monitor de Estado en Vivo */}
               <Route path="/status" element={<StatusPageView />} />
 
+              {/* Galería de Componentes UI */}
+              <Route path="/ui" element={<UiGalleryView />} />
+
               {/* Páginas Legales y Auxiliares */}
               <Route path="/terminos" element={<LegalPageView forcedDocId="terminos" />} />
               <Route path="/privacidad" element={<LegalPageView forcedDocId="privacidad" />} />
               <Route path="/cookies" element={<LegalPageView forcedDocId="cookies" />} />
-              <Route path="/reembolso" element={<LegalPageView forcedDocId="reembolso" />} />
-              <Route path="/legal/:docId" element={<LegalPageView />} />
               <Route path="/arrepentimiento" element={<ArrepentimientoView />} />
-              <Route path="/ui" element={<UiGalleryView />} />
-              <Route path="/ui-gallery" element={<UiGalleryView />} />
 
-              {/* 404 Not Found */}
+              {/* 404 No Encontrado */}
               <Route path="*" element={<NotFoundView />} />
             </Routes>
           </BrowserRouter>
