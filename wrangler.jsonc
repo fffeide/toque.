@@ -1,17 +1,22 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "toque-app",
-  "main": "src/worker.ts",
+  "main": "worker/index.ts",
   "compatibility_date": "2025-03-01",
-  "compatibility_flags": [
-    "nodejs_compat"
-  ],
+  "compatibility_flags": ["nodejs_compat"],
   "assets": {
     "directory": "./dist",
     "binding": "ASSETS",
-    "not_found_handling": "single-page-application"
+    "not_found_handling": "single-page-application",
+    // El Worker responde primero en estas rutas (si no, el SPA las intercepta).
+    "run_worker_first": ["/r/*", "/api/*", "/healthz"]
   },
-  "observability": {
-    "enabled": true
-  }
+  "d1_databases": [
+    { "binding": "DB", "database_name": "toque-db", "database_id": "REEMPLAZAR_CON_EL_ID_DE_D1", "migrations_dir": "migrations" }
+  ],
+  "kv_namespaces": [
+    { "binding": "KV", "id": "REEMPLAZAR_CON_EL_ID_DE_KV" }
+  ],
+  "triggers": { "crons": ["0 6 1 * *"] },
+  "observability": { "enabled": true }
 }
