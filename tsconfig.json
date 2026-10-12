@@ -28,6 +28,7 @@
   },
   "exclude": [
     "worker",
+    "src/db",
     "node_modules",
     "dist"
   ]
