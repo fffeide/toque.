@@ -8,7 +8,7 @@
  * - 9 pestañas completas y todos los modales intactos y funcionales.
  */
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { useAuth } from '../../lib/authContext';
 import { useTheme } from '../../lib/themeContext';
 import {
@@ -32,17 +32,17 @@ import { EmptyState } from '../../components/ui/EmptyState';
 import { BrandPreview } from '../../components/ui/BrandPreview';
 import { useToast } from '../../components/ui/Toast';
 import { formatNumber } from '../../lib/formatters';
+import { getShortUrl, getShortUrlDisplay } from '../../lib/urls';
 
 // Subcomponentes del Fabricante
 import { ManufacturerAtRiskModal } from './ManufacturerAtRiskModal';
 import { QuickBusinessModal } from './QuickBusinessModal';
+import { CreateCartelModal } from './CreateCartelModal';
 import { BatchImportModal } from './BatchImportModal';
 import { PrintKitView } from './PrintKitView';
-import { ResaleCalculatorView } from './ResaleCalculatorView';
 import { ReplacementOrdersView } from './ReplacementOrdersView';
 import { ManufacturerBillingView } from './ManufacturerBillingView';
 import { ManufacturerStaffView } from './ManufacturerStaffView';
-import { ManufacturerHelpView } from './ManufacturerHelpView';
 import { ManufacturerOnboardingWizard } from './ManufacturerOnboardingWizard';
 import { ManufacturerNetworkSection } from './ManufacturerNetworkSection';
 import { ReplaceCartelSheet } from '../business/ReplaceCartelSheet';
@@ -82,15 +82,13 @@ import {
 
 type ManufacturerTab =
   | 'tablero'
+  | 'carteles'
   | 'negocios'
   | 'red_fabricantes'
   | 'kit_impresion'
-  | 'marca'
-  | 'plan_facturacion'
-  | 'reventa'
   | 'reposiciones'
   | 'equipo'
-  | 'ayuda';
+  | 'plan_facturacion';
 
 export const ManufacturerDashboard: React.FC = () => {
   const { tenant } = useAuth();
@@ -105,6 +103,7 @@ export const ManufacturerDashboard: React.FC = () => {
   // Modales
   const [isOnboardingOpen, setIsOnboardingOpen] = useState(false);
   const [isQuickBizOpen, setIsQuickBizOpen] = useState(false);
+  const [isCreateCartelOpen, setIsCreateCartelOpen] = useState(false);
   const [isBatchImportOpen, setIsBatchImportOpen] = useState(false);
   const [atRiskTarget, setAtRiskTarget] = useState<BusinessAtRisk | null>(null);
   const [replaceCartelTarget, setReplaceCartelTarget] = useState<Cartel | null>(null);
@@ -120,6 +119,7 @@ export const ManufacturerDashboard: React.FC = () => {
   const [brandLogoInput, setBrandLogoInput] = useState(tenant?.brandLogo || '');
   const [supportPhoneInput, setSupportPhoneInput] = useState('+54 9 11 4455-8899');
   const [supportEmailInput, setSupportEmailInput] = useState('soporte@carteleriademo.com.ar');
+  const [customDomainInput, setCustomDomainInput] = useState(tenant?.website || '');
   const [isSavingBrand, setIsSavingBrand] = useState(false);
 
   // Disparar onboarding paso a paso si llega con welcome=1
@@ -253,9 +253,9 @@ export const ManufacturerDashboard: React.FC = () => {
     );
   }
 
-  const totalCartelesCount = carteles?.filter((s) => s.status !== 'trash').length || 42;
+  const totalCartelesCount = carteles?.filter((s) => s.status !== 'trash').length || 0;
   const cartelesLimit = plan?.cartelesLimit || 50;
-  const totalScansMonth = 2480;
+  const totalScansMonth = carteles?.reduce((acc, c) => acc + (c.scansCount || 0), 0) || 0;
 
   return (
     <div className="space-y-6 text-white">
@@ -265,24 +265,25 @@ export const ManufacturerDashboard: React.FC = () => {
           <div className="flex items-center gap-2">
             <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
             <span className="text-xs font-semibold uppercase tracking-wider text-emerald-300">
-              Panel de Marca Blanca para Fabricantes
+              Panel del Fabricante
             </span>
           </div>
           <h1 className="text-2xl sm:text-3xl font-headline font-bold text-white tracking-tight mt-0.5">
-            Vendé el cartel. Quedate con el cliente.
+            {tenant?.name || 'Taller de Cartelería y Grabado'}
           </h1>
           <p className="text-xs text-white/70 mt-0.5">
-            {tenant?.name || 'Cartelería Demo'} • Infraestructura digital para carteles NFC + QR.
+            Producción de carteles inteligentes con NFC y QR dinámico.
           </p>
         </div>
 
         <div className="flex items-center gap-2.5 flex-wrap">
           <Button
-            variant="ghost"
-            onClick={() => setIsOnboardingOpen(true)}
-            icon={<Sparkles className="w-4 h-4 text-amber-300" />}
+            variant="primary"
+            onClick={() => setIsCreateCartelOpen(true)}
+            icon={<Plus className="w-4 h-4 text-slate-900" />}
+            className="bg-white text-slate-900 hover:bg-slate-100 font-semibold"
           >
-            Tutorial de inicio (9 pasos)
+            Crear cartel (solo link)
           </Button>
 
           <Button
@@ -294,52 +295,67 @@ export const ManufacturerDashboard: React.FC = () => {
           </Button>
 
           <Button
-            variant="primary"
+            variant="secondary"
             onClick={() => setIsQuickBizOpen(true)}
-            icon={<Plus className="w-4 h-4 text-slate-900" />}
+            icon={<Store className="w-4 h-4 text-white" />}
           >
             Nuevo negocio
           </Button>
         </div>
       </div>
 
-      {/* 2. PESTAÑAS DE NAVEGACIÓN SUPERIOR (Liquid Glass Nav Tabs) */}
-      <div className="flex items-center gap-1.5 p-1.5 bg-white/10 rounded-2xl border border-white/15 backdrop-blur-md overflow-x-auto scrollbar-none">
-        {[
-          { id: 'tablero', label: 'Tablero', icon: Store },
-          { id: 'negocios', label: `Negocios (${businesses?.length || 12})`, icon: Factory },
-          { id: 'red_fabricantes', label: 'Red de Fabricantes', icon: Globe },
-          { id: 'kit_impresion', label: 'Kit de impresión', icon: Printer },
-          { id: 'marca', label: 'Marca blanca', icon: Palette },
-          { id: 'plan_facturacion', label: 'Plan y cupo', icon: CreditCard },
-          { id: 'reventa', label: 'Reventa & Ganancia', icon: Calculator },
-          {
-            id: 'reposiciones',
-            label: `Reposiciones ${replacementOrders && replacementOrders.filter((o) => o.status !== 'completed').length > 0 ? `(${replacementOrders.filter((o) => o.status !== 'completed').length})` : ''}`,
-            icon: RotateCcw,
-          },
-          { id: 'equipo', label: 'Equipo', icon: Users },
-          { id: 'ayuda', label: 'Ayuda & Videos', icon: HelpCircle },
-        ].map((tab) => {
-          const Icon = tab.icon;
-          const isActive = activeTab === tab.id;
-          return (
-            <button
-              key={tab.id}
-              type="button"
-              onClick={() => setActiveTab(tab.id as ManufacturerTab)}
-              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-medium whitespace-nowrap transition cursor-pointer ${
-                isActive
-                  ? 'bg-white text-slate-950 font-bold shadow-md border border-white'
-                  : 'text-white/70 hover:text-white hover:bg-white/10'
-              }`}
-            >
-              <Icon className="w-4 h-4 shrink-0" />
-              <span>{tab.label}</span>
-            </button>
-          );
-        })}
-      </div>
+      {/* DISPOSICIÓN CON BARRA LATERAL IZQUIERDA (Punto 2: Más espacio en el panel) */}
+      <div className="flex flex-col md:flex-row gap-6 items-start">
+        {/* BARRA LATERAL IZQUIERDA */}
+        <aside className="w-full md:w-64 shrink-0 p-3 bg-white/5 border border-white/10 rounded-2xl backdrop-blur-md space-y-1.5 sticky top-20">
+          <div className="px-3 py-2 border-b border-white/10 mb-2">
+            <p className="text-[10px] font-bold uppercase tracking-wider text-white/50">
+              Secciones
+            </p>
+            <p className="text-xs font-semibold text-white truncate mt-0.5">
+              {tenant?.name || 'Taller'}
+            </p>
+          </div>
+
+          {[
+            { id: 'tablero', label: 'Tablero', icon: Store },
+            { id: 'carteles', label: `Carteles (${carteles?.filter(s => s.status !== 'trash').length || 0})`, icon: QrCode },
+            { id: 'negocios', label: `Comercios (${businesses?.length || 0})`, icon: Factory },
+            { id: 'red_fabricantes', label: 'Red de Fabricantes', icon: Globe },
+            { id: 'kit_impresion', label: 'Kit de impresión', icon: Printer },
+            {
+              id: 'reposiciones',
+              label: `Reposiciones ${replacementOrders && replacementOrders.filter((o) => o.status !== 'completed').length > 0 ? `(${replacementOrders.filter((o) => o.status !== 'completed').length})` : ''}`,
+              icon: RotateCcw,
+            },
+            { id: 'equipo', label: 'Equipo', icon: Users },
+            { id: 'plan_facturacion', label: 'Plan y cupo', icon: CreditCard },
+          ].map((tab) => {
+            const Icon = tab.icon;
+            const isActive = activeTab === tab.id;
+            return (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => setActiveTab(tab.id as ManufacturerTab)}
+                className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs font-medium transition cursor-pointer ${
+                  isActive
+                    ? 'bg-white text-slate-950 font-bold shadow-md'
+                    : 'text-white/70 hover:text-white hover:bg-white/10'
+                }`}
+              >
+                <div className="flex items-center gap-2.5">
+                  <Icon className="w-4 h-4 shrink-0" />
+                  <span>{tab.label}</span>
+                </div>
+                {isActive && <span className="w-1.5 h-1.5 rounded-full bg-slate-900" />}
+              </button>
+            );
+          })}
+        </aside>
+
+        {/* CONTENEDOR PRINCIPAL DERECHO */}
+        <main className="flex-1 min-w-0 space-y-6">
 
       {/* ============================================================== */}
       {/* VISTA 1: TABLERO GENERAL (OVERVIEW)                            */}
@@ -532,30 +548,100 @@ export const ManufacturerDashboard: React.FC = () => {
                 })}
               </div>
             </Card>
+          </div>
+        </div>
+      )}
 
-            {/* Tarjeta de Reventa Rápida */}
-            <Card className="p-6 flex flex-col justify-between space-y-4">
-              <div className="space-y-3">
-                <div className="flex items-center gap-2 text-indigo-300">
-                  <Calculator className="w-5 h-5" />
-                  <h3 className="text-sm font-semibold text-white">
-                    Calculá tu Ganancia
-                  </h3>
-                </div>
-                <p className="text-xs text-white/70 leading-relaxed">
-                  Cobrando $7.500 ARS/mes por comercio gastronómico a 20 clientes, obtenés más de <strong className="text-white">$130.000 netos mensuales</strong> recurrentes libres de costo.
+      {/* ============================================================== */}
+      {/* VISTA 1.5: GESTIÓN DE CARTELES (SOLO LINK DE GOOGLE MAPS)      */}
+      {/* ============================================================== */}
+      {activeTab === 'carteles' && (
+        <div className="space-y-6">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div>
+              <h2 className="text-xl sm:text-2xl font-headline font-bold text-white tracking-tight">
+                Carteles generados
+              </h2>
+              <p className="text-xs text-white/70 mt-0.5">
+                Para crear un cartel solo ingresá el link de Google Maps. No es necesario dar de alta un comercio antes.
+              </p>
+            </div>
+
+            <Button
+              variant="primary"
+              onClick={() => setIsCreateCartelOpen(true)}
+              icon={<Plus className="w-4 h-4 text-slate-900" />}
+              className="bg-white text-slate-900 hover:bg-slate-100 font-semibold"
+            >
+              Crear nuevo cartel
+            </Button>
+          </div>
+
+          {(!carteles || carteles.filter(s => s.status !== 'trash').length === 0) ? (
+            <Card className="p-10 text-center space-y-4 border-white/20 bg-white/10 backdrop-blur-md">
+              <div className="w-12 h-12 rounded-2xl bg-cyan-400/20 text-cyan-300 mx-auto flex items-center justify-center border border-cyan-400/30">
+                <QrCode className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="font-headline text-lg font-bold text-white">
+                  No tenés carteles creados aún
+                </h3>
+                <p className="text-xs text-white/70 mt-1 max-w-md mx-auto leading-relaxed">
+                  Generá carteles físicos pegando directamente la URL de reseñas de Google Maps de tus clientes.
                 </p>
               </div>
-
               <Button
-                variant="secondary"
-                className="w-full justify-center"
-                onClick={() => setActiveTab('reventa')}
+                variant="primary"
+                onClick={() => setIsCreateCartelOpen(true)}
+                icon={<Plus className="w-4 h-4 text-slate-900" />}
+                className="bg-white text-slate-900 hover:bg-slate-100 font-semibold"
               >
-                Abrir calculadora de reventa
+                Crear primer cartel
               </Button>
             </Card>
-          </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {carteles.filter(s => s.status !== 'trash').map((c) => (
+                <Card key={c.id} className="p-5 border-white/20 bg-white/10 backdrop-blur-md space-y-3">
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <h4 className="font-headline text-base font-bold text-white">{c.name}</h4>
+                      <p className="text-xs text-white/60">{c.locationDescription || 'Ubicación física lista'}</p>
+                    </div>
+                    <span className="font-mono text-[11px] bg-white/10 text-cyan-300 px-2 py-0.5 rounded font-bold">
+                      {c.code || c.shortCode}
+                    </span>
+                  </div>
+
+                  <div className="p-2.5 rounded-xl bg-black/40 border border-white/10 font-mono text-xs text-white/90 space-y-1.5">
+                    <div className="flex justify-between items-center text-[11px]">
+                      <span className="text-white/60">Enlace dinámico:</span>
+                      <a href={getShortUrl(c.shortCode)} target="_blank" rel="noopener noreferrer" className="text-cyan-300 hover:underline flex items-center gap-1">
+                        {getShortUrlDisplay(c.shortCode)}
+                        <ExternalLink className="w-3 h-3" />
+                      </a>
+                    </div>
+                    <div className="flex justify-between items-center text-[11px] truncate">
+                      <span className="text-white/60">Destino Maps:</span>
+                      <span className="text-white/80 truncate max-w-[200px]">{c.targetUrl}</span>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between text-xs text-white/70 pt-1">
+                    <span>{c.scansCount || 0} toques registrados</span>
+                    <button
+                      type="button"
+                      onClick={() => setReplaceCartelTarget(c)}
+                      className="text-amber-300 hover:underline text-[11px] flex items-center gap-1 cursor-pointer"
+                    >
+                      <RotateCcw className="w-3 h-3" />
+                      Reemplazar por rotura
+                    </button>
+                  </div>
+                </Card>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
@@ -785,131 +871,6 @@ export const ManufacturerDashboard: React.FC = () => {
       )}
 
       {/* ============================================================== */}
-      {/* VISTA 4: CONFIGURACIÓN DE MARCA BLANCA                        */}
-      {/* ============================================================== */}
-      {activeTab === 'marca' && (
-        <div className="space-y-6">
-          <div>
-            <h2 className="text-xl sm:text-2xl font-headline font-bold text-white">
-              Personalización de Marca Blanca
-            </h2>
-            <p className="text-xs text-white/70 mt-0.5">
-              Tus comercios ingresan a paneles con tu logo, color institucional y datos de soporte.
-            </p>
-          </div>
-
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <Card className="p-6 space-y-5">
-              <h3 className="text-sm font-semibold text-white flex items-center gap-2">
-                <Palette className="w-4 h-4 text-indigo-300" />
-                <span>Datos y Estilo de Marca</span>
-              </h3>
-
-              <div className="space-y-4">
-                <Input
-                  label="Nombre de tu empresa fabricante"
-                  value={brandNameInput}
-                  onChange={(e) => setBrandNameInput(e.target.value)}
-                  placeholder="ej. Cartelería Gómez"
-                />
-
-                <Input
-                  label="URL del logotipo (opcional)"
-                  value={brandLogoInput}
-                  onChange={(e) => setBrandLogoInput(e.target.value)}
-                  placeholder="https://miempresa.com/logo.png"
-                  helperText="Si lo dejás vacío, se utilizará el sello tipográfico con acento estelar"
-                />
-
-                <div>
-                  <label className="text-xs font-medium text-white block mb-1.5">
-                    Color primario (--brand)
-                  </label>
-                  <div className="flex items-center gap-3">
-                    <input
-                      type="color"
-                      value={brandColorInput}
-                      onChange={(e) => {
-                        setBrandColorInput(e.target.value);
-                        setBrandColor(e.target.value);
-                      }}
-                      className="w-12 h-11 p-1 bg-white/10 rounded-xl border border-white/20 cursor-pointer"
-                    />
-                    <Input
-                      value={brandColorInput}
-                      onChange={(e) => {
-                        setBrandColorInput(e.target.value);
-                        setBrandColor(e.target.value);
-                      }}
-                      className="font-mono uppercase"
-                    />
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t border-white/10">
-                  <Input
-                    label="WhatsApp de soporte oficial"
-                    type="tel"
-                    value={supportPhoneInput}
-                    onChange={(e) => setSupportPhoneInput(e.target.value)}
-                  />
-
-                  <Input
-                    label="Correo de soporte"
-                    type="email"
-                    value={supportEmailInput}
-                    onChange={(e) => setSupportEmailInput(e.target.value)}
-                  />
-                </div>
-
-                <div className="pt-2 border-t border-white/10 space-y-2">
-                  <Input
-                    label="Dominio propio de redirección (Opcional)"
-                    value={customDomainInput}
-                    onChange={(e) => setCustomDomainInput(e.target.value)}
-                    placeholder="carteles.miempresa.com.ar"
-                  />
-                  <div className="p-3 rounded-2xl bg-white/10 border border-white/15 text-xs text-white/80 flex items-start gap-2">
-                    <ShieldCheck className="w-4 h-4 text-emerald-300 shrink-0 mt-0.5" />
-                    <span>
-                      <strong className="text-white">Aviso de resiliencia:</strong> Si alguna vez perdés o se cae tu dominio propio, los carteles físicos siguen funcionando siempre por el nuestro.
-                    </span>
-                  </div>
-                </div>
-
-                <Button
-                  variant="primary"
-                  onClick={handleSaveBrand}
-                  isLoading={isSavingBrand}
-                  className="w-full justify-center"
-                  icon={<Check className="w-4 h-4 text-slate-900" />}
-                >
-                  Guardar y aplicar a todos los paneles
-                </Button>
-              </div>
-            </Card>
-
-            {/* VISTA PREVIA EN VIVO */}
-            <div className="space-y-4">
-              <BrandPreview
-                brandName={brandNameInput}
-                brandColor={brandColorInput}
-                contrastRatio={contrastInfo.ratio}
-                passesAA={contrastInfo.passesAA}
-                recommendedColor={contrastInfo.recommendedColor}
-                onApplyRecommended={() => {
-                  if (contrastInfo.recommendedColor) {
-                    setBrandColorInput(contrastInfo.recommendedColor);
-                    setBrandColor(contrastInfo.recommendedColor);
-                  }
-                }}
-              />
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ============================================================== */}
       {/* VISTA 5: PLAN Y FACTURACIÓN                                    */}
       {/* ============================================================== */}
       {activeTab === 'plan_facturacion' && plan && (
@@ -922,12 +883,7 @@ export const ManufacturerDashboard: React.FC = () => {
       )}
 
       {/* ============================================================== */}
-      {/* VISTA 6: REVENTA Y CALCULADORA                                 */}
-      {/* ============================================================== */}
-      {activeTab === 'reventa' && <ResaleCalculatorView />}
-
-      {/* ============================================================== */}
-      {/* VISTA 7: BANDEJA DE REPOSICIONES                               */}
+      {/* VISTA 6: BANDEJA DE REPOSICIONES                               */}
       {/* ============================================================== */}
       {activeTab === 'reposiciones' && (
         <ReplacementOrdersView
@@ -937,7 +893,7 @@ export const ManufacturerDashboard: React.FC = () => {
       )}
 
       {/* ============================================================== */}
-      {/* VISTA 8: EQUIPO DEL TALLER                                     */}
+      {/* VISTA 7: EQUIPO DEL TALLER                                     */}
       {/* ============================================================== */}
       {activeTab === 'equipo' && (
         <ManufacturerStaffView
@@ -946,11 +902,8 @@ export const ManufacturerDashboard: React.FC = () => {
           onStaffUpdated={refetchStaff}
         />
       )}
-
-      {/* ============================================================== */}
-      {/* VISTA 9: AYUDA Y TUTORIALES EN VIDEO                           */}
-      {/* ============================================================== */}
-      {activeTab === 'ayuda' && <ManufacturerHelpView />}
+        </main>
+      </div>
 
       {/* ============================================================== */}
       {/* MODALES CONECTADOS                                             */}
@@ -961,6 +914,17 @@ export const ManufacturerDashboard: React.FC = () => {
         isOpen={!!atRiskTarget}
         onClose={() => setAtRiskTarget(null)}
         atRiskItem={atRiskTarget}
+      />
+
+      {/* Modal Crear Cartel Directo (Solo link de Google Maps) */}
+      <CreateCartelModal
+        isOpen={isCreateCartelOpen}
+        onClose={() => setIsCreateCartelOpen(false)}
+        manufacturerId={manufacturerId}
+        onCartelesCreated={() => {
+          refetchCarteles();
+          refetchPlan();
+        }}
       />
 
       {/* Modal Alta Rápida de Negocio */}
@@ -995,17 +959,6 @@ export const ManufacturerDashboard: React.FC = () => {
         onSuccess={() => {
           refetchCarteles();
           refetchOrders();
-        }}
-      />
-
-      {/* Wizard de Onboarding del Fabricante */}
-      <ManufacturerOnboardingWizard
-        isOpen={isOnboardingOpen}
-        onClose={() => setIsOnboardingOpen(false)}
-        onFinish={() => {
-          refetchBiz();
-          refetchCarteles();
-          refetchPlan();
         }}
       />
     </div>

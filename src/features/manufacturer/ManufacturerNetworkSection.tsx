@@ -47,23 +47,16 @@ export const ManufacturerNetworkSection: React.FC<ManufacturerNetworkSectionProp
   const isAllowedPlan = plan.includes('taller') || plan.includes('fabrica') || tenant?.isDemo;
 
   const [inNetwork, setInNetwork] = useState(tenant?.inNetwork ?? true);
-  const [phone, setPhone] = useState(tenant?.phone || '+54 9 11 5821-4433');
-  const [city, setCity] = useState(tenant?.city || 'CABA y Gran Buenos Aires');
-  const [address, setAddress] = useState(tenant?.address || 'Av. San Martín 2450');
-  const [website, setWebsite] = useState(tenant?.website || 'https://rexitecnologies.com.ar');
-  const [leadTime, setLeadTime] = useState(tenant?.leadTime || '48 a 72 hs hábiles');
-  const [description, setDescription] = useState(
-    tenant?.description ||
-      'Taller especializado en soportes acrílicos y de madera para gastronomía con chips NFC antimetal y protección UV.'
-  );
+  const [phone, setPhone] = useState(tenant?.phone || '');
+  const [city, setCity] = useState(tenant?.city || '');
+  const [address, setAddress] = useState(tenant?.address || '');
+  const [website, setWebsite] = useState(tenant?.website || '');
+  const [leadTime, setLeadTime] = useState(tenant?.leadTime || '');
+  const [description, setDescription] = useState(tenant?.description || '');
 
   // Materiales y formatos
-  const [materialsText, setMaterialsText] = useState(
-    (tenant?.materials || ['Acrílico Cristal 3mm', 'Impresión UV Ultra HD', 'Chips NTAG215 Blindados', 'Madera Petiribí']).join(', ')
-  );
-  const [formatsText, setFormatsText] = useState(
-    (tenant?.formats || ['Placa de mostrador 10x15cm', 'Pirámide de mesa', 'Tótem con base de madera', 'Sticker blindado']).join(', ')
-  );
+  const [materialsText, setMaterialsText] = useState((tenant?.materials || []).join(', '));
+  const [formatsText, setFormatsText] = useState((tenant?.formats || []).join(', '));
 
   // Catálogo de productos con precios
   const [products, setProducts] = useState<Array<{
@@ -74,39 +67,7 @@ export const ManufacturerNetworkSection: React.FC<ManufacturerNetworkSectionProp
     price: number;
     description: string;
     estimatedDays: number;
-  }>>(
-    tenant?.products && tenant.products.length > 0
-      ? tenant.products
-      : [
-          {
-            id: 'prod-1',
-            name: 'Cartel Acrílico de Mostrador',
-            format: 'Placa L inclinada 10x15 cm',
-            material: 'Acrílico cristal 3mm + Chip NFC NTAG215 + QR',
-            price: 7900,
-            description: 'Ideal para caja y mostrador de atención rápida.',
-            estimatedDays: 2,
-          },
-          {
-            id: 'prod-2',
-            name: 'Pirámide de Mesa Doble Faz',
-            format: 'Pirámide 8x12 cm',
-            material: 'Acrílico termoformado reforzado',
-            price: 9400,
-            description: 'Visible desde ambos lados de la mesa del restaurante.',
-            estimatedDays: 3,
-          },
-          {
-            id: 'prod-3',
-            name: 'Soporte Premium Base Madera',
-            format: 'Base 12x5 cm con placa 10x15 cm',
-            material: 'Madera natural tratada + Acrílico esmerilado',
-            price: 12500,
-            description: 'Para cafeterías de especialidad y hoteles boutique.',
-            estimatedDays: 4,
-          },
-        ]
-  );
+  }>>(tenant?.products || []);
 
   const [newProdName, setNewProdName] = useState('');
   const [newProdFormat, setNewProdFormat] = useState('');

@@ -14,6 +14,7 @@ import { Card } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
 import { useToast } from '../../components/ui/Toast';
+import { Dialog } from '../../components/ui/Dialog';
 import {
   Factory,
   Search,
@@ -29,6 +30,7 @@ import {
   Layers,
   Send,
   Info,
+  Clock,
 } from 'lucide-react';
 
 export const ManufacturersDirectoryView: React.FC = () => {
@@ -40,6 +42,7 @@ export const ManufacturersDirectoryView: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedMaterial, setSelectedMaterial] = useState<string>('all');
+  const [selectedMfgForDetails, setSelectedMfgForDetails] = useState<Tenant | null>(null);
 
   // Estado del formulario de nueva reseña
   const [reviewModalMfg, setReviewModalMfg] = useState<Tenant | null>(null);

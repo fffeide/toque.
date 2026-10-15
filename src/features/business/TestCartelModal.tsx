@@ -12,6 +12,7 @@ import { Cartel } from '../../api/types';
 import { api } from '../../api';
 import { useToast } from '../../components/ui/Toast';
 import { Smartphone, QrCode, ExternalLink, Check, Copy } from 'lucide-react';
+import { getShortUrl, getShortUrlDisplay } from '../../lib/urls';
 
 interface TestCartelModalProps {
   isOpen: boolean;

@@ -37,6 +37,8 @@ import {
   Server,
   Zap,
   Palette,
+  ShieldCheck,
+  MessageSquare,
 } from 'lucide-react';
 
 export const AdminDashboard: React.FC = () => {

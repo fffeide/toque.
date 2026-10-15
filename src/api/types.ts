@@ -232,12 +232,14 @@ export interface ChannelMetric {
 
 export interface StaffMember {
   id: string;
+  businessId?: string;
   name: string;
   role: string; // 'Mozo salón', 'Cajero', 'Barista'
   shortCode: string;
   scansThisMonth: number;
   rank: number;
   avatar?: string;
+  active?: boolean;
 }
 
 export interface WeeklyReportPreview {

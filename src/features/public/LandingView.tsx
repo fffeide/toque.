@@ -145,7 +145,7 @@ export const LandingView: React.FC = () => {
   const profitMarginPercent = grossMonthlyRevenue > 0 ? Math.round((netMonthlyProfit / grossMonthlyRevenue) * 100) : 0;
 
   // Validación y envío del formulario beta
-  const handleBetaSubmit = (e: React.FormEvent) => {
+  const handleBetaSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const errors: Record<string, string> = {};
 

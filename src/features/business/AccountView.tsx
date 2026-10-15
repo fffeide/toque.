@@ -21,6 +21,7 @@ import { ThemeToggle } from '../../components/ui/ThemeToggle';
 import { SegmentedControl } from '../../components/ui/SegmentedControl';
 import { BrandLogo } from '../../components/ui/Avatar';
 import { BusinessOnboardingModal } from './BusinessOnboardingModal';
+import { ManufacturerNetworkSection } from '../manufacturer/ManufacturerNetworkSection';
 import { useToast } from '../../components/ui/Toast';
 import { validateGoogleReviewUrl } from '../../lib/urlValidator';
 import {
@@ -39,6 +40,7 @@ import {
   Tag,
   Save,
   ShieldCheck,
+  Factory,
 } from 'lucide-react';
 
 export const AccountView: React.FC = () => {
@@ -51,7 +53,9 @@ export const AccountView: React.FC = () => {
     tenant?.type === 'manufacturer' || 
     user?.role === 'manufacturer_admin' || 
     user?.email?.toLowerCase().includes('fabricante') ||
-    location.pathname.startsWith('/fabricante');
+    tenant?.plan === 'taller' ||
+    tenant?.plan === 'fabrica' ||
+    tenant?.plan === 'arranque';
 
   const [isOnboardingOpen, setIsOnboardingOpen] = useState(false);
   const [textSize, setTextSize] = useState<'normal' | 'large'>('normal');
@@ -331,6 +335,19 @@ export const AccountView: React.FC = () => {
             </Button>
           </div>
         </Card>
+      )}
+
+      {/* RED DE FABRICANTES 100% EDITABLE DENTRO DE MI CUENTA (Puntos 5 y 8) */}
+      {isManufacturer && (
+        <div className="space-y-4 pt-2">
+          <div className="flex items-center gap-2">
+            <Globe className="w-5 h-5 text-emerald-400" />
+            <h3 className="font-headline text-lg font-bold text-white">
+              Tu Perfil en la Red Oficial de Fabricantes
+            </h3>
+          </div>
+          <ManufacturerNetworkSection tenant={tenant} />
+        </div>
       )}
 
       {/* 2. DATOS DEL COMERCIO EDITABLES Y GUARDABLES (Punto 10 y 13) */}

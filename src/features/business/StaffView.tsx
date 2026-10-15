@@ -38,7 +38,7 @@ import {
 export const StaffView: React.FC = () => {
   const { tenant } = useAuth();
   const { success, error: toastError } = useToast();
-  const businessId = tenant?.type === 'business' ? tenant.id : 'biz-esquina';
+  const businessId = tenant?.id || 'biz-default';
   const [selectedStaffForQr, setSelectedStaffForQr] = useState<StaffMember | null>(null);
   const [copiedCode, setCopiedCode] = useState(false);
 
@@ -138,9 +138,39 @@ export const StaffView: React.FC = () => {
         </div>
       </div>
 
-      {/* Lista del Ranking */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {staffList.map((member) => (
+      {/* Lista del Ranking o Estado Vacío */}
+      {staffList.length === 0 ? (
+        <Card className="p-8 sm:p-12 text-center space-y-4 border-white/20 bg-white/10 backdrop-blur-md max-w-xl mx-auto">
+          <div className="w-14 h-14 rounded-2xl bg-amber-400/20 text-amber-300 mx-auto flex items-center justify-center border border-amber-400/30">
+            <Users className="w-7 h-7" />
+          </div>
+          <div>
+            <h3 className="font-headline text-lg font-bold text-white">
+              Aún no agregaste colaboradores
+            </h3>
+            <p className="text-xs text-white/70 mt-1 max-w-sm mx-auto leading-relaxed">
+              Creá perfiles para tus mozos, cajeros o baristas. Cada uno tendrá su propio enlace y QR para medir a quién felicitan más los comensales.
+            </p>
+          </div>
+          <div className="pt-2">
+            <Button
+              variant="primary"
+              onClick={() => {
+                setEditingStaff(null);
+                setStaffName('');
+                setStaffRole('');
+                setIsAddModalOpen(true);
+              }}
+              icon={<Plus className="w-4 h-4 text-slate-900" />}
+              className="bg-white text-slate-900 hover:bg-slate-100 font-semibold"
+            >
+              Agregar primer colaborador
+            </Button>
+          </div>
+        </Card>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {staffList.map((member) => (
           <Card key={member.id} className="p-5 flex items-center justify-between gap-4">
             <div className="flex items-center gap-4 min-w-0">
               <div className={`w-11 h-11 rounded-2xl flex items-center justify-center font-headline font-bold text-base shrink-0 border ${
@@ -208,6 +238,7 @@ export const StaffView: React.FC = () => {
           </Card>
         ))}
       </div>
+      )}
 
       {/* Modal de QR de Empleado */}
       {selectedStaffForQr && (

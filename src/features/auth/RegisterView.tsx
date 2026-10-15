@@ -92,11 +92,11 @@ export const RegisterView: React.FC = () => {
         `Bienvenido a Toque, ${res.user.name}. Ingresando a tu panel...`
       );
 
-      // Redirección inmediata al panel correspondiente según lo elegido
+      // Redirección inmediata al panel correspondiente según lo elegido con bienvenida
       if (activity === 'fabricante') {
-        navigate('/fabricante', { replace: true });
+        navigate('/fabricante?welcome=1', { replace: true });
       } else {
-        navigate('/resumen', { replace: true });
+        navigate('/resumen?welcome=1', { replace: true });
       }
     } catch (err) {
       toastError(
@@ -124,9 +124,9 @@ export const RegisterView: React.FC = () => {
       });
       success('Acceso con Google completado', `Hola, ${res.user.name}`);
       if (activity === 'fabricante') {
-        navigate('/fabricante', { replace: true });
+        navigate('/fabricante?welcome=1', { replace: true });
       } else {
-        navigate('/resumen', { replace: true });
+        navigate('/resumen?welcome=1', { replace: true });
       }
     } catch (err) {
       toastError('Error al iniciar con Google', 'Intentá con correo y contraseña');
@@ -566,7 +566,7 @@ export const RegisterView: React.FC = () => {
                   <span>Tu panel te dará la bienvenida con el asistente paso a paso de configuración física.</span>
                 </div>
 
-                <div className="flex items-center justify-between pt-2">
+                <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-2">
                   <Button
                     type="button"
                     variant="ghost"
@@ -576,16 +576,28 @@ export const RegisterView: React.FC = () => {
                   >
                     Volver
                   </Button>
-                  <Button
-                    type="button"
-                    variant="primary"
-                    isLoading={isSubmitting}
-                    onClick={handleCompleteRegistration}
-                    className="bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold px-6 shadow-lg shadow-emerald-500/20"
-                    rightIcon={<Sparkles className="w-4 h-4 text-slate-950" />}
-                  >
-                    Comenzar ahora
-                  </Button>
+                  
+                  <div className="flex items-center gap-2 w-full sm:w-auto">
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      onClick={() => navigate(`/login?registered=1&email=${encodeURIComponent(email)}&pass=${encodeURIComponent(password)}`)}
+                      className="text-xs"
+                      disabled={isSubmitting}
+                    >
+                      Ir a pantalla de Login
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="primary"
+                      isLoading={isSubmitting}
+                      onClick={handleCompleteRegistration}
+                      className="bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold px-6 shadow-lg shadow-emerald-500/20"
+                      rightIcon={<Sparkles className="w-4 h-4 text-slate-950" />}
+                    >
+                      Comenzar ahora
+                    </Button>
+                  </div>
                 </div>
               </motion.div>
             )}

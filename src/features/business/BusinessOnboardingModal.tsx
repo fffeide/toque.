@@ -81,11 +81,29 @@ export const BusinessOnboardingModal: React.FC<BusinessOnboardingModalProps> = (
     }
   };
 
-  const { user, markUserOnboarded } = useAuth();
+  const { user, markUserOnboarded, updateTenantState } = useAuth();
 
   const handleFinish = async () => {
     try {
-      await markUserOnboarded(user?.id);
+      if (tenant?.id) {
+        if (api.claimCartelesByGoogleMapsUrl && reviewUrl) {
+          const res = await api.claimCartelesByGoogleMapsUrl(tenant.id, reviewUrl);
+          if (res.claimedCount > 0) {
+            success('Carteles vinculados', `Se vincularon ${res.claimedCount} cartel(es) físico(s) a tu panel.`);
+          }
+        }
+        const patch = {
+          name: bizName,
+          address: bizAddress,
+          category: bizCategory,
+          reviewUrl: reviewUrl,
+        };
+        await api.updateTenant(tenant.id, patch);
+        updateTenantState(patch);
+      }
+      if (user?.id) {
+        await markUserOnboarded(user.id);
+      }
     } catch {
       // fallback
     }

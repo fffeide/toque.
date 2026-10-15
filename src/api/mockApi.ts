@@ -10,6 +10,7 @@
 import { ToqueApi } from './ToqueApi';
 import {
   Tenant,
+  TenantType,
   User,
   UserRole,
   Cartel,
@@ -37,8 +38,8 @@ import {
 import { validateGoogleReviewUrl } from '../lib/urlValidator';
 import { generateAccountCode, generateCartelCode } from '../lib/codeGenerator';
 
-const STORAGE_KEY = 'toque_real_db_v3';
-const SESSION_USER_KEY = 'toque_real_session_user_v3';
+const STORAGE_KEY = 'toque_real_db_v4';
+const SESSION_USER_KEY = 'toque_real_session_user_v4';
 
 // Generador determinista de números pseudoaleatorios (Linear Congruential Generator)
 function pseudoRandom(seed: number): () => number {
@@ -64,8 +65,6 @@ interface MockDatabase {
 }
 
 function createInitialDatabase(): MockDatabase {
-  const rand = pseudoRandom(42);
-
   // 1. Tenants
   const platformTenant: Tenant = {
     id: 'tenant-platform',
@@ -80,45 +79,16 @@ function createInitialDatabase(): MockDatabase {
   const manufacturerTenant: Tenant = {
     id: 'tenant-mfg-demo',
     type: 'manufacturer',
-    name: 'Cartelería Demo',
-    slug: 'carteleria-demo',
+    name: 'Taller Fabricante',
+    slug: 'taller-fabricante',
     brandColor: '#3A3FE0',
-    contactEmail: 'hola@carteleriademo.com.ar',
-    isDemo: true,
+    contactEmail: 'fabricante@toque.ar',
+    isDemo: false,
     createdAt: '2026-02-01T00:00:00Z',
   };
 
-  const businessNames = [
-    { name: 'Café & Bistro La Esquina', slug: 'la-esquina', id: 'biz-esquina', cartelesCount: 6 },
-    { name: 'Pizzería San Telmo', slug: 'san-telmo', id: 'biz-san-telmo', cartelesCount: 5 },
-    { name: 'Barba & Bigote Barbería', slug: 'barba-bigote', id: 'biz-barba-bigote', cartelesCount: 3 },
-    { name: 'Taller Mecánico Los Hermanos', slug: 'taller-hermanos', id: 'biz-taller-hermanos', cartelesCount: 3 },
-    { name: 'Heladería Dulce Nieve', slug: 'dulce-nieve', id: 'biz-dulce-nieve', cartelesCount: 4 },
-    { name: 'Hamburguesería Central', slug: 'central-burger', id: 'biz-central-burger', cartelesCount: 4 },
-    { name: 'Clínica Veterinaria Huellas', slug: 'vet-huellas', id: 'biz-vet-huellas', cartelesCount: 3 },
-    { name: 'Farmacia del Parque', slug: 'farmacia-parque', id: 'biz-farmacia-parque', cartelesCount: 2 },
-    { name: 'Restaurante El Bodegón', slug: 'el-bodegon', id: 'biz-el-bodegon', cartelesCount: 4 },
-    { name: 'Gimnasio IronBox', slug: 'iron-box', id: 'biz-iron-box', cartelesCount: 2 },
-    { name: 'Óptica Mirador', slug: 'optica-mirador', id: 'biz-optica-mirador', cartelesCount: 2 },
-    { name: 'Panadería Artesanal San Cayetano', slug: 'san-cayetano', id: 'biz-san-cayetano', cartelesCount: 2 },
-  ];
-
-  const businessTenants: Tenant[] = businessNames.map(b => ({
-    id: b.id,
-    type: 'business',
-    name: b.name,
-    slug: b.slug,
-    manufacturerId: 'tenant-mfg-demo',
-    contactEmail: `contacto@${b.slug}.com.ar`,
-    isDemo: true,
-    features: {
-      channels: true,
-      staff: true,
-    },
-    createdAt: '2026-03-01T00:00:00Z',
-  }));
-
-  const allTenants = [platformTenant, manufacturerTenant, ...businessTenants];
+  // Sin negocios falsos ni inventados: se crean cuando un negocio se registra o abre su panel
+  const allTenants = [platformTenant, manufacturerTenant];
 
   // 2. Usuarios
   const users: User[] = [
@@ -126,23 +96,23 @@ function createInitialDatabase(): MockDatabase {
       id: 'user-platform-admin',
       tenantId: 'tenant-platform',
       email: 'admin@toque.ar',
-      name: 'Martín Romero (Dueño Toque)',
+      name: 'Administrador Toque',
       role: 'platform_admin',
       hasSeenOnboarding: true,
     },
     {
       id: 'user-mfg-admin',
       tenantId: 'tenant-mfg-demo',
-      email: 'ventas@carteleriademo.com.ar',
-      name: 'Federico Gómez (Fabricante)',
+      email: 'fabricante@toque.ar',
+      name: 'Taller Fabricante',
       role: 'manufacturer_admin',
-      hasSeenOnboarding: false,
+      hasSeenOnboarding: true,
     },
     {
       id: 'user-biz-owner',
-      tenantId: 'biz-esquina',
-      email: 'fede@laesquina.com.ar',
-      name: 'Valeria Rossi (Café La Esquina)',
+      tenantId: 'tenant-platform',
+      email: 'negocio@toque.ar',
+      name: 'Comercio',
       role: 'business_owner',
       hasSeenOnboarding: false,
     },
@@ -156,114 +126,20 @@ function createInitialDatabase(): MockDatabase {
     },
   ];
 
-  // 3. Carteles (Total 40)
-  const cartelLocations = [
-    'Mesa 1 — Terraza', 'Mesa 4 — Salón Principal', 'Mostrador de Caja', 'Barra de Café',
-    'Mesa 12 — Ventanal', 'Recepción de Entrada', 'Caja 2 — Take Away', 'Espejo Principal',
-    'Mostrador de Entrega', 'Mesa 8 — Patio', 'Mesa 6 — Salón VIP', 'Caja Cobro Rápido'
-  ];
-
   // 3. Carteles reales creados por el usuario (sin carteles falsos)
   const carteles: Cartel[] = [];
 
   // 4. Escaneos reales (sin telemetría simulada inventada)
   const scans: Scan[] = [];
 
-  // 5. Alertas
-  const alerts: Alert[] = [
-    {
-      id: 'alert-1',
-      tenantId: 'biz-esquina',
-      type: 'first_scan',
-      title: '¡Tu cartel ya está trabajando!',
-      message: 'El cartel "Mesa 4 — Salón Principal" registró su primer escaneo de cliente.',
-      severity: 'info',
-      read: true,
-      createdAt: new Date(Date.now() - 86400000 * 2).toISOString(),
-    },
-    {
-      id: 'alert-2',
-      tenantId: 'biz-esquina',
-      type: 'inactivity',
-      title: 'Cartel sin movimiento reciente',
-      message: 'El cartel "Caja 2 — Take Away" no registró toques en los últimos 7 días. Verificá si está bien ubicado o si tiene visibilidad.',
-      severity: 'warning',
-      read: false,
-      createdAt: new Date(Date.now() - 86400000 * 1).toISOString(),
-    },
-  ];
+  // 5. Alertas reales
+  const alerts: Alert[] = [];
 
-  // 6. Reportes Mensuales
-  const reports: Report[] = [
-    {
-      id: 'rep-2026-09',
-      businessId: 'biz-esquina',
-      month: '2026-09',
-      totalScans: 486,
-      nfcScans: 284,
-      qrScans: 202,
-      estimatedReviews: 136,
-      topCartelId: carteles[1]?.id || 'cartel-101',
-    },
-    {
-      id: 'rep-2026-08',
-      businessId: 'biz-esquina',
-      month: '2026-08',
-      totalScans: 412,
-      nfcScans: 238,
-      qrScans: 174,
-      estimatedReviews: 115,
-      topCartelId: carteles[0]?.id || 'cartel-100',
-    },
-    {
-      id: 'rep-2026-07',
-      businessId: 'biz-esquina',
-      month: '2026-07',
-      totalScans: 350,
-      nfcScans: 205,
-      qrScans: 145,
-      estimatedReviews: 98,
-      topCartelId: carteles[1]?.id || 'cartel-101',
-    },
-  ];
+  // 6. Reportes Mensuales reales
+  const reports: Report[] = [];
 
-  // 7. Pedidos de reposición de los negocios
-  const replacementOrders: ReplacementOrder[] = [
-    {
-      id: 'rep-ord-1',
-      businessId: 'biz-esquina',
-      businessName: 'Café & Bistro La Esquina',
-      cartelId: carteles[0]?.id || 'cartel-100',
-      cartelName: 'Mesa 4 — Salón Principal',
-      shortCode: 'esq-m4',
-      reason: 'chip_failure',
-      status: 'pending',
-      requestedAt: new Date(Date.now() - 86400000 * 2).toISOString(),
-    },
-    {
-      id: 'rep-ord-2',
-      businessId: 'biz-san-telmo',
-      businessName: 'Pizzería San Telmo',
-      cartelId: 'cartel-san-telmo-2',
-      cartelName: 'Mesa 8 — Patio',
-      shortCode: 'st-m8',
-      reason: 'broken',
-      status: 'in_progress',
-      requestedAt: new Date(Date.now() - 86400000 * 5).toISOString(),
-    },
-    {
-      id: 'rep-ord-3',
-      businessId: 'biz-barba-bigote',
-      businessName: 'Barba & Bigote Barbería',
-      cartelId: 'cartel-barba-1',
-      cartelName: 'Sillón 1 — Entrada',
-      shortCode: 'bb-s1',
-      reason: 'design_update',
-      status: 'completed',
-      requestedAt: new Date(Date.now() - 86400000 * 12).toISOString(),
-      completedAt: new Date(Date.now() - 86400000 * 8).toISOString(),
-    },
-  ];
+  // 7. Pedidos de reposición reales
+  const replacementOrders: ReplacementOrder[] = [];
 
   // 8. Equipo del taller fabricante
   const manufacturerStaff: ManufacturerStaffUser[] = [
@@ -845,6 +721,87 @@ class MockApiImpl implements ToqueApi {
     return newCartel;
   }
 
+  async createCartelFromLink(data: {
+    targetUrl: string;
+    name?: string;
+    quantity?: number;
+    manufacturerId?: string;
+  }): Promise<Cartel[]> {
+    const validation = validateGoogleReviewUrl(data.targetUrl);
+    if (!validation.isValid) {
+      throw new Error(validation.error || 'Ingresá un enlace válido de Google Maps');
+    }
+    const cleanUrl = validation.sanitizedUrl || data.targetUrl.trim();
+    const qty = Math.max(1, Math.min(50, data.quantity || 1));
+    const createdList: Cartel[] = [];
+    const mfgTenant = data.manufacturerId ? this.db.tenants.find(t => t.id === data.manufacturerId) : null;
+    const mfgCode = mfgTenant?.accountCode || 'TQ-01';
+
+    for (let i = 0; i < qty; i++) {
+      const shortCode = Math.random().toString(36).substring(2, 7);
+      const seq = this.db.carteles.length + 1;
+      const cartelName = qty > 1 
+        ? `${data.name || 'Cartel físico'} #${i + 1}` 
+        : (data.name || 'Cartel físico');
+      const code = `${mfgCode.split('-')[0]}-MAP-${String(seq).padStart(2, '0')}`;
+
+      const newCartel: Cartel = {
+        id: `cartel-${Date.now()}-${i}`,
+        tenantId: data.manufacturerId || 'unassigned',
+        businessId: 'unassigned',
+        manufacturerId: data.manufacturerId || 'tenant-mfg-demo',
+        code,
+        shortCode,
+        name: cartelName,
+        locationDescription: 'Listo para colocar en salón o mostrador',
+        targetUrl: cleanUrl,
+        nfcEnabled: true,
+        qrEnabled: true,
+        status: 'active',
+        scansCount: 0,
+        estimatedReviewsCount: 0,
+        createdAt: new Date().toISOString(),
+      };
+      this.db.carteles.unshift(newCartel);
+      createdList.push(newCartel);
+    }
+    this.saveDatabase(this.db);
+    return createdList;
+  }
+
+  async claimCartelesByGoogleMapsUrl(
+    businessId: string,
+    googleMapsUrl: string,
+    shortCode?: string
+  ): Promise<{ claimedCount: number; carteles: Cartel[] }> {
+    const cleanUrl = googleMapsUrl.trim().toLowerCase();
+    const claimed: Cartel[] = [];
+
+    this.db.carteles.forEach((c) => {
+      let isMatch = false;
+      if (shortCode && c.shortCode.toLowerCase() === shortCode.trim().toLowerCase()) {
+        isMatch = true;
+      } else if (cleanUrl && c.targetUrl) {
+        const cUrl = c.targetUrl.toLowerCase();
+        // Match exact or placeId
+        if (cUrl === cleanUrl) isMatch = true;
+        const placeIdMatch = cleanUrl.match(/placeid=([a-zA-Z0-9_-]+)/);
+        if (placeIdMatch && cUrl.includes(placeIdMatch[1])) isMatch = true;
+      }
+
+      if (isMatch) {
+        c.businessId = businessId;
+        c.tenantId = businessId;
+        claimed.push(c);
+      }
+    });
+
+    if (claimed.length > 0) {
+      this.saveDatabase(this.db);
+    }
+    return { claimedCount: claimed.length, carteles: claimed };
+  }
+
   async updateCartel(id: string, patch: Partial<Cartel>): Promise<Cartel> {
     const idx = this.db.carteles.findIndex(s => s.id === id);
     if (idx === -1) throw new Error('Cartel no encontrado.');
@@ -1297,47 +1254,7 @@ class MockApiImpl implements ToqueApi {
     } catch {
       // ignore
     }
-
-    const initial = [
-      {
-        id: 'staff-1',
-        name: 'Sofía R.',
-        role: 'Moza Salón',
-        shortCode: 'sofia-r',
-        scansThisMonth: 84,
-        rank: 1,
-      },
-      {
-        id: 'staff-2',
-        name: 'Lucas M.',
-        role: 'Barista y Caja',
-        shortCode: 'lucas-m',
-        scansThisMonth: 67,
-        rank: 2,
-      },
-      {
-        id: 'staff-3',
-        name: 'Martina G.',
-        role: 'Moza Terraza',
-        shortCode: 'martina-g',
-        scansThisMonth: 53,
-        rank: 3,
-      },
-      {
-        id: 'staff-4',
-        name: 'Ezequiel P.',
-        role: 'Atención Mostrador',
-        shortCode: 'eze-p',
-        scansThisMonth: 38,
-        rank: 4,
-      },
-    ];
-    try {
-      localStorage.setItem(key, JSON.stringify(initial));
-    } catch {
-      // ignore
-    }
-    return initial;
+    return [];
   }
 
   async addStaff(businessId: string, member: { name: string; role: string }): Promise<StaffMember> {
@@ -1604,8 +1521,11 @@ class MockApiImpl implements ToqueApi {
 
   async getCartelQr(cartelId: string, size = 300): Promise<{ qrUrl: string }> {
     const cartel = await this.getCartel(cartelId);
+    const short = cartel?.shortCode || 'demo';
+    const origin = typeof window !== 'undefined' && window.location?.origin ? window.location.origin : 'https://toque.ar';
+    const destinationUrl = `${origin}/r/${short}`;
     return {
-      qrUrl: `https://toque.ar/${cartel?.shortCode || cartelId}`,
+      qrUrl: `https://api.qrserver.com/v1/create-qr-code/?size=${size}x${size}&data=${encodeURIComponent(destinationUrl)}`,
     };
   }
 

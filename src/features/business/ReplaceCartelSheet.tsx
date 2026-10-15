@@ -21,7 +21,6 @@ import {
   Check,
   Copy,
   Info,
-  Radio,
   ExternalLink,
 } from 'lucide-react';
 
@@ -215,20 +214,6 @@ export const ReplaceCartelSheet: React.FC<ReplaceCartelSheetProps> = ({
                     {copied ? <Check className="w-3.5 h-3.5 text-[var(--menta)]" /> : <Copy className="w-3.5 h-3.5" />}
                   </button>
                 </div>
-              </div>
-            </div>
-
-            {/* Instrucción para grabar el chip NFC */}
-            <div className="p-4 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-card)] space-y-2">
-              <h4 className="font-display text-small font-semibold text-[var(--text-main)] flex items-center gap-2">
-                <Radio className="w-4 h-4 text-[var(--brand)]" />
-                <span>Datos para grabar el chip NFC</span>
-              </h4>
-              <p className="text-micro text-[var(--text-muted)] leading-relaxed">
-                Si tenés un lector NFC o usás la app móvil del fabricante, grabá la URL directa como registro <code className="font-mono bg-black/5 dark:bg-white/10 px-1 rounded">URI (https://)</code>:
-              </p>
-              <div className="p-2.5 rounded-lg bg-black/5 dark:bg-white/10 font-mono text-micro text-[var(--text-main)] select-all truncate">
-                {shortUrl}
               </div>
             </div>
 

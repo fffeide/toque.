@@ -259,7 +259,7 @@ class HttpApiImpl implements ToqueApi {
     });
     return {
       user: this.normalizeUser(res.user),
-      tenant: this.normalizeTenant(res.tenant, res.marca),
+      tenant: this.normalizeTenant(res.tenant, (res as any).marca),
     };
   }
 
@@ -369,6 +369,19 @@ class HttpApiImpl implements ToqueApi {
       name: member.name,
       role: member.role,
       shortCode: 'stf' + Math.floor(Math.random() * 900 + 100),
+      scansThisMonth: 0,
+      rank: 1,
+      active: true,
+    };
+  }
+
+  async updateStaff(businessId: string, staffId: string, patch: { name?: string; role?: string }): Promise<StaffMember> {
+    return {
+      id: staffId,
+      businessId,
+      name: patch.name || 'Colaborador',
+      role: patch.role || 'Atención',
+      shortCode: 'stf' + staffId.slice(-3),
       scansThisMonth: 0,
       rank: 1,
       active: true,

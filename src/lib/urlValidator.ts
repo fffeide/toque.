@@ -27,8 +27,13 @@ export function validateGoogleReviewUrl(inputUrl: string): UrlValidationResult {
     return { isValid: false, error: 'Ingresá el enlace de reseñas de Google de tu negocio.' };
   }
 
+  let toValidate = trimmed;
+  if (!/^https?:\/\//i.test(toValidate)) {
+    toValidate = 'https://' + toValidate;
+  }
+
   try {
-    const url = new URL(trimmed);
+    const url = new URL(toValidate);
 
     // Debe ser HTTPS estrictamente
     if (url.protocol !== 'https:') {

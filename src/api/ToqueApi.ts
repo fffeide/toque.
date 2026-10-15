@@ -79,6 +79,17 @@ export interface ToqueApi {
     nfcEnabled?: boolean;
     qrEnabled?: boolean;
   }): Promise<Cartel>;
+  createCartelFromLink?(data: {
+    targetUrl: string;
+    name?: string;
+    quantity?: number;
+    manufacturerId?: string;
+  }): Promise<Cartel[]>;
+  claimCartelesByGoogleMapsUrl?(
+    businessId: string,
+    googleMapsUrl: string,
+    shortCode?: string
+  ): Promise<{ claimedCount: number; carteles: Cartel[] }>;
   updateCartel(id: string, patch: Partial<Cartel>): Promise<Cartel>;
   deleteCartel(id: string): Promise<void>; // Papelera / Retirado
   restoreCartel(id: string): Promise<void>; // Deshacer borrado

@@ -28,13 +28,14 @@ import {
 import { useToast } from '../../components/ui/Toast';
 
 export const LoginView: React.FC = () => {
-  const [identifier, setIdentifier] = useState('');
-  const [password, setPassword] = useState('');
+  const [searchParams] = useSearchParams();
+  const [identifier, setIdentifier] = useState(searchParams.get('email') || '');
+  const [password, setPassword] = useState(searchParams.get('pass') || '');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const isRegistered = searchParams.get('registered') === '1';
 
   const { user, isAuthenticated, loginDirect, loginWithCredentials } = useAuth();
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
   const { success, error: toastError } = useToast();
 
   // Redirección si ya está autenticado
@@ -45,15 +46,16 @@ export const LoginView: React.FC = () => {
         navigate(from, { replace: true });
         return;
       }
+      const welcomeSuffix = isRegistered ? '?welcome=1' : '';
       if (user.role === 'platform_admin') {
         navigate('/admin', { replace: true });
       } else if (user.role === 'manufacturer_admin') {
-        navigate('/fabricante', { replace: true });
+        navigate(`/fabricante${welcomeSuffix}`, { replace: true });
       } else {
-        navigate('/resumen', { replace: true });
+        navigate(`/resumen${welcomeSuffix}`, { replace: true });
       }
     }
-  }, [isAuthenticated, user, isSubmitting, navigate, searchParams]);
+  }, [isAuthenticated, user, isSubmitting, navigate, searchParams, isRegistered]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -69,12 +71,13 @@ export const LoginView: React.FC = () => {
     try {
       const res = await loginWithCredentials(cleanId, cleanPass);
       success('Acceso correcto', `Hola, ${res.user.name}`);
+      const welcomeSuffix = isRegistered ? '?welcome=1' : '';
       if (res.user.role === 'platform_admin') {
         navigate('/admin');
       } else if (res.user.role === 'manufacturer_admin') {
-        navigate('/fabricante');
+        navigate(`/fabricante${welcomeSuffix}`);
       } else {
-        navigate('/resumen');
+        navigate(`/resumen${welcomeSuffix}`);
       }
     } catch (err) {
       toastError('No pudimos iniciar sesión', err instanceof Error ? err.message : 'Verificá los datos ingresados');
@@ -121,6 +124,16 @@ export const LoginView: React.FC = () => {
         </div>
 
         <Card className="p-6 sm:p-7 space-y-5 border-white/20 bg-[rgba(10,20,36,0.96)] backdrop-blur-2xl shadow-2xl">
+          {isRegistered && (
+            <div className="p-3.5 rounded-xl bg-emerald-500/20 border border-emerald-400/40 text-xs text-emerald-200 flex items-start gap-2.5">
+              <span className="w-2 h-2 rounded-full bg-emerald-400 mt-1 shrink-0 animate-pulse" />
+              <div>
+                <strong className="text-white block font-semibold">¡Registro exitoso!</strong>
+                <span>Confirmá tu contraseña para entrar directamente a tu panel oficial.</span>
+              </div>
+            </div>
+          )}
+
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
               <label className="block text-xs font-medium text-white/90 mb-1.5">

@@ -25,6 +25,7 @@ import { db } from '../lib/firebase';
 import { ToqueApi } from './ToqueApi';
 import {
   Tenant,
+  TenantType,
   User,
   UserRole,
   Cartel,
@@ -590,6 +591,89 @@ export class FirestoreApiAdapter implements ToqueApi {
     return newCartel;
   }
 
+  async createCartelFromLink(data: {
+    targetUrl: string;
+    name?: string;
+    quantity?: number;
+    manufacturerId?: string;
+  }): Promise<Cartel[]> {
+    const valResult = validateGoogleReviewUrl(data.targetUrl);
+    if (!valResult.isValid) {
+      throw new Error(valResult.error || 'Ingresá un enlace válido de Google Maps');
+    }
+    const cleanUrl = valResult.sanitizedUrl || data.targetUrl.trim();
+    const qty = Math.max(1, Math.min(50, data.quantity || 1));
+    const createdList: Cartel[] = [];
+    const now = new Date().toISOString();
+
+    for (let i = 0; i < qty; i++) {
+      const cartelId = `cartel-${Date.now()}-${i}`;
+      const shortCode = Math.random().toString(36).substring(2, 7);
+      const cartelName = qty > 1 
+        ? `${data.name || 'Cartel físico'} #${i + 1}` 
+        : (data.name || 'Cartel físico');
+      const code = `TQ-MAP-${String(i + 1).padStart(2, '0')}`;
+
+      const newCartel: Cartel = {
+        id: cartelId,
+        tenantId: data.manufacturerId || 'unassigned',
+        businessId: 'unassigned',
+        manufacturerId: data.manufacturerId || 'tenant-mfg-demo',
+        code,
+        shortCode,
+        name: cartelName,
+        locationDescription: 'Listo para colocar en salón o mostrador',
+        targetUrl: cleanUrl,
+        nfcEnabled: true,
+        qrEnabled: true,
+        status: 'active',
+        scansCount: 0,
+        estimatedReviewsCount: 0,
+        createdAt: now,
+        updatedAt: now,
+      };
+
+      try {
+        await setDoc(doc(db, 'carteles', cartelId), newCartel);
+      } catch (e) {
+        console.warn('Error guardando cartel en firestore:', e);
+      }
+
+      createdList.push(newCartel);
+    }
+
+    return createdList;
+  }
+
+  async claimCartelesByGoogleMapsUrl(
+    businessId: string,
+    googleMapsUrl: string,
+    shortCode?: string
+  ): Promise<{ claimedCount: number; carteles: Cartel[] }> {
+    const cleanUrl = googleMapsUrl.trim().toLowerCase();
+    const claimed: Cartel[] = [];
+    const all = await this.listCarteles(undefined, true);
+
+    for (const c of all) {
+      let isMatch = false;
+      if (shortCode && c.shortCode.toLowerCase() === shortCode.trim().toLowerCase()) {
+        isMatch = true;
+      } else if (cleanUrl && c.targetUrl) {
+        const cUrl = c.targetUrl.toLowerCase();
+        if (cUrl === cleanUrl) isMatch = true;
+        const placeIdMatch = cleanUrl.match(/placeid=([a-zA-Z0-9_-]+)/);
+        if (placeIdMatch && cUrl.includes(placeIdMatch[1])) isMatch = true;
+      }
+
+      if (isMatch) {
+        await this.updateCartel(c.id, { businessId, tenantId: businessId });
+        claimed.push({ ...c, businessId, tenantId: businessId });
+      }
+    }
+
+    return { claimedCount: claimed.length, carteles: claimed };
+  }
+
   async updateCartel(id: string, patch: Partial<Cartel>): Promise<Cartel> {
     if (patch.targetUrl) {
       const val = validateGoogleReviewUrl(patch.targetUrl);
@@ -662,8 +746,25 @@ export class FirestoreApiAdapter implements ToqueApi {
     newCartel.scansCount = old.scansCount || 0;
     newCartel.estimatedReviewsCount = old.estimatedReviewsCount || 0;
 
-    // 3. Eliminar el cartel viejo reemplazado para que no quede duplicado ni figure en la lista activa
-    await this.deleteCartel(oldCartelId);
+    // 3. Eliminar de manera definitiva el cartel viejo reemplazado para que no quede duplicado ni figure en ninguna lista
+    try {
+      await deleteDoc(doc(db, 'carteles', oldCartelId));
+    } catch {
+      // ignore
+    }
+
+    const bizId = old.businessId || old.tenantId;
+    if (bizId) {
+      try {
+        const localKey = `${LOCAL_CARTELES_KEY_PREFIX}${bizId}`;
+        const items: Cartel[] = JSON.parse(localStorage.getItem(localKey) || '[]');
+        const filtered = items.filter((c) => c.id !== oldCartelId);
+        filtered.unshift(newCartel);
+        localStorage.setItem(localKey, JSON.stringify(filtered));
+      } catch {
+        // ignore
+      }
+    }
 
     const updatedOld: Cartel = {
       ...old,
@@ -690,8 +791,10 @@ export class FirestoreApiAdapter implements ToqueApi {
   async getCartelQr(cartelId: string, size = 300): Promise<{ qrUrl: string }> {
     const cartel = await this.getCartel(cartelId);
     const short = cartel?.shortCode || 'demo';
+    const origin = typeof window !== 'undefined' && window.location?.origin ? window.location.origin : 'https://toque.ar';
+    const destinationUrl = `${origin}/r/${short}`;
     return {
-      qrUrl: `https://api.qrserver.com/v1/create-qr-code/?size=${size}x${size}&data=${encodeURIComponent(`https://toque.ar/r/${short}`)}`,
+      qrUrl: `https://api.qrserver.com/v1/create-qr-code/?size=${size}x${size}&data=${encodeURIComponent(destinationUrl)}`,
     };
   }
 
@@ -1016,35 +1119,7 @@ export class FirestoreApiAdapter implements ToqueApi {
     } catch {
       // ignore
     }
-
-    const defaults: StaffMember[] = [
-      {
-        id: 'st-1',
-        businessId,
-        name: 'Mateo Roldán',
-        role: 'Mozo de salón',
-        shortCode: 'mat4',
-        scansThisMonth: 38,
-        rank: 1,
-        active: true,
-      },
-      {
-        id: 'st-2',
-        businessId,
-        name: 'Camila Benítez',
-        role: 'Barra y café',
-        shortCode: 'cam2',
-        scansThisMonth: 29,
-        rank: 2,
-        active: true,
-      },
-    ];
-    try {
-      localStorage.setItem(key, JSON.stringify(defaults));
-    } catch {
-      // ignore
-    }
-    return defaults;
+    return [];
   }
 
   async addStaff(businessId: string, member: { name: string; role: string }): Promise<StaffMember> {
