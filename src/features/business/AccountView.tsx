@@ -70,6 +70,14 @@ export const AccountView: React.FC = () => {
   const [isSavingBiz, setIsSavingBiz] = useState(false);
   const [hexInput, setHexInput] = useState(brandColor || '#3A3FE0');
 
+  // Identidad y personalización del taller (trasladado a Mi Cuenta, sin llamarse Marca Blanca)
+  const [mfgBrandName, setMfgBrandName] = useState(tenant?.name || '');
+  const [mfgBrandLogo, setMfgBrandLogo] = useState(tenant?.brandLogo || '');
+  const [mfgSupportPhone, setMfgSupportPhone] = useState(tenant?.phone || '+54 9 11 4455-8899');
+  const [mfgSupportEmail, setMfgSupportEmail] = useState(tenant?.contactEmail || 'soporte@taller.com.ar');
+  const [mfgWebsite, setMfgWebsite] = useState(tenant?.website || '');
+  const [isSavingMfgBrand, setIsSavingMfgBrand] = useState(false);
+
   useEffect(() => {
     if (tenant) {
       setBizName(tenant.name || '');
@@ -78,6 +86,12 @@ export const AccountView: React.FC = () => {
       setBizCity(tenant.city || 'Buenos Aires, Argentina');
       setBizAddress(tenant.address || '');
       setBizReviewUrl(tenant.reviewUrl || '');
+
+      setMfgBrandName(tenant.name || '');
+      setMfgBrandLogo(tenant.brandLogo || '');
+      if (tenant.phone) setMfgSupportPhone(tenant.phone);
+      if (tenant.contactEmail) setMfgSupportEmail(tenant.contactEmail);
+      if (tenant.website) setMfgWebsite(tenant.website);
     }
   }, [tenant]);
 
@@ -137,6 +151,34 @@ export const AccountView: React.FC = () => {
       toastError('Error al guardar', err instanceof Error ? err.message : 'Error inesperado');
     } finally {
       setIsSavingBiz(false);
+    }
+  };
+
+  // Guardar identidad y personalización del taller (anteriormente Marca Blanca)
+  const handleSaveMfgBrand = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!tenant?.id) return;
+    setIsSavingMfgBrand(true);
+    try {
+      await api.updateTenantBrand(tenant.id, {
+        name: mfgBrandName.trim(),
+        brandLogo: mfgBrandLogo.trim(),
+        brandColor: brandColor,
+      });
+      const patch = {
+        name: mfgBrandName.trim(),
+        brandLogo: mfgBrandLogo.trim(),
+        phone: mfgSupportPhone.trim(),
+        contactEmail: mfgSupportEmail.trim(),
+        website: mfgWebsite.trim(),
+      };
+      await api.updateTenant(tenant.id, patch);
+      updateTenantState(patch);
+      success('Identidad del taller guardada', 'Los datos y personalización de tu taller se actualizaron correctamente.');
+    } catch (err) {
+      toastError('No se pudo guardar la identidad', err instanceof Error ? err.message : 'Error inesperado');
+    } finally {
+      setIsSavingMfgBrand(false);
     }
   };
 
@@ -350,6 +392,109 @@ export const AccountView: React.FC = () => {
         </div>
       )}
 
+      {/* IDENTIDAD Y PERSONALIZACIÓN DEL TALLER (Trasladado a Mi Cuenta, sin nombrarse Marca Blanca) */}
+      {isManufacturer && (
+        <Card className="p-6 space-y-5 border-white/20 bg-white/10 backdrop-blur-md">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <ShieldCheck className="w-5 h-5 text-indigo-300" />
+              <h3 className="font-headline text-base font-bold text-white">
+                Identidad y Personalización del Taller
+              </h3>
+            </div>
+            <span className="text-[11px] font-mono text-white/50">
+              Personalización activa
+            </span>
+          </div>
+
+          <p className="text-xs text-white/70">
+            Configurá el nombre, logotipo y canales de soporte con los que tus clientes interactúan. Tus carteles y panel preservan 100% tu identidad.
+          </p>
+
+          <form onSubmit={handleSaveMfgBrand} className="space-y-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs font-medium text-white/80 mb-1">
+                  Nombre de tu taller / marca *
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={mfgBrandName}
+                  onChange={(e) => setMfgBrandName(e.target.value)}
+                  placeholder="Ej. Taller Gráfico & Cartelería"
+                  className="w-full px-3 py-2 rounded-xl bg-black/30 border border-white/20 text-white text-xs focus:outline-none focus:ring-1 focus:ring-cyan-400"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-white/80 mb-1">
+                  URL del Logotipo (PNG / SVG)
+                </label>
+                <input
+                  type="url"
+                  value={mfgBrandLogo}
+                  onChange={(e) => setMfgBrandLogo(e.target.value)}
+                  placeholder="https://tudominio.com/logo.png"
+                  className="w-full px-3 py-2 rounded-xl bg-black/30 border border-white/20 text-white text-xs focus:outline-none focus:ring-1 focus:ring-cyan-400"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-white/80 mb-1">
+                  WhatsApp / Teléfono de atención al cliente
+                </label>
+                <input
+                  type="text"
+                  value={mfgSupportPhone}
+                  onChange={(e) => setMfgSupportPhone(e.target.value)}
+                  placeholder="+54 9 11 4455-8899"
+                  className="w-full px-3 py-2 rounded-xl bg-black/30 border border-white/20 text-white text-xs focus:outline-none focus:ring-1 focus:ring-cyan-400"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-white/80 mb-1">
+                  Email de soporte para consultas
+                </label>
+                <input
+                  type="email"
+                  value={mfgSupportEmail}
+                  onChange={(e) => setMfgSupportEmail(e.target.value)}
+                  placeholder="soporte@tutaller.com.ar"
+                  className="w-full px-3 py-2 rounded-xl bg-black/30 border border-white/20 text-white text-xs focus:outline-none focus:ring-1 focus:ring-cyan-400"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-white/80 mb-1">
+                Sitio web oficial o dominio
+              </label>
+              <input
+                type="text"
+                value={mfgWebsite}
+                onChange={(e) => setMfgWebsite(e.target.value)}
+                placeholder="https://tutaller.com.ar"
+                className="w-full px-3 py-2 rounded-xl bg-black/30 border border-white/20 text-white text-xs focus:outline-none focus:ring-1 focus:ring-cyan-400"
+              />
+            </div>
+
+            <div className="pt-2 flex justify-end">
+              <Button
+                type="submit"
+                variant="primary"
+                isLoading={isSavingMfgBrand}
+                icon={<Save className="w-4 h-4 text-slate-900" />}
+                className="bg-white text-slate-900 hover:bg-slate-100 font-semibold"
+              >
+                Guardar personalización de identidad
+              </Button>
+            </div>
+          </form>
+        </Card>
+      )}
+
       {/* 2. DATOS DEL COMERCIO EDITABLES Y GUARDABLES (Punto 10 y 13) */}
       <Card className="p-6 space-y-5 border-white/20 bg-white/10 backdrop-blur-md">
         <div className="flex items-center justify-between">
@@ -557,15 +702,6 @@ export const AccountView: React.FC = () => {
             <Download className="w-4 h-4 text-cyan-300" />
             <span>Copia de Seguridad y Exportación</span>
           </h3>
-
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => setIsOnboardingOpen(true)}
-            icon={<Sparkles className="w-3.5 h-3.5 text-amber-300" />}
-          >
-            Repasar bienvenida
-          </Button>
         </div>
 
         <p className="text-xs text-white/70">

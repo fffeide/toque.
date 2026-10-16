@@ -112,7 +112,7 @@ export const ManufacturerOnboardingWizard: React.FC<ManufacturerOnboardingWizard
 
   const stepTitles = [
     'Cuenta y contacto',
-    'Marca blanca y color',
+    'Identidad y color',
     'Canales de soporte',
     'Plan y cupo de carteles',
     'Dominio propio (opcional)',
@@ -225,12 +225,12 @@ export const ManufacturerOnboardingWizard: React.FC<ManufacturerOnboardingWizard
           </div>
         )}
 
-        {/* PASO 2: MARCA BLANCA */}
+        {/* PASO 2: IDENTIDAD Y COLOR */}
         {currentStep === 2 && (
           <div className="space-y-4">
             <div>
               <h3 className="font-display text-title-2 font-bold text-[var(--text-main)]">
-                Personalizá tu Marca Blanca
+                Personalizá la Identidad de tu Taller
               </h3>
               <p className="text-small text-[var(--text-muted)] mt-1">
                 Tus clientes verán tu nombre y color corporativo en todo momento.
@@ -605,7 +605,7 @@ export const ManufacturerOnboardingWizard: React.FC<ManufacturerOnboardingWizard
             <div className="p-4 rounded-xl bg-[var(--menta)]/10 border border-[var(--menta)]/30 text-small text-[var(--text-main)] flex items-center gap-3">
               <Sparkles className="w-5 h-5 text-[var(--menta)] shrink-0" />
               <span>
-                Todo configurado bajo tu marca blanca. Podés acceder a tu tablero de control en cualquier momento.
+                Todo configurado bajo tu propia identidad. Podés acceder a tu tablero de control en cualquier momento.
               </span>
             </div>
           </div>

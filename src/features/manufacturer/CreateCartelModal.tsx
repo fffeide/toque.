@@ -244,7 +244,7 @@ export const CreateCartelModal: React.FC<CreateCartelModalProps> = ({
           {firstCartel && (
             <div className="flex flex-col sm:flex-row items-center gap-4 p-4 rounded-2xl bg-white/10 border border-white/15">
               <div className="p-2 rounded-xl bg-white shrink-0">
-                <QRPreview shortCode={firstCartel.shortCode} size={120} />
+                <QRPreview url={shortUrl} size={120} />
               </div>
               <div className="flex-1 min-w-0 space-y-1 text-center sm:text-left">
                 <span className="text-[10px] font-mono text-cyan-300 uppercase tracking-wider block">

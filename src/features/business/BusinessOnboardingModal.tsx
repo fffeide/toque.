@@ -16,7 +16,7 @@ import { Input } from '../../components/ui/Input';
 import { StepperWizard } from '../../components/ui/StepperWizard';
 import { BrandLogo } from '../../components/ui/Avatar';
 import { validateGoogleReviewUrl } from '../../lib/urlValidator';
-import { Tenant } from '../../api/types';
+import { api, Tenant } from '../../api';
 import { useToast } from '../../components/ui/Toast';
 import {
   Building2,

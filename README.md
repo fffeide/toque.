@@ -1,7 +1,6 @@
 # Toque — Tu cartel, con datos
 
 > **Propuesta de valor:** "Tu cartel, con datos."  
-> **Para fabricantes:** "Vendé el cartel. Quedate con el cliente."  
 > Plataforma SaaS multi-tenant para vincular carteles físicos con chip NFC y código QR directamente a las reseñas de Google Maps, midiendo toques en tiempo real, con analítica agregada y preservación total de la privacidad de los clientes finales.
 
 ---

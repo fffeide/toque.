@@ -77,8 +77,6 @@ export const ToqueChatWidget: React.FC = () => {
         ? [
             { label: '🖨️ Generar Kit de Impresión', actionKey: 'print_kit' },
             { label: '⚠️ Ver comercios sin toques', actionKey: 'at_risk' },
-            { label: '🏷️ ¿Cómo grabar chips NTAG215?', actionKey: 'guide_nfc' },
-            { label: '💰 Calcular ganancia de reventa', actionKey: 'calc_profit' },
           ]
         : isAdmin
         ? [
@@ -230,20 +228,7 @@ export const ToqueChatWidget: React.FC = () => {
           setIsTyping(false);
           addMessage(
             'assistant',
-            `Analicé los 12 comercios de tu taller:\n\n• **Farmacia del Parque:** 8 días sin toques (sugerencia: verificar si el cartel sigue en el mostrador o fue tapado por folletos).\n• **Taller Los Hermanos:** 5 días sin toques.\n\nPodés enviarles un mensaje automático de WhatsApp prediseñado desde el módulo de Clientes en Riesgo para cuidar la renovación de la cuota mensual.`
-          );
-        }, 400);
-        break;
-      }
-
-      case 'guide_nfc': {
-        addMessage('user', '¿Cómo grabar chips NTAG215?');
-        setIsTyping(true);
-        setTimeout(() => {
-          setIsTyping(false);
-          addMessage(
-            'assistant',
-            `Guía rápida para grabado de chips NTAG215:\n\n1. Descargá la app **NFC Tools** (gratuita en iOS y Android) o usá un grabador USB ACR122U.\n2. Tipo de registro: **URI / Enlace Web** (NDEF).\n3. Formato: \`https://toque.ar/codigo\` (ej. toque.ar/k7m2p).\n4. **Importante:** Bloqueá contra reescritura solo si el cliente lo solicita expresamente; si no lo bloqueás, podrás reutilizar el chip si el cliente cambia de local.`
+            `Podés revisar el estado de actividad de todos tus carteles y comercios directamente en la sección Comercios de tu panel.`
           );
         }, 400);
         break;
@@ -326,8 +311,6 @@ export const ToqueChatWidget: React.FC = () => {
         handleActionClick('simulate_scan');
       } else if (lower.includes('whatsapp') || lower.includes('fabricante') || lower.includes('contacto')) {
         handleActionClick('whatsapp_support');
-      } else if (lower.includes('chip') || lower.includes('ntag') || lower.includes('nfc') || lower.includes('grab')) {
-        handleActionClick('guide_nfc');
       } else {
         addMessage(
           'assistant',

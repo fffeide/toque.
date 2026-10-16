@@ -109,7 +109,7 @@ export const UiGalleryView: React.FC = () => {
           </div>
           <div>
             <span className="text-micro text-[var(--text-muted)] block">Título 2 (1.5rem / Sora 600):</span>
-            <div className="text-title-2 text-[var(--text-main)]">Vendé el cartel. Quedate con el cliente.</div>
+            <div className="text-title-2 text-[var(--text-main)]">Carteles físicos con telemetría en tiempo real.</div>
           </div>
           <div>
             <span className="text-micro text-[var(--text-muted)] block">Cuerpo (1rem / Inter 400 / line-height 1.5):</span>

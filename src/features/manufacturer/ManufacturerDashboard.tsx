@@ -9,6 +9,7 @@
  */
 
 import React, { useState, useMemo, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useAuth } from '../../lib/authContext';
 import { useTheme } from '../../lib/themeContext';
 import {
@@ -97,8 +98,13 @@ export const ManufacturerDashboard: React.FC = () => {
 
   const manufacturerId = tenant?.type === 'manufacturer' ? tenant.id : 'tenant-mfg-demo';
 
-  // Pestaña activa
-  const [activeTab, setActiveTab] = useState<ManufacturerTab>('tablero');
+  // Pestaña activa sincronizada con la barra lateral izquierda
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tabFromUrl = searchParams.get('tab') as ManufacturerTab | null;
+  const activeTab: ManufacturerTab = tabFromUrl || 'tablero';
+  const setActiveTab = (tab: ManufacturerTab) => {
+    setSearchParams({ tab });
+  };
 
   // Modales
   const [isOnboardingOpen, setIsOnboardingOpen] = useState(false);
@@ -304,58 +310,35 @@ export const ManufacturerDashboard: React.FC = () => {
         </div>
       </div>
 
-      {/* DISPOSICIÓN CON BARRA LATERAL IZQUIERDA (Punto 2: Más espacio en el panel) */}
-      <div className="flex flex-col md:flex-row gap-6 items-start">
-        {/* BARRA LATERAL IZQUIERDA */}
-        <aside className="w-full md:w-64 shrink-0 p-3 bg-white/5 border border-white/10 rounded-2xl backdrop-blur-md space-y-1.5 sticky top-20">
-          <div className="px-3 py-2 border-b border-white/10 mb-2">
-            <p className="text-[10px] font-bold uppercase tracking-wider text-white/50">
-              Secciones
-            </p>
-            <p className="text-xs font-semibold text-white truncate mt-0.5">
-              {tenant?.name || 'Taller'}
-            </p>
-          </div>
+      {/* Selector de pestañas para móvil (en desktop se controla desde la barra lateral izquierda) */}
+      <div className="md:hidden flex items-center gap-1.5 overflow-x-auto pb-2 -mx-1 px-1">
+        {[
+          { id: 'tablero', label: 'Tablero' },
+          { id: 'carteles', label: `Carteles (${carteles?.filter(s => s.status !== 'trash').length || 0})` },
+          { id: 'negocios', label: `Comercios (${businesses?.length || 0})` },
+          { id: 'red_fabricantes', label: 'Red' },
+          { id: 'kit_impresion', label: 'Kit Impresión' },
+          { id: 'reposiciones', label: 'Reposiciones' },
+          { id: 'equipo', label: 'Equipo' },
+          { id: 'plan_facturacion', label: 'Plan' },
+        ].map((tab) => (
+          <button
+            key={tab.id}
+            type="button"
+            onClick={() => setActiveTab(tab.id as ManufacturerTab)}
+            className={`px-3 py-1.5 rounded-xl text-xs font-medium whitespace-nowrap transition shrink-0 cursor-pointer ${
+              activeTab === tab.id
+                ? 'bg-white text-slate-950 font-bold shadow-md'
+                : 'bg-white/5 text-white/70 hover:text-white'
+            }`}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
 
-          {[
-            { id: 'tablero', label: 'Tablero', icon: Store },
-            { id: 'carteles', label: `Carteles (${carteles?.filter(s => s.status !== 'trash').length || 0})`, icon: QrCode },
-            { id: 'negocios', label: `Comercios (${businesses?.length || 0})`, icon: Factory },
-            { id: 'red_fabricantes', label: 'Red de Fabricantes', icon: Globe },
-            { id: 'kit_impresion', label: 'Kit de impresión', icon: Printer },
-            {
-              id: 'reposiciones',
-              label: `Reposiciones ${replacementOrders && replacementOrders.filter((o) => o.status !== 'completed').length > 0 ? `(${replacementOrders.filter((o) => o.status !== 'completed').length})` : ''}`,
-              icon: RotateCcw,
-            },
-            { id: 'equipo', label: 'Equipo', icon: Users },
-            { id: 'plan_facturacion', label: 'Plan y cupo', icon: CreditCard },
-          ].map((tab) => {
-            const Icon = tab.icon;
-            const isActive = activeTab === tab.id;
-            return (
-              <button
-                key={tab.id}
-                type="button"
-                onClick={() => setActiveTab(tab.id as ManufacturerTab)}
-                className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs font-medium transition cursor-pointer ${
-                  isActive
-                    ? 'bg-white text-slate-950 font-bold shadow-md'
-                    : 'text-white/70 hover:text-white hover:bg-white/10'
-                }`}
-              >
-                <div className="flex items-center gap-2.5">
-                  <Icon className="w-4 h-4 shrink-0" />
-                  <span>{tab.label}</span>
-                </div>
-                {isActive && <span className="w-1.5 h-1.5 rounded-full bg-slate-900" />}
-              </button>
-            );
-          })}
-        </aside>
-
-        {/* CONTENEDOR PRINCIPAL DERECHO */}
-        <main className="flex-1 min-w-0 space-y-6">
+      {/* CONTENEDOR PRINCIPAL: 100% DEL ANCHO (MÁXIMO ESPACIO EN EL PANEL) */}
+      <div className="w-full space-y-6">
 
       {/* ============================================================== */}
       {/* VISTA 1: TABLERO GENERAL (OVERVIEW)                            */}
@@ -394,7 +377,7 @@ export const ManufacturerDashboard: React.FC = () => {
               <div className="flex items-center gap-2 flex-wrap">
                 <div className="aurora-chip-glass px-4 py-2 flex items-center gap-2 text-xs">
                   <Store className="w-3.5 h-3.5 text-emerald-300" />
-                  <span>{businesses?.length || 12} Comercios Activos</span>
+                  <span>{businesses?.length || 0} Comercios Activos</span>
                 </div>
 
                 <div className="aurora-chip-glass px-4 py-2 flex items-center gap-2 text-xs">
@@ -404,7 +387,7 @@ export const ManufacturerDashboard: React.FC = () => {
 
                 <div className="aurora-chip-glass px-4 py-2 flex items-center gap-2 text-xs">
                   <ShieldCheck className="w-3.5 h-3.5 text-indigo-300" />
-                  <span>100% Marca Blanca Protegida</span>
+                  <span>100% Identidad Propia</span>
                 </div>
               </div>
             </div>
@@ -902,7 +885,6 @@ export const ManufacturerDashboard: React.FC = () => {
           onStaffUpdated={refetchStaff}
         />
       )}
-        </main>
       </div>
 
       {/* ============================================================== */}

@@ -20,14 +20,14 @@ export interface HeroProps {
 }
 
 export const Hero: React.FC<HeroProps> = ({
-  headline = 'Fluid Asset Streams',
-  subheadline = 'Access Smart Vaults, stake RIVR, NFTs, transform rigid holdings into liquid cash instantly.',
-  badgeText = 'Fluid Staking',
-  statNumber = '5.2K',
-  statLabel = 'Active Yielders',
-  cardButtonLabel = 'Join Discord',
-  cornerTitle = 'Documentation',
-  cornerSubtitle = 'Library',
+  headline = 'Tu cartel, con datos.',
+  subheadline = 'El soporte físico con NFC y QR que conecta a tus clientes con Google Reviews en tiempo real.',
+  badgeText = 'Toque · Cartel Inteligente',
+  statNumber = 'En vivo',
+  statLabel = 'Métricas y toques',
+  cardButtonLabel = 'Probar Cartel',
+  cornerTitle = 'Panel de Control',
+  cornerSubtitle = 'Ver estadísticas',
   onBookDemo,
   onJoinDiscord,
   onCornerClick,

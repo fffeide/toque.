@@ -309,39 +309,28 @@ export const HomeManufacturersSection: React.FC = () => {
               <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">
                 Catálogo de Carteles y Precios
               </h4>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {(selectedMfg.products && selectedMfg.products.length > 0 ? selectedMfg.products : [
-                  {
-                    id: 'p-1',
-                    name: 'Cartel Acrílico de Mostrador',
-                    format: 'Placa L inclinada 10x15 cm',
-                    material: 'Acrílico cristal 3mm + NFC + QR',
-                    price: 7900,
-                    estimatedDays: 2,
-                  },
-                  {
-                    id: 'p-2',
-                    name: 'Pirámide Doble Faz para Mesas',
-                    format: 'Pirámide 8x12 cm',
-                    material: 'Acrílico reforzado',
-                    price: 9400,
-                    estimatedDays: 3,
-                  },
-                ]).map((prod) => (
-                  <div key={prod.id} className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 space-y-1.5">
-                    <div className="flex justify-between items-start">
-                      <span className="font-bold text-slate-900 text-xs">{prod.name}</span>
-                      <span className="font-bold text-emerald-700 text-xs">
-                        ${prod.price.toLocaleString('es-AR')} ARS
-                      </span>
+              {selectedMfg.products && selectedMfg.products.length > 0 ? (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {selectedMfg.products.map((prod) => (
+                    <div key={prod.id} className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 space-y-1.5">
+                      <div className="flex justify-between items-start">
+                        <span className="font-bold text-slate-900 text-xs">{prod.name}</span>
+                        <span className="font-bold text-emerald-700 text-xs">
+                          ${prod.price.toLocaleString('es-AR')} ARS
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-500">{prod.format} • {prod.material}</p>
+                      <p className="text-[10px] text-slate-400 font-mono">
+                        Entrega aprox: {prod.estimatedDays} días hábiles
+                      </p>
                     </div>
-                    <p className="text-[11px] text-slate-500">{prod.format} • {prod.material}</p>
-                    <p className="text-[10px] text-slate-400 font-mono">
-                      Entrega aprox: {prod.estimatedDays} días hábiles
-                    </p>
-                  </div>
-                ))}
-              </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="p-4 rounded-xl bg-slate-50 text-center text-xs text-slate-500">
+                  Este taller confecciona carteles a medida bajo consulta directa por WhatsApp.
+                </div>
+              )}
             </div>
 
             {/* Reseñas Auténticas Verificadas */}

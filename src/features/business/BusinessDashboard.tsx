@@ -62,7 +62,7 @@ const DEFAULT_CARDS: CardConfig[] = [
 
 export const BusinessDashboard: React.FC = () => {
   const { tenant, user } = useAuth();
-  const { success } = useToast();
+  const { success, error: toastError } = useToast();
   const businessId = tenant?.type === 'business' ? tenant.id : 'biz-esquina';
 
   // Modales
@@ -70,6 +70,9 @@ export const BusinessDashboard: React.FC = () => {
   const [isOnboardingOpen, setIsOnboardingOpen] = useState(false);
   const [isCustomizingCards, setIsCustomizingCards] = useState(false);
   const [cartelToInspect, setCartelToInspect] = useState<Cartel | null>(null);
+  const [isClaimModalOpen, setIsClaimModalOpen] = useState(false);
+  const [claimInput, setClaimInput] = useState('');
+  const [isClaiming, setIsClaiming] = useState(false);
 
   // Alerta descartada en sesión
   const [isAlertDismissed, setIsAlertDismissed] = useState(false);
@@ -184,6 +187,43 @@ export const BusinessDashboard: React.FC = () => {
     }
   };
 
+  // Vincular cartel por código corto o enlace de Google Maps
+  const handleClaimCartel = async (inputVal: string) => {
+    if (!inputVal.trim()) return;
+    setIsClaiming(true);
+    try {
+      const res = await api.claimCartelesByGoogleMapsUrl(tenant?.id || businessId, inputVal.trim());
+      if (res.claimedCount > 0) {
+        success(
+          '¡Cartel vinculado con éxito!',
+          `Se asociaron ${res.claimedCount} cartel(es) a tu panel. Ya podés ver tus toques en tiempo real.`
+        );
+        refetchCarteles();
+        refetchStats();
+        setClaimInput('');
+        setIsClaimModalOpen(false);
+      } else {
+        toastError(
+          'No encontramos carteles pendientes',
+          'Verificá que el código o el link de Google Maps coincida con el generado por el fabricante.'
+        );
+      }
+    } catch (err) {
+      toastError('Error al vincular', err instanceof Error ? err.message : 'Error inesperado');
+    } finally {
+      setIsClaiming(false);
+    }
+  };
+
+  // Detección automática si ingresa con ?claim=TQ-xxxx o ?link=...
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const claimCode = params.get('claim') || params.get('codigo') || params.get('link');
+    if (claimCode && (tenant?.id || businessId)) {
+      handleClaimCartel(claimCode);
+    }
+  }, [tenant?.id, businessId]);
+
   if (isLoadingStats) {
     return (
       <div className="space-y-6">
@@ -282,7 +322,60 @@ export const BusinessDashboard: React.FC = () => {
             {tenant?.name || 'Tu negocio'}
           </h2>
         </div>
+
+        <div className="flex items-center gap-2.5 flex-wrap">
+          <Button
+            variant="secondary"
+            onClick={() => setIsClaimModalOpen(true)}
+            icon={<QrCode className="w-4 h-4 text-cyan-300" />}
+            className="text-xs bg-white/10 hover:bg-white/20 border-white/20"
+          >
+            Vincular cartel por código o link
+          </Button>
+        </div>
       </div>
+
+      {/* Cartel de Vinculación Directa (Sin registro ni trámites para el comercio) */}
+      {carteles && carteles.length === 0 && (
+        <Card className="p-6 sm:p-8 bg-gradient-to-r from-blue-950/60 via-slate-900/80 to-indigo-950/60 border border-cyan-400/30 backdrop-blur-md space-y-4 shadow-xl">
+          <div className="flex items-start gap-4">
+            <div className="w-12 h-12 rounded-2xl bg-cyan-400/20 text-cyan-300 flex items-center justify-center shrink-0 border border-cyan-400/30">
+              <QrCode className="w-6 h-6" />
+            </div>
+            <div className="space-y-1">
+              <span className="text-xs font-semibold uppercase tracking-wider text-cyan-300">
+                Tu cartel ya está listo y funcionando
+              </span>
+              <h3 className="text-lg sm:text-xl font-headline font-bold text-white">
+                ¿Recibiste tu cartel? Mirá tus toques y estadísticas al instante
+              </h3>
+              <p className="text-xs sm:text-sm text-white/70 max-w-xl leading-relaxed">
+                El cartel físico ya redirige a las reseñas de Google desde el primer segundo. Ingresá el código impreso en tu cartel (ej: TQ-4829) o pegá el link de Google Maps de tu negocio para asociarlo a tu cuenta sin trámites ni demoras.
+              </p>
+            </div>
+          </div>
+
+          <form onSubmit={(e) => { e.preventDefault(); handleClaimCartel(claimInput); }} className="flex flex-col sm:flex-row gap-2 pt-2 max-w-xl">
+            <input
+              type="text"
+              required
+              value={claimInput}
+              onChange={(e) => setClaimInput(e.target.value)}
+              placeholder="Código del cartel (ej. TQ-4829) o link de Google Maps"
+              className="flex-1 px-4 py-2.5 rounded-xl bg-black/40 border border-white/20 text-white placeholder-white/40 text-xs focus:outline-none focus:ring-1 focus:ring-cyan-400 font-mono"
+            />
+            <Button
+              type="submit"
+              variant="primary"
+              isLoading={isClaiming}
+              icon={<CheckCircle2 className="w-4 h-4 text-slate-900" />}
+              className="bg-white text-slate-900 hover:bg-slate-100 font-semibold text-xs whitespace-nowrap"
+            >
+              Vincular y ver datos
+            </Button>
+          </form>
+        </Card>
+      )}
 
       {/* 2. Alerta destacada (si hay cartel inactivo o algo que revisar) */}
       {prominentAlert && (
@@ -754,6 +847,58 @@ export const BusinessDashboard: React.FC = () => {
             </Button>
           </div>
         </div>
+      </Dialog>
+
+      {/* MODAL: VINCULAR CARTEL POR CÓDIGO O GOOGLE MAPS */}
+      <Dialog
+        isOpen={isClaimModalOpen}
+        onClose={() => setIsClaimModalOpen(false)}
+        title="Vincular Cartel Físico a tu Panel"
+        size="sm"
+      >
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            handleClaimCartel(claimInput);
+          }}
+          className="space-y-4 pt-1"
+        >
+          <p className="text-xs text-white/70 leading-relaxed">
+            Ingresá el código corto del cartel (ejemplo: <span className="font-mono text-cyan-300">TQ-4829</span> o <span className="font-mono text-cyan-300">7x8pq</span>) o pegá el link de Google Maps con el que tu fabricante generó el soporte.
+          </p>
+
+          <div>
+            <label className="block text-xs font-medium text-white/90 mb-1">
+              Código de cartel o URL de Google Maps *
+            </label>
+            <input
+              type="text"
+              required
+              value={claimInput}
+              onChange={(e) => setClaimInput(e.target.value)}
+              placeholder="TQ-4829 o https://..."
+              className="w-full px-3.5 py-2.5 rounded-xl bg-black/40 border border-white/20 text-white placeholder-white/30 text-xs focus:outline-none focus:ring-1 focus:ring-cyan-400 font-mono"
+            />
+          </div>
+
+          <div className="pt-2 flex items-center justify-end gap-2 border-t border-white/10">
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={() => setIsClaimModalOpen(false)}
+            >
+              Cancelar
+            </Button>
+            <Button
+              type="submit"
+              variant="primary"
+              isLoading={isClaiming}
+              className="bg-white text-slate-900 hover:bg-slate-100 font-semibold"
+            >
+              Vincular cartel
+            </Button>
+          </div>
+        </form>
       </Dialog>
 
       {/* MODAL 3: DETALLE DE CARTEL */}

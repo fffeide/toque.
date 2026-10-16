@@ -29,6 +29,11 @@ import {
   Shield,
   Activity,
   Factory,
+  Printer,
+  RotateCcw,
+  CreditCard,
+  Store,
+  Globe,
 } from 'lucide-react';
 import { useAuth } from '../../lib/authContext';
 import { UserRole } from '../../api/types';
@@ -92,200 +97,233 @@ export const AppLayout: React.FC = () => {
       {/* 3. Estructura Aurora: Sidebar + Header + Área de Contenido */}
       <div className="relative z-10 flex-1 flex flex-col md:flex-row max-w-[1536px] w-full mx-auto p-3 sm:p-5 md:p-6 gap-6">
         {/* Barra Lateral Izquierda Desktop (Aurora Sidebar Liquid Glass) */}
-        <aside className="hidden md:flex flex-col items-center w-20 py-6 px-3 shrink-0 aurora-sidebar-glass relative my-2">
-          {/* Logo SVG con ondas de la marca */}
-          <NavLink to="/" className="w-11 h-11 rounded-2xl bg-white/15 flex items-center justify-center border border-white/20 hover:bg-white/25 transition group mb-10">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" className="text-white">
-              <path d="M2 12c2.5-3 5-3 7.5 0s5 3 7.5 0 5-3 7.5 0" />
-              <path d="M2 17c2.5-3 5-3 7.5 0s5 3 7.5 0 5-3 7.5 0" opacity="0.6" />
-            </svg>
-          </NavLink>
+        <aside className="hidden md:flex flex-col w-64 py-5 px-3 shrink-0 aurora-sidebar-glass relative my-2 rounded-3xl">
+          {/* Logo y Encabezado de la Marca */}
+          <div className="px-3 pb-4 mb-2 border-b border-white/10 flex items-center gap-3">
+            <NavLink to="/" className="w-10 h-10 rounded-xl bg-white/15 flex items-center justify-center border border-white/20 hover:bg-white/25 transition group shrink-0">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" className="text-white">
+                <path d="M2 12c2.5-3 5-3 7.5 0s5 3 7.5 0 5-3 7.5 0" />
+                <path d="M2 17c2.5-3 5-3 7.5 0s5 3 7.5 0 5-3 7.5 0" opacity="0.6" />
+              </svg>
+            </NavLink>
+            <div className="min-w-0">
+              <span className="font-display font-bold text-white text-base tracking-tight block truncate">
+                Toque
+              </span>
+              <span className="text-[10px] text-white/60 block truncate">
+                Tu cartel, con datos
+              </span>
+            </div>
+          </div>
 
-          {/* Menú de Navegación Vertical Aislado por Rol */}
-          <nav className="flex flex-col items-center gap-6 w-full">
+          {/* Badge del Rol y Taller/Comercio */}
+          <div className="px-3 py-2 mb-3 bg-white/5 rounded-xl border border-white/10">
+            <span className="text-[9px] uppercase tracking-wider text-white/50 font-bold block">
+              {isAdmin ? 'Super Admin' : isManufacturer ? 'Taller Fabricante' : 'Local / Comercio'}
+            </span>
+            <p className="text-xs font-semibold text-white truncate mt-0.5">
+              {tenant?.name || user?.name || 'Mi Espacio'}
+            </p>
+          </div>
+
+          {/* Menú de Navegación Vertical con Todas las Secciones en la Barra Lateral */}
+          <nav className="flex flex-col gap-1 w-full overflow-y-auto flex-1 pr-1 custom-scrollbar">
             {isAdmin ? (
               <>
                 <NavLink
                   to="/admin"
                   className={({ isActive }) =>
-                    `relative p-2.5 rounded-xl transition ${
-                      isActive ? 'text-white bg-white/20' : 'text-white/60 hover:text-white'
+                    `flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-medium transition cursor-pointer ${
+                      isActive ? 'bg-white text-slate-950 font-bold shadow-md' : 'text-white/70 hover:text-white hover:bg-white/10'
                     }`
                   }
-                  title="Panel Super Admin (/admin)"
                 >
-                  {location.pathname === '/admin' && (
-                    <span className="aurora-pip -left-3 top-1" />
-                  )}
-                  <Shield className="w-5 h-5 text-purple-300" />
+                  <Shield className="w-4 h-4 text-purple-300 shrink-0" />
+                  <span className="truncate">Panel Super Admin</span>
                 </NavLink>
 
                 <NavLink
                   to="/status"
                   className={({ isActive }) =>
-                    `relative p-2.5 rounded-xl transition ${
-                      isActive ? 'text-white bg-white/20' : 'text-white/60 hover:text-white'
+                    `flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-medium transition cursor-pointer ${
+                      isActive ? 'bg-white text-slate-950 font-bold shadow-md' : 'text-white/70 hover:text-white hover:bg-white/10'
                     }`
                   }
-                  title="Estado del Sistema"
                 >
-                  {location.pathname === '/status' && (
-                    <span className="aurora-pip -left-3 top-1" />
-                  )}
-                  <Activity className="w-5 h-5 text-blue-300" />
+                  <Activity className="w-4 h-4 text-blue-300 shrink-0" />
+                  <span className="truncate">Estado del Sistema</span>
                 </NavLink>
 
                 <NavLink
                   to="/ui"
                   className={({ isActive }) =>
-                    `relative p-2.5 rounded-xl transition ${
-                      isActive ? 'text-white bg-white/20' : 'text-white/60 hover:text-white'
+                    `flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-medium transition cursor-pointer ${
+                      isActive ? 'bg-white text-slate-950 font-bold shadow-md' : 'text-white/70 hover:text-white hover:bg-white/10'
                     }`
                   }
-                  title="Galería UI (/ui)"
                 >
-                  {location.pathname === '/ui' && (
-                    <span className="aurora-pip -left-3 top-1" />
-                  )}
-                  <Sparkles className="w-5 h-5 text-amber-300" />
+                  <Sparkles className="w-4 h-4 text-amber-300 shrink-0" />
+                  <span className="truncate">Galería UI</span>
                 </NavLink>
               </>
             ) : isManufacturer ? (
               <>
-                <NavLink
-                  to="/fabricante"
-                  className={({ isActive }) =>
-                    `relative p-2.5 rounded-xl transition ${
-                      isActive ? 'text-white bg-white/20' : 'text-white/60 hover:text-white'
-                    }`
-                  }
-                  title="Panel de Fabricante"
-                >
-                  {location.pathname.startsWith('/fabricante') && (
-                    <span className="aurora-pip -left-3 top-1" />
-                  )}
-                  <Building2 className="w-5 h-5 text-amber-300" />
-                </NavLink>
+                {[
+                  { id: 'tablero', label: 'Tablero', icon: LayoutDashboard, path: '/fabricante?tab=tablero' },
+                  { id: 'carteles', label: 'Carteles', icon: QrCode, path: '/fabricante?tab=carteles' },
+                  { id: 'negocios', label: 'Comercios', icon: Store, path: '/fabricante?tab=negocios' },
+                  { id: 'kit_impresion', label: 'Kit de impresión', icon: Printer, path: '/fabricante?tab=kit_impresion' },
+                  { id: 'reposiciones', label: 'Reposiciones', icon: RotateCcw, path: '/fabricante?tab=reposiciones' },
+                  { id: 'equipo', label: 'Equipo del Taller', icon: Users, path: '/fabricante?tab=equipo' },
+                  { id: 'plan_facturacion', label: 'Plan y cupo', icon: CreditCard, path: '/fabricante?tab=plan_facturacion' },
+                ].map((item) => {
+                  const Icon = item.icon;
+                  const currentParams = new URLSearchParams(location.search);
+                  const activeTabParam = currentParams.get('tab') || 'tablero';
+                  const isActive = location.pathname.startsWith('/fabricante') && activeTabParam === item.id;
+
+                  return (
+                    <NavLink
+                      key={item.id}
+                      to={item.path}
+                      className={`flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs font-medium transition cursor-pointer ${
+                        isActive
+                          ? 'bg-white text-slate-950 font-bold shadow-md'
+                          : 'text-white/70 hover:text-white hover:bg-white/10'
+                      }`}
+                    >
+                      <div className="flex items-center gap-3 min-w-0">
+                        <Icon className="w-4 h-4 shrink-0" />
+                        <span className="truncate">{item.label}</span>
+                      </div>
+                      {isActive && <span className="w-1.5 h-1.5 rounded-full bg-slate-950" />}
+                    </NavLink>
+                  );
+                })}
               </>
             ) : (
               <>
                 <NavLink
                   to="/resumen"
                   className={({ isActive }) =>
-                    `relative p-2.5 rounded-xl transition ${
-                      isActive ? 'text-white bg-white/20' : 'text-white/60 hover:text-white'
+                    `flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs font-medium transition cursor-pointer ${
+                      isActive ? 'bg-white text-slate-950 font-bold shadow-md' : 'text-white/70 hover:text-white hover:bg-white/10'
                     }`
                   }
-                  title="Resumen del Salón"
                 >
-                  {location.pathname === '/resumen' && (
-                    <span className="aurora-pip -left-3 top-1" />
-                  )}
-                  <LayoutDashboard className="w-5 h-5 text-blue-300" />
+                  <div className="flex items-center gap-3 min-w-0">
+                    <LayoutDashboard className="w-4 h-4 text-blue-300 shrink-0" />
+                    <span className="truncate">Resumen del Salón</span>
+                  </div>
+                  {location.pathname === '/resumen' && <span className="w-1.5 h-1.5 rounded-full bg-slate-950" />}
                 </NavLink>
 
                 <NavLink
                   to="/carteles"
                   className={({ isActive }) =>
-                    `relative p-2.5 rounded-xl transition ${
-                      isActive ? 'text-white bg-white/20' : 'text-white/60 hover:text-white'
+                    `flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs font-medium transition cursor-pointer ${
+                      isActive ? 'bg-white text-slate-950 font-bold shadow-md' : 'text-white/70 hover:text-white hover:bg-white/10'
                     }`
                   }
-                  title="Mis Carteles"
                 >
-                  {location.pathname === '/carteles' && (
-                    <span className="aurora-pip -left-3 top-1" />
-                  )}
-                  <QrCode className="w-5 h-5 text-indigo-300" />
+                  <div className="flex items-center gap-3 min-w-0">
+                    <QrCode className="w-4 h-4 text-indigo-300 shrink-0" />
+                    <span className="truncate">Mis Carteles</span>
+                  </div>
+                  {location.pathname === '/carteles' && <span className="w-1.5 h-1.5 rounded-full bg-slate-950" />}
                 </NavLink>
 
                 <NavLink
                   to="/canales"
                   className={({ isActive }) =>
-                    `relative p-2.5 rounded-xl transition ${
-                      isActive ? 'text-white bg-white/20' : 'text-white/60 hover:text-white'
+                    `flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs font-medium transition cursor-pointer ${
+                      isActive ? 'bg-white text-slate-950 font-bold shadow-md' : 'text-white/70 hover:text-white hover:bg-white/10'
                     }`
                   }
-                  title="Canales de Escaneo"
                 >
-                  {location.pathname === '/canales' && (
-                    <span className="aurora-pip -left-3 top-1" />
-                  )}
-                  <Share2 className="w-5 h-5 text-cyan-300" />
+                  <div className="flex items-center gap-3 min-w-0">
+                    <Share2 className="w-4 h-4 text-cyan-300 shrink-0" />
+                    <span className="truncate">Canales de Escaneo</span>
+                  </div>
+                  {location.pathname === '/canales' && <span className="w-1.5 h-1.5 rounded-full bg-slate-950" />}
                 </NavLink>
 
                 <NavLink
                   to="/reportes"
                   className={({ isActive }) =>
-                    `relative p-2.5 rounded-xl transition ${
-                      isActive ? 'text-white bg-white/20' : 'text-white/60 hover:text-white'
+                    `flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs font-medium transition cursor-pointer ${
+                      isActive ? 'bg-white text-slate-950 font-bold shadow-md' : 'text-white/70 hover:text-white hover:bg-white/10'
                     }`
                   }
-                  title="Reportes Imprimibles"
                 >
-                  {location.pathname === '/reportes' && (
-                    <span className="aurora-pip -left-3 top-1" />
-                  )}
-                  <FileText className="w-5 h-5 text-emerald-300" />
+                  <div className="flex items-center gap-3 min-w-0">
+                    <FileText className="w-4 h-4 text-emerald-300 shrink-0" />
+                    <span className="truncate">Reportes Imprimibles</span>
+                  </div>
+                  {location.pathname === '/reportes' && <span className="w-1.5 h-1.5 rounded-full bg-slate-950" />}
                 </NavLink>
 
                 <NavLink
                   to="/equipo"
                   className={({ isActive }) =>
-                    `relative p-2.5 rounded-xl transition ${
-                      isActive ? 'text-white bg-white/20' : 'text-white/60 hover:text-white'
+                    `flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs font-medium transition cursor-pointer ${
+                      isActive ? 'bg-white text-slate-950 font-bold shadow-md' : 'text-white/70 hover:text-white hover:bg-white/10'
                     }`
                   }
-                  title="Equipo"
                 >
-                  {location.pathname === '/equipo' && (
-                    <span className="aurora-pip -left-3 top-1" />
-                  )}
-                  <Users className="w-5 h-5 text-purple-300" />
+                  <div className="flex items-center gap-3 min-w-0">
+                    <Users className="w-4 h-4 text-purple-300 shrink-0" />
+                    <span className="truncate">Equipo</span>
+                  </div>
+                  {location.pathname === '/equipo' && <span className="w-1.5 h-1.5 rounded-full bg-slate-950" />}
                 </NavLink>
 
                 <NavLink
                   to="/fabricantes"
                   className={({ isActive }) =>
-                    `relative p-2.5 rounded-xl transition ${
-                      isActive ? 'text-white bg-white/20' : 'text-white/60 hover:text-white'
+                    `flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs font-medium transition cursor-pointer ${
+                      isActive ? 'bg-white text-slate-950 font-bold shadow-md' : 'text-white/70 hover:text-white hover:bg-white/10'
                     }`
                   }
-                  title="Red de Fabricantes"
                 >
-                  {location.pathname === '/fabricantes' && (
-                    <span className="aurora-pip -left-3 top-1" />
-                  )}
-                  <Factory className="w-5 h-5 text-amber-300" />
+                  <div className="flex items-center gap-3 min-w-0">
+                    <Factory className="w-4 h-4 text-amber-300 shrink-0" />
+                    <span className="truncate">Red de Fabricantes</span>
+                  </div>
+                  {location.pathname === '/fabricantes' && <span className="w-1.5 h-1.5 rounded-full bg-slate-950" />}
                 </NavLink>
               </>
             )}
 
+            <div className="my-2 border-t border-white/10 pt-2" />
+
             <NavLink
               to="/cuenta"
               className={({ isActive }) =>
-                `relative p-2.5 rounded-xl transition ${
-                  isActive ? 'text-white bg-white/20' : 'text-white/60 hover:text-white'
+                `flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs font-medium transition cursor-pointer ${
+                  isActive ? 'bg-white text-slate-950 font-bold shadow-md' : 'text-white/70 hover:text-white hover:bg-white/10'
                 }`
               }
-              title="Mi Cuenta y Preferencias"
             >
-              {location.pathname === '/cuenta' && (
-                <span className="aurora-pip -left-3 top-1" />
-              )}
-              <Settings className="w-5 h-5" />
+              <div className="flex items-center gap-3 min-w-0">
+                <Settings className="w-4 h-4 shrink-0" />
+                <span className="truncate">{isManufacturer ? 'Mi Cuenta y Red' : 'Mi Cuenta'}</span>
+              </div>
+              {location.pathname === '/cuenta' && <span className="w-1.5 h-1.5 rounded-full bg-slate-950" />}
             </NavLink>
           </nav>
 
           {/* Botón de Salir al Fondo */}
-          <button
-            type="button"
-            onClick={handleLogout}
-            className="mt-auto p-2.5 text-white/60 hover:text-rose-400 hover:bg-rose-500/10 rounded-xl transition cursor-pointer"
-            title="Cerrar sesión"
-          >
-            <LogOut className="w-5 h-5" />
-          </button>
+          <div className="pt-3 border-t border-white/10 mt-auto">
+            <button
+              type="button"
+              onClick={handleLogout}
+              className="w-full flex items-center gap-3 px-3.5 py-2.5 text-xs text-white/70 hover:text-rose-400 hover:bg-rose-500/10 rounded-xl transition cursor-pointer font-medium"
+            >
+              <LogOut className="w-4 h-4 shrink-0" />
+              <span>Cerrar sesión</span>
+            </button>
+          </div>
         </aside>
 
         {/* Contenido Principal con Header Flotante */}

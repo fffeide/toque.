@@ -763,6 +763,29 @@ class HttpApiImpl implements ToqueApi {
     });
   }
 
+  async claimCartelesByGoogleMapsUrl(
+    businessId: string,
+    googleMapsUrl: string,
+    shortCode?: string,
+    businessName?: string
+  ): Promise<{ claimedCount: number; carteles: Cartel[] }> {
+    try {
+      const res = await this.request<{ claimedCount: number; carteles: any[] }>(
+        `/business/${BACKEND_RESOURCE_SEGMENT}/claim`,
+        {
+          method: 'POST',
+          body: JSON.stringify({ businessId, googleMapsUrl, shortCode, businessName }),
+        }
+      );
+      return {
+        claimedCount: res.claimedCount || 0,
+        carteles: (res.carteles || []).map((c) => this.normalizeCartel(c)),
+      };
+    } catch {
+      return { claimedCount: 0, carteles: [] };
+    }
+  }
+
   async replaceCartel(
     oldCartelId: string,
     newCartelData: {

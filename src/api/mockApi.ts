@@ -38,8 +38,8 @@ import {
 import { validateGoogleReviewUrl } from '../lib/urlValidator';
 import { generateAccountCode, generateCartelCode } from '../lib/codeGenerator';
 
-const STORAGE_KEY = 'toque_real_db_v4';
-const SESSION_USER_KEY = 'toque_real_session_user_v4';
+const STORAGE_KEY = 'toque_clean_db_v5';
+const SESSION_USER_KEY = 'toque_clean_session_v5';
 
 // Generador determinista de números pseudoaleatorios (Linear Congruential Generator)
 function pseudoRandom(seed: number): () => number {
@@ -84,6 +84,22 @@ function createInitialDatabase(): MockDatabase {
     brandColor: '#3A3FE0',
     contactEmail: 'fabricante@toque.ar',
     isDemo: false,
+    inNetwork: true,
+    city: 'Buenos Aires, Argentina',
+    description: 'Taller de producción de carteles acrílicos con chips NFC y códigos QR.',
+    materials: ['Acrílico Cristal 3mm', 'Impresión UV Ultra HD', 'Chips NTAG215'],
+    formats: ['Placa L de mostrador', 'Pirámide de mesa'],
+    products: [
+      {
+        id: 'prod-1',
+        name: 'Cartel Acrílico de Mostrador',
+        format: 'Placa L inclinada 10x15 cm',
+        material: 'Acrílico cristal 3mm + NFC + QR',
+        price: 7900,
+        description: 'Soporte físico para mostrador con chip NTAG215 y QR de alta resolución',
+        estimatedDays: 2,
+      },
+    ],
     createdAt: '2026-02-01T00:00:00Z',
   };
 
@@ -145,60 +161,20 @@ function createInitialDatabase(): MockDatabase {
   const manufacturerStaff: ManufacturerStaffUser[] = [
     {
       id: 'mfg-staff-1',
-      name: 'Martín Gómez',
-      email: 'martin@carteleriademo.com.ar',
+      name: 'Administración Taller',
+      email: 'fabricante@toque.ar',
       role: 'owner',
       addedAt: '2026-02-01T00:00:00Z',
-    },
-    {
-      id: 'mfg-staff-2',
-      name: 'Sofía Valenzuela',
-      email: 'sofia@carteleriademo.com.ar',
-      role: 'admin',
-      isBackupAdmin: true,
-      addedAt: '2026-02-15T00:00:00Z',
-    },
-    {
-      id: 'mfg-staff-3',
-      name: 'Javier Rossi',
-      email: 'taller@carteleriademo.com.ar',
-      role: 'viewer',
-      addedAt: '2026-03-01T00:00:00Z',
     },
   ];
 
   // 9. Facturas
-  const invoices: InvoiceItem[] = [
-    {
-      id: 'inv-2026-09',
-      number: 'FAC-B-0001-00004218',
-      date: '2026-09-01',
-      amount: 19900,
-      currency: 'ARS',
-      status: 'paid',
-    },
-    {
-      id: 'inv-2026-08',
-      number: 'FAC-B-0001-00004102',
-      date: '2026-08-01',
-      amount: 19900,
-      currency: 'ARS',
-      status: 'paid',
-    },
-    {
-      id: 'inv-2026-07',
-      number: 'FAC-B-0001-00003984',
-      date: '2026-07-01',
-      amount: 19900,
-      currency: 'ARS',
-      status: 'paid',
-    },
-  ];
+  const invoices: InvoiceItem[] = [];
 
   // 10. Plan del Fabricante
   const plan: ManufacturerPlan = {
     planName: 'Plan Taller 50',
-    cartelesUsed: 42,
+    cartelesUsed: 0,
     cartelesLimit: 50,
     pricePerMonth: 24899,
     currency: 'ARS',
@@ -532,76 +508,7 @@ class MockApiImpl implements ToqueApi {
   }
 
   async listManufacturers(): Promise<Tenant[]> {
-    const defaultMfgs: Tenant[] = [
-      {
-        id: 'mfg-rexi',
-        type: 'manufacturer',
-        name: 'Rexi Tecnologies',
-        slug: 'rexi-tecnologies',
-        accountCode: 'RT-01',
-        city: 'CABA y GBA, Buenos Aires',
-        materials: ['Acrílico Cristal 3mm', 'Impresión UV Ultra HD', 'Chips NTAG215 Blindados', 'Tótems de Madera'],
-        phone: '+54 9 11 5821-4433',
-        contactEmail: 'ventas@rexitecnologies.com.ar',
-        description: 'Taller especializado en soportes acrílicos con chips NFC protegidos contra agua y rayones.',
-        brandColor: '#2563EB',
-        isDemo: true,
-        createdAt: '2026-01-15T00:00:00Z',
-      },
-      {
-        id: 'mfg-acrilicos-norte',
-        type: 'manufacturer',
-        name: 'Acrílicos Norte Taller',
-        slug: 'acrilicos-norte',
-        accountCode: 'AN-01',
-        city: 'Córdoba Capital, Córdoba',
-        materials: ['Acrílico Termoformado', 'Bases de Madera Petiribí', 'Chips NTAG215 Antimetal'],
-        phone: '+54 9 351 498-7711',
-        contactEmail: 'contacto@acrilicosnorte.com.ar',
-        description: 'Fabricación artesanal y seriada de carteles de mesa y mostrador con bases de madera natural tratada.',
-        brandColor: '#059669',
-        isDemo: true,
-        createdAt: '2026-02-10T00:00:00Z',
-      },
-      {
-        id: 'mfg-grafica-rosario',
-        type: 'manufacturer',
-        name: 'Imprenta Gráfica Rosario',
-        slug: 'grafica-rosario',
-        accountCode: 'GR-01',
-        city: 'Rosario, Santa Fe',
-        materials: ['Acrílico Esmerilado', 'Vinilo UV Alta Resistencia', 'Aluminio Anodizado'],
-        phone: '+54 9 341 622-1100',
-        contactEmail: 'pedidos@graficarosario.com.ar',
-        description: 'Especialistas en cartelería para gastronomía, cartas con QR y soportes NFC resistentes al alcohol y limpieza frecuente.',
-        brandColor: '#7C3AED',
-        isDemo: true,
-        createdAt: '2026-02-20T00:00:00Z',
-      },
-      {
-        id: 'mfg-toque-saas',
-        type: 'manufacturer',
-        name: 'Toque™ SaaS (Fabricante Oficial)',
-        slug: 'toque-saas',
-        accountCode: 'TS-01',
-        city: 'Todo el país (Envíos nacionales)',
-        materials: ['Acrílico de Mostrador', 'Stickers NFC Blindados', 'Impresión Digital Directa'],
-        phone: '+54 9 11 5263-8900',
-        contactEmail: 'soporte@toque.ar',
-        description: 'Canal oficial de Toque para negocios que gestionan sus propios carteles directamente.',
-        brandColor: '#1E3A8A',
-        isDemo: false,
-        createdAt: '2026-01-01T00:00:00Z',
-      },
-    ];
-
-    const dbMfgs = this.db.tenants.filter(t => t.type === 'manufacturer');
-    for (const m of defaultMfgs) {
-      if (!dbMfgs.some(item => item.id === m.id || item.accountCode === m.accountCode)) {
-        dbMfgs.push(m);
-      }
-    }
-    return dbMfgs;
+    return this.db.tenants.filter(t => t.type === 'manufacturer' && t.inNetwork !== false);
   }
 
   async listManufacturerReviews(manufacturerId: string): Promise<import('./types').ManufacturerReview[]> {
@@ -772,21 +679,26 @@ class MockApiImpl implements ToqueApi {
   async claimCartelesByGoogleMapsUrl(
     businessId: string,
     googleMapsUrl: string,
-    shortCode?: string
+    shortCode?: string,
+    businessName?: string
   ): Promise<{ claimedCount: number; carteles: Cartel[] }> {
-    const cleanUrl = googleMapsUrl.trim().toLowerCase();
+    const rawQuery = (shortCode || googleMapsUrl || '').trim();
+    const cleanQuery = rawQuery.toLowerCase();
     const claimed: Cartel[] = [];
 
     this.db.carteles.forEach((c) => {
       let isMatch = false;
-      if (shortCode && c.shortCode.toLowerCase() === shortCode.trim().toLowerCase()) {
-        isMatch = true;
-      } else if (cleanUrl && c.targetUrl) {
-        const cUrl = c.targetUrl.toLowerCase();
-        // Match exact or placeId
-        if (cUrl === cleanUrl) isMatch = true;
-        const placeIdMatch = cleanUrl.match(/placeid=([a-zA-Z0-9_-]+)/);
-        if (placeIdMatch && cUrl.includes(placeIdMatch[1])) isMatch = true;
+      if (cleanQuery) {
+        if (c.shortCode && c.shortCode.toLowerCase() === cleanQuery) isMatch = true;
+        if (c.code && c.code.toLowerCase() === cleanQuery) isMatch = true;
+        if (c.code && c.code.toLowerCase().includes(cleanQuery)) isMatch = true;
+        if (c.targetUrl) {
+          const cUrl = c.targetUrl.toLowerCase();
+          if (cUrl === cleanQuery) isMatch = true;
+          const placeIdMatch = cleanQuery.match(/placeid=([a-zA-Z0-9_-]+)/);
+          if (placeIdMatch && cUrl.includes(placeIdMatch[1])) isMatch = true;
+          if (cleanQuery.includes('google.com') && cUrl.includes(cleanQuery)) isMatch = true;
+        }
       }
 
       if (isMatch) {
@@ -796,8 +708,19 @@ class MockApiImpl implements ToqueApi {
       }
     });
 
-    if (claimed.length > 0) {
+    if (businessName && businessName.trim()) {
+      const bizTenant = this.db.tenants.find(t => t.id === businessId);
+      if (bizTenant) {
+        bizTenant.name = businessName.trim();
+        if (this.currentUser && this.currentUser.tenant.id === businessId) {
+          this.currentUser.tenant.name = businessName.trim();
+        }
+      }
+    }
+
+    if (claimed.length > 0 || businessName) {
       this.saveDatabase(this.db);
+      this.saveSession();
     }
     return { claimedCount: claimed.length, carteles: claimed };
   }

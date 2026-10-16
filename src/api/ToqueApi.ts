@@ -85,10 +85,11 @@ export interface ToqueApi {
     quantity?: number;
     manufacturerId?: string;
   }): Promise<Cartel[]>;
-  claimCartelesByGoogleMapsUrl?(
+  claimCartelesByGoogleMapsUrl(
     businessId: string,
     googleMapsUrl: string,
-    shortCode?: string
+    shortCode?: string,
+    businessName?: string
   ): Promise<{ claimedCount: number; carteles: Cartel[] }>;
   updateCartel(id: string, patch: Partial<Cartel>): Promise<Cartel>;
   deleteCartel(id: string): Promise<void>; // Papelera / Retirado

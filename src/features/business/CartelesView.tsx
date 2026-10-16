@@ -64,6 +64,9 @@ export const CartelesView: React.FC = () => {
   const [replaceCartelTarget, setReplaceCartelTarget] = useState<Cartel | null>(null);
   const [quickQrCartel, setQuickQrCartel] = useState<Cartel | null>(null);
   const [testModalCartel, setTestModalCartel] = useState<Cartel | null>(null);
+  const [isClaimModalOpen, setIsClaimModalOpen] = useState(false);
+  const [claimInput, setClaimInput] = useState('');
+  const [isClaiming, setIsClaiming] = useState(false);
 
   // Formulario nuevo cartel
   const [newName, setNewName] = useState('');
@@ -144,6 +147,33 @@ export const CartelesView: React.FC = () => {
       refetch();
     } catch (err) {
       toastError('No se pudo restaurar', err instanceof Error ? err.message : 'Error');
+    }
+  };
+
+  const handleClaimCartel = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!claimInput.trim()) return;
+    setIsClaiming(true);
+    try {
+      const res = await api.claimCartelesByGoogleMapsUrl(businessId, claimInput.trim());
+      if (res.claimedCount > 0) {
+        success(
+          '¡Cartel vinculado!',
+          `Se asociaron ${res.claimedCount} cartel(es) a tu cuenta con éxito.`
+        );
+        refetch();
+        setClaimInput('');
+        setIsClaimModalOpen(false);
+      } else {
+        toastError(
+          'No encontramos carteles pendientes',
+          'Verificá que el código o el link de Google Maps coincida con el generado por el fabricante.'
+        );
+      }
+    } catch (err) {
+      toastError('Error al vincular', err instanceof Error ? err.message : 'Error');
+    } finally {
+      setIsClaiming(false);
     }
   };
 
@@ -239,6 +269,17 @@ export const CartelesView: React.FC = () => {
           <p className="text-xs text-white/70 mt-0.5">
             Carteles físicos activos con enlace dinámico a reseñas de Google.
           </p>
+        </div>
+
+        <div className="flex items-center gap-2 flex-wrap">
+          <Button
+            variant="secondary"
+            onClick={() => setIsClaimModalOpen(true)}
+            icon={<QrCode className="w-4 h-4 text-cyan-300" />}
+            className="text-xs bg-white/10 hover:bg-white/20 border-white/20"
+          >
+            Vincular cartel por código
+          </Button>
         </div>
       </div>
 
@@ -584,6 +625,52 @@ export const CartelesView: React.FC = () => {
           </div>
         </form>
       </Sheet>
+
+      {/* MODAL VINCULAR CARTEL */}
+      <Dialog
+        isOpen={isClaimModalOpen}
+        onClose={() => setIsClaimModalOpen(false)}
+        title="Vincular Cartel Físico"
+        size="sm"
+      >
+        <form onSubmit={handleClaimCartel} className="space-y-4 pt-1">
+          <p className="text-xs text-white/70 leading-relaxed">
+            Ingresá el código corto del cartel (ejemplo: <span className="font-mono text-cyan-300">TQ-4829</span> o <span className="font-mono text-cyan-300">7x8pq</span>) o pegá el link de Google Maps que tu fabricante utilizó para generar el soporte.
+          </p>
+
+          <div>
+            <label className="block text-xs font-medium text-white/90 mb-1">
+              Código del cartel o link de Google Maps *
+            </label>
+            <input
+              type="text"
+              required
+              value={claimInput}
+              onChange={(e) => setClaimInput(e.target.value)}
+              placeholder="TQ-4829 o https://..."
+              className="w-full px-3.5 py-2.5 rounded-xl bg-black/40 border border-white/20 text-white placeholder-white/30 text-xs focus:outline-none focus:ring-1 focus:ring-cyan-400 font-mono"
+            />
+          </div>
+
+          <div className="pt-2 flex items-center justify-end gap-2 border-t border-white/10">
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={() => setIsClaimModalOpen(false)}
+            >
+              Cancelar
+            </Button>
+            <Button
+              type="submit"
+              variant="primary"
+              isLoading={isClaiming}
+              className="bg-white text-slate-900 hover:bg-slate-100 font-semibold"
+            >
+              Vincular cartel
+            </Button>
+          </div>
+        </form>
+      </Dialog>
     </div>
   );
 };

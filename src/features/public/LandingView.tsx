@@ -49,40 +49,20 @@ export const LandingView: React.FC = () => {
   const { success, error: toastError } = useToast();
 
   // Estado para la Demo Interactiva del Cartel
-  const [demoScans, setDemoScans] = useState(142);
+  const [demoScans, setDemoScans] = useState(0);
   const [isDemoTapped, setIsDemoTapped] = useState(false);
   const [demoMode, setDemoMode] = useState<'business' | 'manufacturer'>('business');
   const [recentNotification, setRecentNotification] = useState<string | null>(null);
   const [prefersReducedMotion, setPrefersReducedMotion] = useState(false);
 
-  const [tapHistory, setTapHistory] = useState<Array<{ id: number; time: string; channel: string; target: string }>>([
-    { id: 1, time: 'Hace 3 min', channel: 'Mesa 4 · QR dinámico', target: 'Google Reviews ★ 5.0' },
-    { id: 2, time: 'Hace 14 min', channel: 'Barra · NFC NTAG215', target: 'Google Reviews ★ 5.0' },
-    { id: 3, time: 'Hace 38 min', channel: 'Mostrador · NFC NTAG215', target: 'Google Reviews ★ 5.0' },
-  ]);
+  const [tapHistory, setTapHistory] = useState<Array<{ id: number; time: string; channel: string; target: string }>>([]);
 
   // Selector de período de facturación: mensual o anual (10 meses)
   const [billingPeriod, setBillingPeriod] = useState<'monthly' | 'yearly'>('monthly');
   const [pricingTarget, setPricingTarget] = useState<'business' | 'manufacturer'>('business');
 
-  // Estado para la Calculadora de Reventa del Fabricante
-  const [calcPricePerBusiness, setCalcPricePerBusiness] = useState(4500);
-  const [calcBusinessCount, setCalcBusinessCount] = useState(25);
-
   // Estado para el acordeón de Preguntas Frecuentes
   const [openFaqIndex, setOpenFaqIndex] = useState<number | null>(0);
-
-  // Estado del Formulario de Alta a la Beta
-  const [betaForm, setBetaForm] = useState({
-    nombre: '',
-    email: '',
-    whatsapp: '',
-    tipo: 'fabricante' as 'fabricante' | 'negocio',
-    volumen: '11-50',
-  });
-  const [betaErrors, setBetaErrors] = useState<Record<string, string>>({});
-  const [betaSubmitting, setBetaSubmitting] = useState(false);
-  const [betaSuccess, setBetaSuccess] = useState(false);
 
   // Detectar preferencia de reducción de movimiento
   useEffect(() => {
@@ -125,72 +105,6 @@ export const LandingView: React.FC = () => {
     }, 3800);
   };
 
-  // Cálculos de la Calculadora de Reventa
-  const calculatePlatformCost = (count: number) => {
-    if (count <= 15) return 11899;
-    if (count <= 50) return 24899;
-    return 44899;
-  };
-
-  const getTierName = (count: number) => {
-    if (count <= 15) return 'Plan Arranque';
-    if (count <= 50) return 'Plan Taller';
-    return 'Plan Fábrica';
-  };
-
-  const grossMonthlyRevenue = calcPricePerBusiness * calcBusinessCount;
-  const toqueCost = calculatePlatformCost(calcBusinessCount);
-  const netMonthlyProfit = Math.max(0, grossMonthlyRevenue - toqueCost);
-  const annualizedProfit = netMonthlyProfit * 12;
-  const profitMarginPercent = grossMonthlyRevenue > 0 ? Math.round((netMonthlyProfit / grossMonthlyRevenue) * 100) : 0;
-
-  // Validación y envío del formulario beta
-  const handleBetaSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const errors: Record<string, string> = {};
-
-    if (!betaForm.nombre.trim()) {
-      errors.nombre = 'Ingresá tu nombre y apellido';
-    }
-    if (!betaForm.email.trim() || !/^\S+@\S+\.\S+$/.test(betaForm.email)) {
-      errors.email = 'Ingresá un correo electrónico válido';
-    }
-    if (!betaForm.whatsapp.trim() || betaForm.whatsapp.replace(/\D/g, '').length < 8) {
-      errors.whatsapp = 'Ingresá un WhatsApp con código de área (ej. 11 5263-8900)';
-    }
-
-    if (Object.keys(errors).length > 0) {
-      setBetaErrors(errors);
-      return;
-    }
-
-    setBetaErrors({});
-    setBetaSubmitting(true);
-
-    try {
-      const res = await registerUser({
-        name: betaForm.nombre.trim(),
-        email: betaForm.email.trim(),
-        password: 'Password123!',
-        whatsapp: betaForm.whatsapp.trim(),
-        activity: betaForm.tipo,
-        volume: betaForm.volumen,
-      });
-
-      success('¡Lugar reservado con éxito!', `Bienvenido a Toque, ${res.user.name}. Ingresando a tu panel...`);
-
-      if (betaForm.tipo === 'fabricante') {
-        navigate('/fabricante?welcome=1', { replace: true });
-      } else {
-        navigate('/resumen?welcome=1', { replace: true });
-      }
-    } catch (err) {
-      toastError('No pudimos procesar la reserva', err instanceof Error ? err.message : 'Error inesperado');
-    } finally {
-      setBetaSubmitting(false);
-    }
-  };
-
   const scrollToSection = (id: string) => {
     const el = document.getElementById(id);
     if (el) {
@@ -205,8 +119,8 @@ export const LandingView: React.FC = () => {
         headline="Tu cartel, con datos."
         subheadline="El soporte físico que ya tenés en el mostrador, ahora con analítica en tiempo real, protección ante caídas y sin tocar la privacidad de tus clientes."
         badgeText="Toque · Cartel Inteligente NFC + QR"
-        statNumber="142"
-        statLabel="Toques Registrados Hoy"
+        statNumber="En vivo"
+        statLabel="Telemetría de Toques"
         cardButtonLabel="Probar Cartel"
         cornerTitle="Panel en Vivo"
         cornerSubtitle="Explorar Métricas"
@@ -511,20 +425,20 @@ export const LandingView: React.FC = () => {
         {/* 3. RED NACIONAL DE FABRICANTES (#red-fabricantes) */}
         <HomeManufacturersSection />
 
-        {/* 4. PARA FABRICANTES (#fabricantes) + CALCULADORA */}
+        {/* 4. PARA FABRICANTES (#fabricantes) */}
         <section id="fabricantes" className="scroll-mt-6">
           <div className="bg-white rounded-[2rem] sm:rounded-[2.5rem] border border-black/5 shadow-xs p-6 sm:p-10 md:p-14">
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 items-center">
               <div className="lg:col-span-6">
                 <span className="text-xs font-semibold tracking-wider uppercase text-[rgba(30,50,90,0.8)]">
-                  Modelo para talleres e imprentas
+                  Para talleres e imprentas
                 </span>
                 <h2 className="text-3xl sm:text-4xl md:text-5xl font-normal text-slate-900 tracking-tight font-headline mt-1 mb-4 leading-tight">
-                  Vendé el cartel. <br />
-                  <span className="text-slate-500">Quedate con el cliente.</span>
+                  Cartelería física inteligente <br />
+                  <span className="text-slate-500">con tecnología NFC y QR.</span>
                 </h2>
                 <p className="text-sm sm:text-base text-slate-600 leading-relaxed mb-6">
-                  Dejá de vender un soporte una sola vez. Con Toque cobrás una cuota mensual por el panel de analítica, con tu propio logo, tus colores y sin intermediarios.
+                  Producción de soportes físicos en acrílico, madera y metal con chips NTAG215 y QR de alta resolución. Creá el cartel pegando únicamente el enlace de Google Maps y entregalo listo para funcionar.
                 </p>
 
                 <div className="space-y-3 text-sm text-slate-700">
@@ -532,120 +446,69 @@ export const LandingView: React.FC = () => {
                     <div className="w-5 h-5 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0 mt-0.5">
                       <Check className="w-3.5 h-3.5" />
                     </div>
-                    <span><strong>Marca blanca total:</strong> Tu logo, dominio y soporte en cada panel.</span>
+                    <span><strong>Solo link de Google Maps:</strong> No necesitás crear previamente al comercio para generar su cartel.</span>
                   </div>
                   <div className="flex items-start gap-3">
                     <div className="w-5 h-5 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0 mt-0.5">
                       <Check className="w-3.5 h-3.5" />
                     </div>
-                    <span><strong>Onboarding autoservicio:</strong> El cliente se activa solo en 5 minutos.</span>
+                    <span><strong>Funciona al instante:</strong> El cartel llega al local y ya redirige a las 5 estrellas sin pasos extras.</span>
                   </div>
                   <div className="flex items-start gap-3">
                     <div className="w-5 h-5 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0 mt-0.5">
                       <Check className="w-3.5 h-3.5" />
                     </div>
-                    <span><strong>Alertas de inactividad:</strong> Detectá carteles con 14 días sin toques y asesorá proactivamente.</span>
+                    <span><strong>Redirección dinámica en vivo:</strong> Modificá el destino de cualquier cartel sin tener que reimprimir.</span>
                   </div>
                   <div className="flex items-start gap-3">
                     <div className="w-5 h-5 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0 mt-0.5">
                       <Check className="w-3.5 h-3.5" />
                     </div>
-                    <span><strong>Reemplazos sin costo:</strong> Si el cartel se rompe, se reasigna sin gastar cupo.</span>
+                    <span><strong>Reemplazos sin costo:</strong> Si un cartel se rompe o raya, reasignalo preservando todo el historial.</span>
                   </div>
                 </div>
               </div>
 
-              {/* Calculadora */}
-              <div className="lg:col-span-6 p-6 sm:p-8 rounded-[2rem] bg-slate-50 border border-slate-200/80 shadow-xs">
-                <div className="flex items-center justify-between pb-4 mb-6 border-b border-slate-200">
-                  <div className="flex items-center gap-2">
-                    <Calculator className="w-5 h-5 text-[rgba(30,50,90,0.9)]" />
-                    <h3 className="font-semibold text-base text-slate-900">
-                      Calculadora de Ingreso Recurrente
-                    </h3>
+              {/* Tarjetas de Capacidades para Fabricantes */}
+              <div className="lg:col-span-6 grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="p-6 rounded-2xl bg-slate-50 border border-slate-200 space-y-2.5">
+                  <div className="w-9 h-9 rounded-xl bg-blue-100 text-blue-800 flex items-center justify-center">
+                    <QrCode className="w-5 h-5" />
                   </div>
-                  <span className="text-xs font-mono font-semibold text-emerald-700 bg-emerald-100 px-2.5 py-1 rounded-full">
-                    {getTierName(calcBusinessCount)}
-                  </span>
+                  <h3 className="font-semibold text-slate-900 text-sm">Kit de Impresión</h3>
+                  <p className="text-xs text-slate-600 leading-relaxed">
+                    Generación de planchas de impresión listas para cortar y exportación de enlaces en CSV para chips NFC.
+                  </p>
                 </div>
 
-                <div className="space-y-6 mb-8">
-                  <div>
-                    <div className="flex justify-between items-center text-xs mb-2">
-                      <label htmlFor="price-slider" className="text-slate-600 font-medium">
-                        ¿Cuánto le cobrás por mes a cada local?
-                      </label>
-                      <span className="font-mono font-bold text-slate-900">
-                        {formatCurrency(calcPricePerBusiness)}/mes
-                      </span>
-                    </div>
-                    <input
-                      id="price-slider"
-                      type="range"
-                      min={2000}
-                      max={15000}
-                      step={500}
-                      value={calcPricePerBusiness}
-                      onChange={(e) => setCalcPricePerBusiness(Number(e.target.value))}
-                      className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-[rgba(30,50,90,0.9)]"
-                    />
+                <div className="p-6 rounded-2xl bg-slate-50 border border-slate-200 space-y-2.5">
+                  <div className="w-9 h-9 rounded-xl bg-emerald-100 text-emerald-800 flex items-center justify-center">
+                    <Factory className="w-5 h-5" />
                   </div>
-
-                  <div>
-                    <div className="flex justify-between items-center text-xs mb-2">
-                      <label htmlFor="count-slider" className="text-slate-600 font-medium">
-                        Cantidad de comercios activos:
-                      </label>
-                      <span className="font-mono font-bold text-slate-900">
-                        {calcBusinessCount} clientes
-                      </span>
-                    </div>
-                    <input
-                      id="count-slider"
-                      type="range"
-                      min={5}
-                      max={120}
-                      step={1}
-                      value={calcBusinessCount}
-                      onChange={(e) => setCalcBusinessCount(Number(e.target.value))}
-                      className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-[rgba(30,50,90,0.9)]"
-                    />
-                  </div>
+                  <h3 className="font-semibold text-slate-900 text-sm">Red de Fabricantes</h3>
+                  <p className="text-xs text-slate-600 leading-relaxed">
+                    Publicá tu taller, tus materiales y tu catálogo de productos con precios en la red nacional desde Mi Cuenta.
+                  </p>
                 </div>
 
-                {/* Resultado */}
-                <div className="p-5 rounded-2xl bg-white border border-slate-200 space-y-2.5 shadow-2xs">
-                  <div className="flex justify-between items-center text-xs text-slate-600">
-                    <span>Facturación mensual bruta:</span>
-                    <span className="font-mono font-semibold text-slate-900">
-                      {formatCurrency(grossMonthlyRevenue)}
-                    </span>
+                <div className="p-6 rounded-2xl bg-slate-50 border border-slate-200 space-y-2.5">
+                  <div className="w-9 h-9 rounded-xl bg-amber-100 text-amber-800 flex items-center justify-center">
+                    <AlertTriangle className="w-5 h-5" />
                   </div>
+                  <h3 className="font-semibold text-slate-900 text-sm">Detección de Inactividad</h3>
+                  <p className="text-xs text-slate-600 leading-relaxed">
+                    Identificá locales sin actividad reciente para ayudarlos a reubicar el soporte y optimizar resultados.
+                  </p>
+                </div>
 
-                  <div className="flex justify-between items-center text-xs text-slate-600">
-                    <span>Costo plataforma Toque:</span>
-                    <span className="font-mono text-slate-500">
-                      − {formatCurrency(toqueCost)}
-                    </span>
+                <div className="p-6 rounded-2xl bg-slate-50 border border-slate-200 space-y-2.5">
+                  <div className="w-9 h-9 rounded-xl bg-indigo-100 text-indigo-800 flex items-center justify-center">
+                    <ShieldCheck className="w-5 h-5" />
                   </div>
-
-                  <div className="pt-3 border-t border-slate-200 flex justify-between items-baseline">
-                    <div>
-                      <div className="text-xs uppercase font-semibold text-emerald-700">
-                        Tu ganancia neta mensual
-                      </div>
-                      <div className="text-2xl sm:text-3xl font-mono font-headline font-bold text-slate-900">
-                        {formatCurrency(netMonthlyProfit)}
-                        <span className="text-xs font-normal text-slate-500">/mes</span>
-                      </div>
-                      <div className="text-[11px] text-slate-500 font-mono mt-0.5">
-                        Proyección: {formatCurrency(annualizedProfit)} al año
-                      </div>
-                    </div>
-                    <span className="font-mono font-bold text-sm text-emerald-700 bg-emerald-100 px-2.5 py-1 rounded-full">
-                      {profitMarginPercent}% margen
-                    </span>
-                  </div>
+                  <h3 className="font-semibold text-slate-900 text-sm">Identidad Propia</h3>
+                  <p className="text-xs text-slate-600 leading-relaxed">
+                    Personalizá tus colores, logotipo y vías de soporte en cada interacción con tus clientes.
+                  </p>
                 </div>
               </div>
             </div>
@@ -1166,134 +1029,7 @@ export const LandingView: React.FC = () => {
           </div>
         </section>
 
-        {/* 9. ALTA A LA BETA (#beta) */}
-        <section id="beta" className="scroll-mt-6">
-          <div className="bg-white rounded-[2rem] sm:rounded-[2.5rem] border border-black/5 shadow-xs p-6 sm:p-10 md:p-14 max-w-2xl mx-auto">
-            <div className="text-center mb-8">
-              <span className="text-xs font-semibold tracking-wider uppercase text-[rgba(30,50,90,0.8)]">
-                Acceso anticipado
-              </span>
-              <h2 className="text-3xl sm:text-4xl font-normal text-slate-900 tracking-tight font-headline mt-1 mb-2">
-                Sumate a la beta de Toque
-              </h2>
-              <p className="text-xs sm:text-sm text-slate-600">
-                Acceso gratuito completo para fabricantes, talleres y comercios de Argentina.
-              </p>
-            </div>
 
-              <form onSubmit={handleBetaSubmit} className="space-y-4">
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-xs font-medium text-slate-700 mb-1">
-                      Nombre y Apellido *
-                    </label>
-                    <input
-                      type="text"
-                      placeholder="Ej. Lucas Gómez"
-                      value={betaForm.nombre}
-                      onChange={(e) => setBetaForm({ ...betaForm, nombre: e.target.value })}
-                      className="w-full px-4 py-2.5 rounded-xl bg-slate-50 border border-slate-300 text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:bg-white focus:ring-2 focus:ring-[rgba(30,50,90,0.3)]"
-                    />
-                    {betaErrors.nombre && (
-                      <span className="text-[11px] text-rose-600 mt-1 block">{betaErrors.nombre}</span>
-                    )}
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-medium text-slate-700 mb-1">
-                      Correo electrónico *
-                    </label>
-                    <input
-                      type="email"
-                      placeholder="lucas@miempresa.com.ar"
-                      value={betaForm.email}
-                      onChange={(e) => setBetaForm({ ...betaForm, email: e.target.value })}
-                      className="w-full px-4 py-2.5 rounded-xl bg-slate-50 border border-slate-300 text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:bg-white focus:ring-2 focus:ring-[rgba(30,50,90,0.3)]"
-                    />
-                    {betaErrors.email && (
-                      <span className="text-[11px] text-rose-600 mt-1 block">{betaErrors.email}</span>
-                    )}
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-xs font-medium text-slate-700 mb-1">
-                      WhatsApp con código de área *
-                    </label>
-                    <input
-                      type="text"
-                      placeholder="11 5263-8900"
-                      value={betaForm.whatsapp}
-                      onChange={(e) => setBetaForm({ ...betaForm, whatsapp: e.target.value })}
-                      className="w-full px-4 py-2.5 rounded-xl bg-slate-50 border border-slate-300 text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:bg-white focus:ring-2 focus:ring-[rgba(30,50,90,0.3)]"
-                    />
-                    {betaErrors.whatsapp && (
-                      <span className="text-[11px] text-rose-600 mt-1 block">{betaErrors.whatsapp}</span>
-                    )}
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-medium text-slate-700 mb-1">
-                      ¿Qué actividad realizás? *
-                    </label>
-                    <select
-                      value={betaForm.tipo}
-                      onChange={(e) => setBetaForm({ ...betaForm, tipo: e.target.value as any })}
-                      className="w-full px-4 py-2.5 rounded-xl bg-slate-50 border border-slate-300 text-sm text-slate-900 focus:outline-none focus:bg-white focus:ring-2 focus:ring-[rgba(30,50,90,0.3)]"
-                    >
-                      <option value="fabricante">Soy fabricante / taller de cartelería / imprenta</option>
-                      <option value="negocio">Soy dueño / encargado de un local comercial</option>
-                    </select>
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-medium text-slate-700 mb-1">
-                    ¿Cuántos carteles vendés o usás aproximadamente al mes?
-                  </label>
-                  <div className="grid grid-cols-4 gap-2">
-                    {['1 - 10', '11 - 50', '51 - 200', '200+'].map((vol) => (
-                      <button
-                        key={vol}
-                        type="button"
-                        onClick={() => setBetaForm({ ...betaForm, volumen: vol })}
-                        className={`py-2 px-3 rounded-xl text-xs font-medium border text-center transition cursor-pointer ${
-                          betaForm.volumen === vol
-                            ? 'bg-[rgba(30,50,90,0.9)] text-white border-[rgba(30,50,90,0.9)] shadow-xs'
-                            : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
-                        }`}
-                      >
-                        {vol}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="pt-3">
-                  <button
-                    type="submit"
-                    disabled={betaSubmitting}
-                    className="w-full py-3 rounded-full bg-[rgba(30,50,90,0.9)] hover:bg-[rgba(30,50,90,1)] text-white text-sm font-semibold shadow-md transition cursor-pointer"
-                  >
-                    {betaSubmitting ? 'Enviando...' : 'Reservar mi lugar en la beta'}
-                  </button>
-                </div>
-
-                <p className="text-[11px] text-center text-slate-500 pt-2">
-                  Al registrarte aceptás nuestros{' '}
-                  <Link to="/terminos" className="underline hover:text-slate-800">
-                    Términos
-                  </Link>{' '}
-                  y{' '}
-                  <Link to="/privacidad" className="underline hover:text-slate-800">
-                    Privacidad
-                  </Link>
-                  . Sin tarjetas ni letra chica.
-                </p>
-              </form>
-          </div>
-        </section>
 
         {/* 10. PIE DE PÁGINA INSTITUCIONAL & LEGAL */}
         <footer className="w-full bg-white rounded-[2rem] sm:rounded-[2.5rem] border border-black/5 shadow-xs p-6 sm:p-10 md:p-14 text-xs text-slate-600">
