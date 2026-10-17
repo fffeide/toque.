@@ -1,48 +1,39 @@
-/**
- * Toque — Estado de Error (ErrorState)
- * Mensaje humano comprensible y botón directo "Reintentar".
- */
-
 import React from 'react';
-import { AlertCircle, RefreshCw } from 'lucide-react';
 import { Button } from './Button';
-import { Card } from './Card';
+import { AlertCircle } from 'lucide-react';
 
 export interface ErrorStateProps {
   title?: string;
   message?: string;
   onRetry?: () => void;
-  className?: string;
 }
 
 export const ErrorState: React.FC<ErrorStateProps> = ({
   title = 'No pudimos cargar la información',
-  message = 'Ocurrió un problema de conexión al consultar los datos. Podés volver a intentar en unos segundos.',
+  message = 'Hubo un inconveniente al conectar con el servicio. Probá de nuevo en unos instantes.',
   onRetry,
-  className = '',
 }) => {
   return (
-    <Card className={`text-center py-10 px-6 flex flex-col items-center justify-center max-w-lg mx-auto border-rose-500/20 ${className}`}>
-      <div className="w-12 h-12 rounded-2xl bg-rose-500/10 text-[var(--coral)] flex items-center justify-center mb-3">
+    <div
+      role="alert"
+      className="p-6 rounded-2xl bg-[#FCE9E6] border border-[#B8332A]/20 text-[#0B1030] max-w-md mx-auto my-6 text-center space-y-3"
+    >
+      <div className="w-12 h-12 rounded-xl bg-white text-[#B8332A] flex items-center justify-center mx-auto shadow-xs">
         <AlertCircle className="w-6 h-6" />
       </div>
-      <h3 className="font-display text-title-3 font-semibold text-[var(--text-main)]">
+      <h3 className="font-display font-bold text-base text-[#B8332A]">
         {title}
       </h3>
-      <p className="text-small text-[var(--text-muted)] mt-1.5 max-w-md mx-auto">
+      <p className="text-xs text-[#5E6072] leading-relaxed">
         {message}
       </p>
       {onRetry && (
-        <div className="mt-5">
-          <Button
-            variant="secondary"
-            onClick={onRetry}
-            leftIcon={<RefreshCw className="w-4 h-4" />}
-          >
-            Reintentar
+        <div className="pt-2">
+          <Button variant="secundario" size="sm" onClick={onRetry}>
+            Volver a intentar
           </Button>
         </div>
       )}
-    </Card>
+    </div>
   );
 };

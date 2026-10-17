@@ -1,6 +1,6 @@
 {
-  "summary":  "Plan arquitectónico y de interfaz para desacoplar completamente los paneles de Toque (/admin, /fabricante, /resumen) según el rol y usuario autenticado, implementando Role-Based Access Control (RBAC), rutas protegidas dedicadas, menús de navegación exclusivos sin mezcla de herramientas, y confinando el selector de prueba únicamente a la cuenta @pruebas en el Super Admin.",
-  "updatedAt":  "2026-10-11T02:42:17.534915419Z",
-  "requestFeedback":  true,
-  "userFacing":  true
+  "summary": "Plan de implementación para el nuevo módulo Recibo de Toque: arquitectura sin backend/Firebase, capa de datos desacoplada (ToqueApi, mockApi en memoria y httpApi), diseño editorial sólido con paleta Papel/Tinta/Ultramar/Estrella/Coral, pantalla de Caja para tablets con simulación MP, Hub público del cliente con comprobante no fiscal descargable, club de fidelidad y botón neutro de reseñas de Google, y panel de negocio completo con editor accesible de bloques.",
+  "updatedAt": "2026-10-17T04:09:13.024820044Z",
+  "requestFeedback": true,
+  "userFacing": true
 }

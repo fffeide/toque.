@@ -1,1651 +1,731 @@
 /**
- * Toque — Adaptador Mock de la Capa de Datos (mockApi)
- * Datos demo con persistencia en sessionStorage:
- * - 1 Fabricante Demo ("Cartelería Demo")
- * - 12 Negocios reales
- * - 40 Carteles con nombres y ubicaciones verosímiles
- * - 90 días de escaneos generados determinísticamente con picos de mediodía, noche y fin de semana.
+ * Toque — Módulo Recibo: Mock API en Memoria (mockApi)
+ * Cumple estrictamente la Regla de Oro 1: sin Firebase, sin Firestore y sin localStorage como DB.
+ * Los datos viven en variables en memoria durante la sesión.
+ * Cifras y registros de muestra se rotulan siempre como "Ejemplo".
  */
 
 import { ToqueApi } from './ToqueApi';
 import {
-  Tenant,
-  TenantType,
   User,
-  UserRole,
   Cartel,
-  Scan,
-  ScanTelemetry,
-  Alert,
-  Report,
-  StatsSummary,
-  GoogleReviewsProfile,
-  CartelDetailStats,
-  CartelTimelineEvent,
-  ChannelMetric,
-  StaffMember,
-  WeeklyReportPreview,
-  ReportConfig,
-  ReplacementOrder,
-  ManufacturerStaffUser,
-  ManufacturerPlan,
-  InvoiceItem,
-  BusinessAtRisk,
-  BatchImportRow,
-  PlatformStats,
-  SystemHealthItem,
+  HubConfig,
+  PublicHub,
+  Sale,
+  Receipt,
+  ClubConfig,
+  ClubMember,
+  MercadoPagoStatus,
+  DashboardSummary,
+  CartelBatch,
+  BusinessProfile,
+  CartelRole,
+  HubMode,
+  PaymentMethod,
+  SaleItem,
 } from './types';
-import { validateGoogleReviewUrl } from '../lib/urlValidator';
-import { generateAccountCode, generateCartelCode } from '../lib/codeGenerator';
 
-const STORAGE_KEY = 'toque_clean_db_v5';
-const SESSION_USER_KEY = 'toque_clean_session_v5';
-
-// Generador determinista de números pseudoaleatorios (Linear Congruential Generator)
-function pseudoRandom(seed: number): () => number {
-  let s = seed % 2147483647;
-  if (s <= 0) s += 2147483646;
-  return () => {
-    s = (s * 16807) % 2147483647;
-    return (s - 1) / 2147483646;
-  };
-}
-
-interface MockDatabase {
-  tenants: Tenant[];
-  users: User[];
-  carteles: Cartel[];
-  scans: Scan[];
-  alerts: Alert[];
-  reports: Report[];
-  replacementOrders: ReplacementOrder[];
-  manufacturerStaff: ManufacturerStaffUser[];
-  invoices: InvoiceItem[];
-  plan: ManufacturerPlan;
-}
-
-function createInitialDatabase(): MockDatabase {
-  // 1. Tenants
-  const platformTenant: Tenant = {
-    id: 'tenant-platform',
-    type: 'platform',
-    name: 'Toque Central',
-    slug: 'toque-admin',
-    contactEmail: 'admin@toque.ar',
-    isDemo: false,
-    createdAt: '2026-01-01T00:00:00Z',
+class MockApi implements ToqueApi {
+  // Estado en memoria
+  private currentUser: User | null = {
+    id: 'user-demo',
+    email: 'comercio@toque.ar',
+    name: 'Martín Gómez',
+    businessId: 'biz-toque-1',
+    role: 'owner',
   };
 
-  const manufacturerTenant: Tenant = {
-    id: 'tenant-mfg-demo',
-    type: 'manufacturer',
-    name: 'Taller Fabricante',
-    slug: 'taller-fabricante',
-    brandColor: '#3A3FE0',
-    contactEmail: 'fabricante@toque.ar',
-    isDemo: false,
-    inNetwork: true,
-    city: 'Buenos Aires, Argentina',
-    description: 'Taller de producción de carteles acrílicos con chips NFC y códigos QR.',
-    materials: ['Acrílico Cristal 3mm', 'Impresión UV Ultra HD', 'Chips NTAG215'],
-    formats: ['Placa L de mostrador', 'Pirámide de mesa'],
+  private businessProfile: BusinessProfile = {
+    id: 'biz-toque-1',
+    name: 'Café & Panadería La Esquina',
+    ownerName: 'Martín Gómez',
+    email: 'comercio@toque.ar',
+    reviewUrl: 'https://maps.app.goo.gl/3QW2JkmG88pM7example',
+    createdAt: new Date().toISOString(),
+  };
+
+  // Carteles iniciales: uno activo para la caja y uno sin activar para probar la activación
+  private carteles: Cartel[] = [
+    {
+      id: 'cartel-caja-1',
+      code: 'CAJA01',
+      pin: '112233',
+      businessId: 'biz-toque-1',
+      name: 'Caja Principal (Mostrador)',
+      role: 'caja',
+      status: 'active',
+      reviewUrl: 'https://maps.app.goo.gl/3QW2JkmG88pM7example',
+      mode: 'hub',
+      createdAt: new Date(Date.now() - 86400000 * 5).toISOString(),
+      activatedAt: new Date(Date.now() - 86400000 * 5).toISOString(),
+    },
+    {
+      id: 'cartel-ejemplo-sin-activar',
+      code: 'DEMO01',
+      pin: 'ABC123', // Cartel de ejemplo para probar activación en menos de 60 segundos
+      name: 'Cartel sin activar (Ejemplo)',
+      role: 'caja',
+      status: 'sin_activar',
+      mode: 'hub',
+      createdAt: new Date().toISOString(),
+    },
+  ];
+
+  // Configuración del Hub
+  private hubConfig: HubConfig = {
+    mode: 'hub',
+    blocks: [
+      { key: 'receipt', enabled: true },
+      { key: 'review', enabled: true },
+      { key: 'club', enabled: true },
+      { key: 'socials', enabled: true },
+      { key: 'products', enabled: true },
+      { key: 'details', enabled: true },
+    ],
+    accentColor: '#3A3FE0', // Ultramar por defecto
+    socials: {
+      instagram: 'laesquina.cafe',
+      whatsapp: '+5491144558899',
+    },
     products: [
       {
         id: 'prod-1',
-        name: 'Cartel Acrílico de Mostrador',
-        format: 'Placa L inclinada 10x15 cm',
-        material: 'Acrílico cristal 3mm + NFC + QR',
-        price: 7900,
-        description: 'Soporte físico para mostrador con chip NTAG215 y QR de alta resolución',
-        estimatedDays: 2,
+        title: 'Café de Especialidad + Medialuna',
+        price: 3800,
+        description: 'Tostado natural con manteca artesanal',
+      },
+      {
+        id: 'prod-2',
+        title: 'Tostado de Campo Jamón y Queso',
+        price: 5200,
+        description: 'Pan de masa madre horneado hoy',
       },
     ],
-    createdAt: '2026-02-01T00:00:00Z',
+    details: {
+      address: 'Av. Corrientes 1450, CABA',
+      hours: 'Lunes a Sábado de 07:30 a 20:00 h',
+      phone: '+54 11 4371-2233',
+    },
+    showToqueFooter: true,
   };
 
-  // Sin negocios falsos ni inventados: se crean cuando un negocio se registra o abre su panel
-  const allTenants = [platformTenant, manufacturerTenant];
+  // Club de fidelidad
+  private clubConfig: ClubConfig = {
+    name: 'Club La Esquina',
+    rule: {
+      type: 'per_visit',
+      value: 1, // 1 sello por cada visita/compra
+    },
+    rewards: [
+      { id: 'rew-1', label: 'Café a elección de regalo', target: 5 },
+      { id: 'rew-2', label: 'Desayuno completo para dos', target: 10 },
+    ],
+    active: true,
+  };
 
-  // 2. Usuarios
-  const users: User[] = [
+  private clubMembers: ClubMember[] = [];
+
+  // Ventas y Recibos en memoria (base limpia sin cobros previos)
+  private sales: Sale[] = [];
+  private receipts: Receipt[] = [];
+
+  // Mercado Pago
+  private mpStatus: MercadoPagoStatus = {
+    connected: true, // Conectado en demo para probar QR
+    collectorId: 'MP-99482103',
+    connectedAt: new Date(Date.now() - 86400000 * 2).toISOString(),
+  };
+
+  // Intentos fallidos de PIN por código de cartel
+  private pinAttempts: Record<string, number> = {};
+
+  // Lotes para fabricante
+  private batches: CartelBatch[] = [
     {
-      id: 'user-platform-admin',
-      tenantId: 'tenant-platform',
-      email: 'admin@toque.ar',
-      name: 'Administrador Toque',
-      role: 'platform_admin',
-      hasSeenOnboarding: true,
-    },
-    {
-      id: 'user-mfg-admin',
-      tenantId: 'tenant-mfg-demo',
-      email: 'fabricante@toque.ar',
-      name: 'Taller Fabricante',
-      role: 'manufacturer_admin',
-      hasSeenOnboarding: true,
-    },
-    {
-      id: 'user-biz-owner',
-      tenantId: 'tenant-platform',
-      email: 'negocio@toque.ar',
-      name: 'Comercio',
-      role: 'business_owner',
-      hasSeenOnboarding: false,
-    },
-    {
-      id: 'user-pruebas',
-      tenantId: 'tenant-platform',
-      email: 'pruebas@toque.ar',
-      name: 'Entorno de Pruebas Toque QA (@pruebas)',
-      role: 'platform_admin',
-      hasSeenOnboarding: true,
+      id: 'lote-101',
+      count: 2,
+      createdAt: new Date(Date.now() - 86400000 * 3).toISOString(),
+      carteles: [
+        { code: 'CAJA01', pin: '112233', status: 'active', shortUrl: 'https://toque.ar/h/CAJA01' },
+        { code: 'DEMO01', pin: 'ABC123', status: 'sin_activar', shortUrl: 'https://toque.ar/h/DEMO01' },
+      ],
     },
   ];
 
-  // 3. Carteles reales creados por el usuario (sin carteles falsos)
-  const carteles: Cartel[] = [];
+  // Simulación de toques a reseña
+  private reviewClicks = 0;
 
-  // 4. Escaneos reales (sin telemetría simulada inventada)
-  const scans: Scan[] = [];
+  // --- MÉTODOS DE AUTENTICACIÓN ---
 
-  // 5. Alertas reales
-  const alerts: Alert[] = [];
-
-  // 6. Reportes Mensuales reales
-  const reports: Report[] = [];
-
-  // 7. Pedidos de reposición reales
-  const replacementOrders: ReplacementOrder[] = [];
-
-  // 8. Equipo del taller fabricante
-  const manufacturerStaff: ManufacturerStaffUser[] = [
-    {
-      id: 'mfg-staff-1',
-      name: 'Administración Taller',
-      email: 'fabricante@toque.ar',
-      role: 'owner',
-      addedAt: '2026-02-01T00:00:00Z',
-    },
-  ];
-
-  // 9. Facturas
-  const invoices: InvoiceItem[] = [];
-
-  // 10. Plan del Fabricante
-  const plan: ManufacturerPlan = {
-    planName: 'Plan Taller 50',
-    cartelesUsed: 0,
-    cartelesLimit: 50,
-    pricePerMonth: 24899,
-    currency: 'ARS',
-    status: 'active',
-    graceDaysRemaining: 15,
-    nextBillingDate: '2026-11-01',
-    paymentMethod: {
-      brand: 'Visa',
-      last4: '4242',
-      expiry: '10/28',
-    },
-  };
-
-  return {
-    tenants: allTenants,
-    users,
-    carteles,
-    scans,
-    alerts,
-    reports,
-    replacementOrders,
-    manufacturerStaff,
-    invoices,
-    plan,
-  };
-}
-
-class MockApiImpl implements ToqueApi {
-  private db: MockDatabase;
-  private currentUser: { user: User; tenant: Tenant } | null = null;
-
-  constructor() {
-    this.db = this.loadDatabase();
-    this.loadSession();
-  }
-
-  private loadDatabase(): MockDatabase {
-    try {
-      const stored = sessionStorage.getItem(STORAGE_KEY);
-      if (stored) {
-        return JSON.parse(stored);
-      }
-    } catch {
-      // Ignorar error de acceso a storage
-    }
-    const fresh = createInitialDatabase();
-    this.saveDatabase(fresh);
-    return fresh;
-  }
-
-  private saveDatabase(db: MockDatabase) {
-    try {
-      sessionStorage.setItem(STORAGE_KEY, JSON.stringify(db));
-    } catch {
-      // Ignorar límite de almacenamiento
-    }
-  }
-
-  private loadSession() {
-    try {
-      const stored = sessionStorage.getItem(SESSION_USER_KEY);
-      if (stored) {
-        this.currentUser = JSON.parse(stored);
-        return;
-      }
-    } catch {
-      // Fallback
-    }
-
-    // Sesión por defecto: Negocio demo 'Café & Bistro La Esquina'
-    const defaultUser = this.db.users.find(u => u.role === 'business_owner') || this.db.users[0];
-    const defaultTenant = this.db.tenants.find(t => t.id === defaultUser.tenantId) || this.db.tenants[0];
-    this.currentUser = { user: defaultUser, tenant: defaultTenant };
-  }
-
-  private saveSession() {
-    try {
-      if (this.currentUser) {
-        sessionStorage.setItem(SESSION_USER_KEY, JSON.stringify(this.currentUser));
-      } else {
-        sessionStorage.removeItem(SESSION_USER_KEY);
-      }
-    } catch {
-      // Ignorar
-    }
-  }
-
-  // --- Autenticación ---
-
-  async requestMagicLink(email: string): Promise<{ success: boolean; simulatedLink?: string; token?: string }> {
-    const cleanEmail = email.trim().toLowerCase();
-    const token = `token-${Date.now().toString(36)}`;
-    const simulatedLink = `/auth/verify?token=${token}&email=${encodeURIComponent(cleanEmail)}`;
-    return { success: true, simulatedLink, token };
-  }
-
-  async verifyMagicLink(token: string): Promise<{ user: User; tenant: Tenant }> {
-    // Si viene token demo o cualquier token simulado, asociar o crear sesión
-    const user = this.db.users[2] || this.db.users[0];
-    const tenant = this.db.tenants.find(t => t.id === user.tenantId) || this.db.tenants[0];
-    this.currentUser = { user, tenant };
-    this.saveSession();
-    return this.currentUser;
-  }
-
-  async loginDirect(email: string, role?: UserRole): Promise<{ user: User; tenant: Tenant }> {
-    const cleanEmail = email.trim().toLowerCase();
-    
-    // Si coincide con usuario existente
-    let matchedUser = this.db.users.find(u => u.email.toLowerCase() === cleanEmail);
-    if (!matchedUser && role) {
-      matchedUser = this.db.users.find(u => u.role === role);
-    }
-
-    if (!matchedUser) {
-      // Crear un usuario y tenant nuevo de negocio directamente
-      const newTenantId = `biz-${Date.now().toString(36)}`;
-      const businessName = cleanEmail.split('@')[0] || 'Mi Negocio';
-      const formattedName = businessName.charAt(0).toUpperCase() + businessName.slice(1);
-      
-      const newTenant: Tenant = {
-        id: newTenantId,
-        type: 'business',
-        name: `${formattedName} (Nuevo)`,
-        slug: businessName.toLowerCase().replace(/[^a-z0-9]/g, '-'),
-        manufacturerId: 'tenant-mfg-demo',
-        contactEmail: cleanEmail,
-        isDemo: true,
-        features: { channels: true, staff: true },
-        createdAt: new Date().toISOString(),
-      };
-      
-      matchedUser = {
-        id: `user-${Date.now().toString(36)}`,
-        tenantId: newTenantId,
-        email: cleanEmail,
-        name: formattedName,
-        role: 'business_owner',
-        hasSeenOnboarding: false,
-      };
-
-      this.db.tenants.push(newTenant);
-      this.db.users.push(matchedUser);
-      this.saveDatabase(this.db);
-    }
-
-    const tenant = this.db.tenants.find(t => t.id === matchedUser!.tenantId) || this.db.tenants[0];
-    this.currentUser = { user: matchedUser, tenant };
-    this.saveSession();
-    return this.currentUser;
-  }
-
-  async loginWithCredentials(username: string, pass: string): Promise<{ user: User; tenant: Tenant }> {
-    const cleanUser = username.trim().toLowerCase();
-    const cleanPass = pass.trim();
-
-    // Credenciales de prueba solicitadas: user: @pruebas contraseña: ¿ToQuE123!
-    const isTestUser = cleanUser === '@pruebas' || cleanUser === 'pruebas' || cleanUser === 'pruebas@toque.ar';
-    const isTestPass = cleanPass === '¿ToQuE123!' || cleanPass === 'ToQuE123!' || cleanPass === 'toque123';
-
-    if (isTestUser && isTestPass) {
-      const qaUser = this.db.users.find(u => u.id === 'user-pruebas') || this.db.users[0];
-      const platformTenant = this.db.tenants.find(t => t.id === 'tenant-platform') || this.db.tenants[0];
-      this.currentUser = { user: qaUser, tenant: platformTenant };
-      this.saveSession();
-      return this.currentUser;
-    }
-
-    if (cleanUser === 'admin@toque.ar' || cleanUser === 'admin') {
-      return this.switchDemoRole('platform_admin');
-    }
-    if (cleanUser === 'fabricante@toque.ar' || cleanUser === 'fabricante') {
-      return this.switchDemoRole('manufacturer_admin');
-    }
-    if (cleanUser === 'negocio@toque.ar' || cleanUser === 'negocio') {
-      return this.switchDemoRole('business_owner');
-    }
-
-    // Si coincide con usuario existente por email
-    const foundUser = this.db.users.find(u => u.email.toLowerCase() === cleanUser);
-    if (foundUser) {
-      const tenant = this.db.tenants.find(t => t.id === foundUser.tenantId) || this.db.tenants[0];
-      this.currentUser = { user: foundUser, tenant };
-      this.saveSession();
-      return this.currentUser;
-    }
-
-    // Si no existe, crear sesión directa para testing sin bloquear
-    return this.loginDirect(cleanUser.includes('@') ? cleanUser : `${cleanUser}@toque.ar`);
-  }
-
-  async registerUser(data: {
-    name: string;
+  async register(data: {
+    businessName: string;
+    ownerName: string;
     email: string;
     password?: string;
-    whatsapp: string;
-    activity: 'fabricante' | 'negocio';
-    volume: string;
-    plan?: string;
-  }): Promise<{ user: User; tenant: Tenant }> {
-    const cleanEmail = data.email.trim().toLowerCase();
-    const cleanName = data.name.trim();
-    const isMfg = data.activity === 'fabricante';
-    const role: UserRole = isMfg ? 'manufacturer_admin' : 'business_owner';
-    const tenantType: TenantType = isMfg ? 'manufacturer' : 'business';
-
-    const existingCount = this.db.tenants.filter(t => t.type === tenantType).length + 1;
-    const accountCode = generateAccountCode(cleanName, existingCount);
-
-    const tenant: Tenant = {
-      id: `${isMfg ? 'mfg' : 'biz'}-${Date.now()}`,
-      type: tenantType,
-      name: cleanName,
-      slug: cleanName.toLowerCase().replace(/[^a-z0-9]/g, '-'),
-      accountCode,
-      contactEmail: cleanEmail,
-      phone: data.whatsapp.trim(),
-      plan: data.plan || (isMfg ? 'taller' : 'free'),
-      manufacturerId: isMfg ? undefined : 'mfg-toque-saas',
-      assignedManufacturerName: isMfg ? undefined : 'Toque™ SaaS',
-      isDemo: false,
-      features: {
-        channels: true,
-        staff: true,
-      },
-      createdAt: new Date().toISOString(),
-    };
-
+  }): Promise<{ user: User; token: string }> {
+    const bizId = `biz-${Date.now()}`;
     const user: User = {
-      id: `usr-${Date.now()}`,
-      tenantId: tenant.id,
-      email: cleanEmail,
-      name: cleanName,
-      role,
-      hasSeenOnboarding: false,
-      hasCompletedOnboarding: false,
+      id: `user-${Date.now()}`,
+      email: data.email.trim().toLowerCase(),
+      name: data.ownerName.trim(),
+      businessId: bizId,
+      role: 'owner',
+    };
+
+    this.currentUser = user;
+    this.businessProfile = {
+      id: bizId,
+      name: data.businessName.trim(),
+      ownerName: data.ownerName.trim(),
+      email: data.email.trim().toLowerCase(),
       createdAt: new Date().toISOString(),
     };
 
-    this.db.tenants.push(tenant);
-    this.db.users.push(user);
-    this.saveDatabase(this.db);
-
-    this.currentUser = { user, tenant };
-    this.saveSession();
-    return this.currentUser;
+    return { user, token: 'mock-jwt-token-register' };
   }
 
-  async markUserOnboarded(userId: string): Promise<User> {
-    const user = this.db.users.find(u => u.id === userId);
-    if (user) {
-      user.hasSeenOnboarding = true;
-      this.saveDatabase(this.db);
-      if (this.currentUser && this.currentUser.user.id === userId) {
-        this.currentUser.user.hasSeenOnboarding = true;
-        this.saveSession();
-      }
-      return user;
-    }
-    if (this.currentUser) {
-      this.currentUser.user.hasSeenOnboarding = true;
-      this.saveSession();
-      return this.currentUser.user;
-    }
-    throw new Error('Usuario no encontrado');
-  }
-
-  async getCurrentUser(): Promise<{ user: User; tenant: Tenant } | null> {
-    return this.currentUser;
+  async login(credentials: {
+    email: string;
+    password?: string;
+    isGoogle?: boolean;
+  }): Promise<{ user: User; token: string }> {
+    const user: User = {
+      id: this.currentUser?.id || 'user-demo',
+      email: credentials.email ? credentials.email.trim().toLowerCase() : 'comercio@toque.ar',
+      name: credentials.isGoogle ? 'Usuario Google' : (this.currentUser?.name || 'Martín Gómez'),
+      businessId: this.businessProfile.id,
+      role: 'owner',
+    };
+    this.currentUser = user;
+    return { user, token: 'mock-jwt-token-login' };
   }
 
   async logout(): Promise<void> {
     this.currentUser = null;
-    try {
-      sessionStorage.removeItem(SESSION_USER_KEY);
-      sessionStorage.removeItem('toque_role_selected');
-      localStorage.removeItem('toque_auth_session');
-    } catch {
-      // Ignore
-    }
   }
 
-  async switchDemoRole(role: UserRole): Promise<{ user: User; tenant: Tenant }> {
-    const targetUser = this.db.users.find(u => u.role === role);
-    if (!targetUser) {
-      throw new Error(`Rol ${role} no encontrado en datos demo.`);
-    }
-    const tenant = this.db.tenants.find(t => t.id === targetUser.tenantId);
-    if (!tenant) {
-      throw new Error(`Tenant para el usuario no encontrado.`);
-    }
-
-    this.currentUser = { user: targetUser, tenant };
-    this.saveSession();
+  async getCurrentUser(): Promise<User | null> {
     return this.currentUser;
   }
 
-  // --- Tenants y Marca Blanca ---
+  // --- ACTIVACIÓN DEL CARTEL ---
 
-  async getTenant(id: string): Promise<Tenant> {
-    const t = this.db.tenants.find(item => item.id === id);
-    if (!t) throw new Error('Tenant no encontrado.');
-    return t;
-  }
+  async getActivationState(code: string): Promise<{
+    found: boolean;
+    status?: Cartel['status'];
+    requiresPin?: boolean;
+    cartel?: Partial<Cartel>;
+  }> {
+    const cleanCode = code.trim().toUpperCase();
+    const cartel = this.carteles.find(c => c.code.toUpperCase() === cleanCode);
 
-  async updateTenant(id: string, patch: Partial<Tenant>): Promise<Tenant> {
-    const idx = this.db.tenants.findIndex(item => item.id === id);
-    if (idx === -1) throw new Error('Tenant no encontrado.');
+    if (!cartel) {
+      return { found: false };
+    }
 
-    const updated = {
-      ...this.db.tenants[idx],
-      ...patch,
-      id,
+    return {
+      found: true,
+      status: cartel.status,
+      requiresPin: cartel.status === 'sin_activar',
+      cartel: {
+        code: cartel.code,
+        name: cartel.name,
+        role: cartel.role,
+        status: cartel.status,
+      },
     };
-    this.db.tenants[idx] = updated;
-    this.saveDatabase(this.db);
-
-    if (this.currentUser && this.currentUser.tenant.id === id) {
-      this.currentUser.tenant = updated;
-      this.saveSession();
-    }
-    return updated;
   }
 
-  async updateTenantBrand(id: string, brand: { brandColor?: string; brandLogo?: string; name?: string }): Promise<Tenant> {
-    return this.updateTenant(id, brand);
-  }
-
-  async listBusinesses(manufacturerId?: string): Promise<Tenant[]> {
-    return this.db.tenants.filter(t => t.type === 'business' && (!manufacturerId || t.manufacturerId === manufacturerId));
-  }
-
-  async listManufacturers(): Promise<Tenant[]> {
-    return this.db.tenants.filter(t => t.type === 'manufacturer' && t.inNetwork !== false);
-  }
-
-  async listManufacturerReviews(manufacturerId: string): Promise<import('./types').ManufacturerReview[]> {
-    try {
-      const stored = localStorage.getItem(`toque_reviews_${manufacturerId}`);
-      if (stored) return JSON.parse(stored);
-    } catch {
-      // ignore
-    }
-    return [];
-  }
-
-  async addManufacturerReview(data: {
-    manufacturerId: string;
-    businessId: string;
+  async activateCartel(data: {
+    code: string;
+    pin: string;
     businessName: string;
-    rating: number;
-    comment: string;
-  }): Promise<import('./types').ManufacturerReview> {
-    const rev: import('./types').ManufacturerReview = {
-      id: 'rev-' + Date.now(),
-      manufacturerId: data.manufacturerId,
-      businessId: data.businessId,
-      businessName: data.businessName,
-      businessCode: this.currentUser?.tenant.accountCode || 'VH-01',
-      rating: Math.max(1, Math.min(5, data.rating)),
-      comment: data.comment.trim(),
-      createdAt: new Date().toISOString(),
-    };
-    try {
-      const stored = JSON.parse(localStorage.getItem(`toque_reviews_${data.manufacturerId}`) || '[]');
-      stored.unshift(rev);
-      localStorage.setItem(`toque_reviews_${data.manufacturerId}`, JSON.stringify(stored));
-    } catch {
-      // ignore
-    }
-    return rev;
-  }
+    reviewUrl: string;
+    cartelName: string;
+    role: CartelRole;
+    mode: HubMode;
+  }): Promise<{ success: boolean; cartel: Cartel }> {
+    const cleanCode = data.code.trim().toUpperCase();
+    const cleanPin = data.pin.trim().toUpperCase();
 
-  async upgradeBusinessPlan(businessId: string, plan: 'free' | 'pro'): Promise<Tenant> {
-    return this.updateTenant(businessId, { plan });
-  }
+    const cartel = this.carteles.find(c => c.code.toUpperCase() === cleanCode);
 
-  async updateManufacturerNetwork(manufacturerId: string, profile: Partial<Tenant>): Promise<Tenant> {
-    const updated = await this.updateTenant(manufacturerId, {
-      ...profile,
-      inNetwork: profile.inNetwork ?? true,
-    });
-    return updated;
-  }
-
-  async verifyManufacturer(manufacturerId: string, verified: boolean, notes?: string): Promise<Tenant> {
-    const updated = await this.updateTenant(manufacturerId, {
-      isVerified: verified,
-      verifiedAt: verified ? new Date().toISOString() : undefined,
-      verificationNotes: notes,
-    });
-    return updated;
-  }
-
-  // --- Carteles ---
-
-  async listCarteles(businessId?: string, includeTrash = false): Promise<Cartel[]> {
-    return this.db.carteles.filter(s => {
-      const matchBiz = !businessId || s.businessId === businessId;
-      const matchStatus = includeTrash ? true : s.status !== 'trash';
-      return matchBiz && matchStatus;
-    });
-  }
-
-  async getCartel(id: string): Promise<Cartel | null> {
-    return this.db.carteles.find(s => s.id === id) || null;
-  }
-
-  async createCartel(data: {
-    businessId: string;
-    name: string;
-    locationDescription: string;
-    targetUrl: string;
-    nfcEnabled?: boolean;
-    qrEnabled?: boolean;
-  }): Promise<Cartel> {
-    const validation = validateGoogleReviewUrl(data.targetUrl);
-    if (!validation.isValid) {
-      throw new Error(validation.error || 'URL no válida');
+    if (!cartel) {
+      throw new Error('No encontramos un cartel con ese código.');
     }
 
-    const shortCode = Math.random().toString(36).substring(2, 7);
+    if (cartel.status === 'active') {
+      throw new Error('Este cartel ya se encuentra activado.');
+    }
 
-    const bizTenant = this.db.tenants.find(t => t.id === data.businessId);
-    const mfgTenant = bizTenant?.manufacturerId ? this.db.tenants.find(t => t.id === bizTenant.manufacturerId) : null;
-    const mfgCode = mfgTenant?.accountCode || 'TS-01';
-    const bizCode = bizTenant?.accountCode || (bizTenant?.name ? generateAccountCode(bizTenant.name, 1) : 'CL-01');
-    const existingCount = this.db.carteles.filter(c => c.businessId === data.businessId).length + 1;
-    const code = generateCartelCode(mfgCode, bizCode, existingCount);
+    // Control de intentos de PIN (máximo 5)
+    const attempts = this.pinAttempts[cleanCode] || 0;
+    if (attempts >= 5) {
+      throw new Error('Superaste los 5 intentos con el PIN. Por seguridad, la activación quedó temporalmente bloqueada.');
+    }
 
-    const newCartel: Cartel = {
-      id: `cartel-${Date.now()}`,
-      tenantId: data.businessId,
-      businessId: data.businessId,
-      manufacturerId: bizTenant?.manufacturerId || 'mfg-toque-saas',
-      code,
-      shortCode,
-      name: data.name.trim(),
-      locationDescription: data.locationDescription.trim(),
-      targetUrl: validation.sanitizedUrl || data.targetUrl,
-      nfcEnabled: data.nfcEnabled ?? true,
-      qrEnabled: data.qrEnabled ?? true,
-      status: 'active',
-      scansCount: 0,
-      estimatedReviewsCount: 0,
-      createdAt: new Date().toISOString(),
-    };
+    if (cartel.pin.toUpperCase() !== cleanPin) {
+      this.pinAttempts[cleanCode] = attempts + 1;
+      const restantes = 5 - (attempts + 1);
+      throw new Error(`El PIN ingresado es incorrecto. Te quedan ${restantes} intento(s).`);
+    }
 
-    this.db.carteles.unshift(newCartel);
-    this.saveDatabase(this.db);
-    return newCartel;
+    // Validación de URL de Google Maps (rechazar redirectores como google.com/url?q=)
+    if (!this.isValidGoogleReviewUrl(data.reviewUrl)) {
+      throw new Error('El enlace de reseñas debe ser un link válido de Google Maps (g.page, maps.app.goo.gl o google.com/maps).');
+    }
+
+    // Activar cartel
+    cartel.businessId = this.businessProfile.id;
+    cartel.name = data.cartelName.trim() || 'Caja 1';
+    cartel.role = data.role;
+    cartel.mode = data.mode;
+    cartel.reviewUrl = data.reviewUrl.trim();
+    cartel.status = 'active';
+    cartel.activatedAt = new Date().toISOString();
+
+    // Actualizar perfil de negocio
+    if (data.businessName.trim()) {
+      this.businessProfile.name = data.businessName.trim();
+    }
+    this.businessProfile.reviewUrl = data.reviewUrl.trim();
+
+    delete this.pinAttempts[cleanCode];
+
+    return { success: true, cartel };
   }
 
-  async createCartelFromLink(data: {
-    targetUrl: string;
-    name?: string;
-    quantity?: number;
-    manufacturerId?: string;
-  }): Promise<Cartel[]> {
-    const validation = validateGoogleReviewUrl(data.targetUrl);
-    if (!validation.isValid) {
-      throw new Error(validation.error || 'Ingresá un enlace válido de Google Maps');
-    }
-    const cleanUrl = validation.sanitizedUrl || data.targetUrl.trim();
-    const qty = Math.max(1, Math.min(50, data.quantity || 1));
-    const createdList: Cartel[] = [];
-    const mfgTenant = data.manufacturerId ? this.db.tenants.find(t => t.id === data.manufacturerId) : null;
-    const mfgCode = mfgTenant?.accountCode || 'TQ-01';
+  private isValidGoogleReviewUrl(url: string): boolean {
+    if (!url || typeof url !== 'string') return false;
+    const clean = url.trim().toLowerCase();
 
-    for (let i = 0; i < qty; i++) {
-      const shortCode = Math.random().toString(36).substring(2, 7);
-      const seq = this.db.carteles.length + 1;
-      const cartelName = qty > 1 
-        ? `${data.name || 'Cartel físico'} #${i + 1}` 
-        : (data.name || 'Cartel físico');
-      const code = `${mfgCode.split('-')[0]}-MAP-${String(seq).padStart(2, '0')}`;
-
-      const newCartel: Cartel = {
-        id: `cartel-${Date.now()}-${i}`,
-        tenantId: data.manufacturerId || 'unassigned',
-        businessId: 'unassigned',
-        manufacturerId: data.manufacturerId || 'tenant-mfg-demo',
-        code,
-        shortCode,
-        name: cartelName,
-        locationDescription: 'Listo para colocar en salón o mostrador',
-        targetUrl: cleanUrl,
-        nfcEnabled: true,
-        qrEnabled: true,
-        status: 'active',
-        scansCount: 0,
-        estimatedReviewsCount: 0,
-        createdAt: new Date().toISOString(),
-      };
-      this.db.carteles.unshift(newCartel);
-      createdList.push(newCartel);
+    // Rechazar redirectores maliciosos
+    if (clean.includes('google.com/url?q=') || clean.includes('/url?q=')) {
+      return false;
     }
-    this.saveDatabase(this.db);
-    return createdList;
+
+    return (
+      clean.includes('g.page/') ||
+      clean.includes('maps.app.goo.gl/') ||
+      clean.includes('google.com/maps') ||
+      clean.includes('goo.gl/maps')
+    );
   }
 
-  async claimCartelesByGoogleMapsUrl(
-    businessId: string,
-    googleMapsUrl: string,
-    shortCode?: string,
-    businessName?: string
-  ): Promise<{ claimedCount: number; carteles: Cartel[] }> {
-    const rawQuery = (shortCode || googleMapsUrl || '').trim();
-    const cleanQuery = rawQuery.toLowerCase();
-    const claimed: Cartel[] = [];
+  // --- CARTELES ---
 
-    this.db.carteles.forEach((c) => {
-      let isMatch = false;
-      if (cleanQuery) {
-        if (c.shortCode && c.shortCode.toLowerCase() === cleanQuery) isMatch = true;
-        if (c.code && c.code.toLowerCase() === cleanQuery) isMatch = true;
-        if (c.code && c.code.toLowerCase().includes(cleanQuery)) isMatch = true;
-        if (c.targetUrl) {
-          const cUrl = c.targetUrl.toLowerCase();
-          if (cUrl === cleanQuery) isMatch = true;
-          const placeIdMatch = cleanQuery.match(/placeid=([a-zA-Z0-9_-]+)/);
-          if (placeIdMatch && cUrl.includes(placeIdMatch[1])) isMatch = true;
-          if (cleanQuery.includes('google.com') && cUrl.includes(cleanQuery)) isMatch = true;
-        }
-      }
-
-      if (isMatch) {
-        c.businessId = businessId;
-        c.tenantId = businessId;
-        claimed.push(c);
-      }
-    });
-
-    if (businessName && businessName.trim()) {
-      const bizTenant = this.db.tenants.find(t => t.id === businessId);
-      if (bizTenant) {
-        bizTenant.name = businessName.trim();
-        if (this.currentUser && this.currentUser.tenant.id === businessId) {
-          this.currentUser.tenant.name = businessName.trim();
-        }
-      }
-    }
-
-    if (claimed.length > 0 || businessName) {
-      this.saveDatabase(this.db);
-      this.saveSession();
-    }
-    return { claimedCount: claimed.length, carteles: claimed };
+  async listCarteles(): Promise<Cartel[]> {
+    return [...this.carteles];
   }
 
-  async updateCartel(id: string, patch: Partial<Cartel>): Promise<Cartel> {
-    const idx = this.db.carteles.findIndex(s => s.id === id);
+  async updateCartel(
+    id: string,
+    patch: Partial<Pick<Cartel, 'name' | 'role' | 'status' | 'mode' | 'reviewUrl'>>
+  ): Promise<Cartel> {
+    const idx = this.carteles.findIndex(c => c.id === id);
     if (idx === -1) throw new Error('Cartel no encontrado.');
 
-    if (patch.targetUrl) {
-      const validation = validateGoogleReviewUrl(patch.targetUrl);
-      if (!validation.isValid) {
-        throw new Error(validation.error || 'URL no válida');
-      }
-      patch.targetUrl = validation.sanitizedUrl || patch.targetUrl;
-    }
-
-    const updated = { ...this.db.carteles[idx], ...patch };
-    this.db.carteles[idx] = updated;
-    this.saveDatabase(this.db);
-    return updated;
-  }
-
-  async deleteCartel(id: string): Promise<void> {
-    const idx = this.db.carteles.findIndex(s => s.id === id);
-    if (idx === -1) return;
-    this.db.carteles[idx] = {
-      ...this.db.carteles[idx],
-      status: 'trash',
-      deletedAt: new Date().toISOString(),
-    };
-    this.saveDatabase(this.db);
-  }
-
-  async restoreCartel(id: string): Promise<void> {
-    const idx = this.db.carteles.findIndex(s => s.id === id);
-    if (idx === -1) return;
-    this.db.carteles[idx] = {
-      ...this.db.carteles[idx],
-      status: 'active',
-      deletedAt: undefined,
-    };
-    this.saveDatabase(this.db);
-  }
-
-  async replaceCartel(oldCartelId: string, newCartelData: {
-    name: string;
-    locationDescription: string;
-    targetUrl?: string;
-    reason?: string;
-  }): Promise<{ oldCartel: Cartel; newCartel: Cartel }> {
-    const oldIdx = this.db.carteles.findIndex(s => s.id === oldCartelId);
-    if (oldIdx === -1) throw new Error('Cartel original no encontrado.');
-
-    const oldCartel = this.db.carteles[oldIdx];
-    const newShortCode = Math.random().toString(36).substring(2, 7);
-    const reason = newCartelData.reason || 'Reemplazo de cartel físico';
-    const now = new Date().toISOString();
-
-    const bizTenant = this.db.tenants.find(t => t.id === oldCartel.businessId);
-    const mfgTenant = bizTenant?.manufacturerId ? this.db.tenants.find(t => t.id === bizTenant.manufacturerId) : null;
-    const mfgCode = mfgTenant?.accountCode || 'TS-01';
-    const bizCode = bizTenant?.accountCode || (bizTenant?.name ? generateAccountCode(bizTenant.name, 1) : 'CL-01');
-    const totalCount = this.db.carteles.filter(c => c.businessId === oldCartel.businessId).length + 1;
-    const newCode = generateCartelCode(mfgCode, bizCode, totalCount);
-
-    const newCartel: Cartel = {
-      id: `cartel-${Date.now()}`,
-      tenantId: oldCartel.tenantId,
-      businessId: oldCartel.businessId,
-      manufacturerId: oldCartel.manufacturerId,
-      code: newCode,
-      shortCode: newShortCode,
-      name: newCartelData.name.trim(),
-      locationDescription: newCartelData.locationDescription.trim(),
-      targetUrl: newCartelData.targetUrl || oldCartel.targetUrl,
-      nfcEnabled: true,
-      qrEnabled: true,
-      status: 'active',
-      replacedCartelId: oldCartel.id,
-      replacementReason: reason,
-      scansCount: oldCartel.scansCount || 0,
-      estimatedReviewsCount: oldCartel.estimatedReviewsCount || 0,
-      createdAt: now,
+    this.carteles[idx] = {
+      ...this.carteles[idx],
+      ...patch,
     };
 
-    const updatedOld: Cartel = {
-      ...oldCartel,
-      status: 'replaced',
-      replacedByCartelId: newCartel.id,
-      replacementReason: reason,
-      updatedAt: now,
+    return this.carteles[idx];
+  }
+
+  // --- HUB DEL NEGOCIO ---
+
+  async getHubConfig(): Promise<HubConfig> {
+    return { ...this.hubConfig };
+  }
+
+  async updateHubConfig(patch: Partial<HubConfig>): Promise<HubConfig> {
+    this.hubConfig = {
+      ...this.hubConfig,
+      ...patch,
     };
-
-    // Eliminar el cartel viejo reemplazado para que no quede duplicado ni figure en la lista activa
-    this.db.carteles.splice(oldIdx, 1);
-    this.db.carteles.unshift(newCartel);
-    this.saveDatabase(this.db);
-
-    return { oldCartel: updatedOld, newCartel };
+    return { ...this.hubConfig };
   }
 
-  // --- Analíticas y Escaneos ---
+  // --- HUB PÚBLICO DEL CLIENTE ---
 
-  async getStats(businessId: string, days = 30): Promise<StatsSummary> {
-    const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
-    const relevantScans = this.db.scans.filter(s => {
-      return s.businessId === businessId && new Date(s.timestamp) >= cutoff;
-    });
+  async getPublicHub(code: string): Promise<PublicHub> {
+    const cleanCode = code.trim().toUpperCase();
+    const cartel = this.carteles.find(c => c.code.toUpperCase() === cleanCode);
 
-    const activeCarteles = this.db.carteles.filter(s => s.businessId === businessId && s.status === 'active');
-
-    let nfcCount = 0;
-    let qrCount = 0;
-    const hourMap: Record<number, number> = {};
-    for (let h = 0; h < 24; h++) hourMap[h] = 0;
-
-    const dayMap: Record<string, { nfc: number; qr: number; total: number }> = {};
-    const cartelMap: Record<string, { nfc: number; qr: number; total: number }> = {};
-
-    relevantScans.forEach(scan => {
-      if (scan.channel === 'nfc') nfcCount++;
-      else qrCount++;
-
-      const dateObj = new Date(scan.timestamp);
-      const hour = dateObj.getHours();
-      hourMap[hour] = (hourMap[hour] || 0) + 1;
-
-      const dayKey = `${dateObj.getDate().toString().padStart(2, '0')}/${(dateObj.getMonth() + 1).toString().padStart(2, '0')}`;
-      if (!dayMap[dayKey]) {
-        dayMap[dayKey] = { nfc: 0, qr: 0, total: 0 };
-      }
-      if (scan.channel === 'nfc') dayMap[dayKey].nfc++;
-      else dayMap[dayKey].qr++;
-      dayMap[dayKey].total++;
-
-      if (!cartelMap[scan.cartelId]) {
-        cartelMap[scan.cartelId] = { nfc: 0, qr: 0, total: 0 };
-      }
-      if (scan.channel === 'nfc') cartelMap[scan.cartelId].nfc++;
-      else cartelMap[scan.cartelId].qr++;
-      cartelMap[scan.cartelId].total++;
-    });
-
-    const topCarteles = Object.entries(cartelMap)
-      .map(([cartelId, data]) => {
-        const found = this.db.carteles.find(s => s.id === cartelId);
-        return {
-          cartelId,
-          name: found ? found.name : 'Cartel sin nombre',
-          scans: data.total,
-          nfc: data.nfc,
-          qr: data.qr,
-        };
-      })
-      .sort((a, b) => b.scans - a.scans)
-      .slice(0, 5);
-
-    // Días ordenados
-    const scansByDay = Object.entries(dayMap).map(([date, counts]) => ({
-      date,
-      nfc: counts.nfc,
-      qr: counts.qr,
-      total: counts.total,
-    }));
-
-    const scansByHour = Object.entries(hourMap).map(([h, count]) => ({
-      hour: Number(h),
-      count,
-    }));
-
-    const totalScans = relevantScans.length;
-    // Estimación fundamentada en benchmark de retail gastronómico (28% de escaneos derivan en reseña)
-    const potentialReviewsEstimate = Math.round(totalScans * 0.28);
-
-    return {
-      totalScans,
-      nfcScans: nfcCount,
-      qrScans: qrCount,
-      potentialReviewsEstimate,
-      activeCartelesCount: activeCarteles.length,
-      scansByDay,
-      scansByHour,
-      topCarteles,
-    };
-  }
-
-  async listRecentScans(businessId: string, limit = 15): Promise<Scan[]> {
-    return this.db.scans
-      .filter(s => s.businessId === businessId)
-      .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
-      .slice(0, limit);
-  }
-
-  async recordScan(
-    shortCode: string,
-    channelOrTelemetry?: 'nfc' | 'qr' | ScanTelemetry
-  ): Promise<{ targetUrl: string; cartel: Cartel }> {
-    const cartel = this.db.carteles.find(s => s.shortCode.toLowerCase() === shortCode.toLowerCase());
     if (!cartel) {
-      throw new Error('Cartel no encontrado o enlace vencido.');
+      throw new Error('Cartel no encontrado.');
     }
 
-    const isTelemetryObj = typeof channelOrTelemetry === 'object' && channelOrTelemetry !== null;
-    const channel = isTelemetryObj
-      ? channelOrTelemetry.channel || 'qr'
-      : (channelOrTelemetry || 'qr');
+    // Registrar escaneo
+    cartel.lastScannedAt = new Date().toISOString();
 
-    const userAgentDevice = isTelemetryObj
-      ? channelOrTelemetry.userAgentDevice || 'android'
-      : 'android';
-
-    const newScan: Scan = {
-      id: `scan-${Date.now()}`,
-      cartelId: cartel.id,
-      businessId: cartel.businessId,
-      timestamp: new Date().toISOString(),
-      channel,
-      userAgentDevice,
-      isEstimatedReview: Math.random() < 0.28,
-      browser: isTelemetryObj ? channelOrTelemetry.browser : undefined,
-      platform: isTelemetryObj ? channelOrTelemetry.platform : undefined,
-      screenResolution: isTelemetryObj ? channelOrTelemetry.screenResolution : undefined,
-      language: isTelemetryObj ? channelOrTelemetry.language : undefined,
-      connectionType: isTelemetryObj ? channelOrTelemetry.connectionType : undefined,
-      timezone: isTelemetryObj ? channelOrTelemetry.timezone : undefined,
-      referrer: isTelemetryObj ? channelOrTelemetry.referrer : undefined,
-    };
-
-    cartel.lastScannedAt = newScan.timestamp;
-    this.db.scans.unshift(newScan);
-    this.saveDatabase(this.db);
-
-    // Enviar también a la API backend para persistencia en servidor
-    try {
-      if (typeof window !== 'undefined' && typeof window.fetch === 'function') {
-        window.fetch('/api/telemetry/scan', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ shortCode, telemetry: newScan }),
-        }).catch(() => {});
-      }
-    } catch {
-      // ignore
-    }
-
-    return { targetUrl: cartel.targetUrl, cartel };
-  }
-
-  // --- Alertas ---
-
-  async listAlerts(tenantId: string): Promise<Alert[]> {
-    return this.db.alerts.filter(a => a.tenantId === tenantId);
-  }
-
-  async markAlertRead(alertId: string): Promise<void> {
-    const a = this.db.alerts.find(item => item.id === alertId);
-    if (a) {
-      a.read = true;
-      this.saveDatabase(this.db);
-    }
-  }
-
-  // --- Reportes ---
-
-  async listReports(businessId: string): Promise<Report[]> {
-    return this.db.reports.filter(r => r.businessId === businessId);
-  }
-
-  async getWeeklyReportPreview(businessId: string): Promise<WeeklyReportPreview> {
-    const carteles = await this.listCarteles(businessId);
-    const topCartel = carteles[0]?.name || 'Mesa 4';
-    return {
-      period: 'Últimos 7 días',
-      line1: 'Esta semana tu negocio acumuló 142 toques (+18% vs semana anterior).',
-      line2: `Tu cartel '${topCartel}' fue el más activo con 54 interacciones.`,
-      line3: 'Estimamos ~14 reseñas potenciales sumadas en Google Maps.',
-      suggestedAction: "El cartel 'Barra' tiene menos actividad que el promedio: probalo o reubicalo cerca de la caja.",
-    };
-  }
-
-  async getReportConfig(businessId: string): Promise<ReportConfig> {
-    const stored = sessionStorage.getItem(`toque_report_cfg_${businessId}`);
-    if (stored) {
-      try {
-        return JSON.parse(stored);
-      } catch {
-        // fallback
-      }
-    }
-    return {
-      deliveryDay: 'monday',
-      deliveryHour: '09:00',
-      channel: 'both',
-      emailRecipient: 'contacto@cafedelaesquina.ar',
-      whatsappPhone: '+54 9 11 4455-8899',
-    };
-  }
-
-  async updateReportConfig(businessId: string, config: Partial<ReportConfig>): Promise<ReportConfig> {
-    const current = await this.getReportConfig(businessId);
-    const updated = { ...current, ...config };
-    sessionStorage.setItem(`toque_report_cfg_${businessId}`, JSON.stringify(updated));
-    return updated;
-  }
-
-  // --- Reseñas de Google Ficha Oficial ---
-
-  async getGoogleReviewsProfile(businessId: string): Promise<GoogleReviewsProfile> {
-    const stored = sessionStorage.getItem(`toque_gprofile_${businessId}`);
-    if (stored) {
-      try {
-        return JSON.parse(stored);
-      } catch {
-        // fallback
-      }
-    }
-    // Por defecto el negocio demo tiene su ficha conectada con datos verosímiles
-    return {
-      isConnected: true,
-      businessName: 'Café de la Esquina',
-      placeId: 'ChIJN1t_tDeuEmsRUsoyG83frY4',
-      rating: 4.8,
-      reviewCount: 432,
-      newReviewsThisMonth: 18,
-      ratingEvolution: 0.2,
-    };
-  }
-
-  async connectGoogleReviewsProfile(businessId: string, placeId: string): Promise<GoogleReviewsProfile> {
-    const profile: GoogleReviewsProfile = {
-      isConnected: true,
-      businessName: 'Café de la Esquina',
-      placeId,
-      rating: 4.8,
-      reviewCount: 432,
-      newReviewsThisMonth: 18,
-      ratingEvolution: 0.1,
-    };
-    sessionStorage.setItem(`toque_gprofile_${businessId}`, JSON.stringify(profile));
-    return profile;
-  }
-
-  // --- Detalle Extendido de Cartel ---
-
-  async getCartelDetail(cartelId: string): Promise<CartelDetailStats | null> {
-    const cartel = this.db.carteles.find(s => s.id === cartelId);
-    if (!cartel) return null;
-
-    const cartelScans = this.db.scans.filter(s => s.cartelId === cartelId);
-    const totalScans = cartelScans.length;
-    const nfcScans = cartelScans.filter(s => s.channel === 'nfc').length;
-    const qrScans = totalScans - nfcScans;
-    const monthScans = Math.min(totalScans, Math.max(12, Math.floor(totalScans * 0.45)));
-
-    const androidCount = cartelScans.filter(s => s.userAgentDevice === 'android').length;
-    const androidPercentage = totalScans > 0 ? Math.round((androidCount / totalScans) * 100) : 58;
-    const iosPercentage = 100 - androidPercentage;
-
-    const timeline: CartelTimelineEvent[] = [
-      {
-        id: `tl-1-${cartelId}`,
-        cartelId,
-        type: 'created',
-        title: 'Cartel creado y código grabado',
-        description: `Código corto asignado: toque.ar/${cartel.shortCode}`,
-        timestamp: cartel.createdAt,
-      },
-      {
-        id: `tl-2-${cartelId}`,
-        cartelId,
-        type: 'first_scan',
-        title: 'Primer escaneo registrado',
-        description: 'Un cliente tocó el cartel por primera vez.',
-        timestamp: cartelScans[cartelScans.length - 1]?.timestamp || cartel.createdAt,
-      },
-    ];
-
-    if (cartel.lastScannedAt) {
-      timeline.push({
-        id: `tl-3-${cartelId}`,
-        cartelId,
-        type: 'url_updated',
-        title: 'Enlace de Google verificado',
-        description: 'Destino a Google Reviews comprobado y activo.',
-        timestamp: cartel.lastScannedAt,
-      });
-    }
+    // Buscar si hay un recibo listo y no vencido (< 3 min) para este cartel
+    const now = Date.now();
+    const activeReceipt = this.receipts.find(
+      r =>
+        r.cartelCode.toUpperCase() === cleanCode &&
+        r.status === 'ready' &&
+        new Date(r.expiresAt).getTime() > now
+    );
 
     return {
-      cartel,
-      totalScans,
-      monthScans,
-      nfcScans,
-      qrScans,
-      peakHour: '13:00 a 15:30 h y 20:30 a 22:30 h',
-      peakDay: 'Viernes, Sábados y Domingos',
-      devices: {
-        androidPercentage,
-        iosPercentage,
+      business: {
+        id: this.businessProfile.id,
+        name: this.businessProfile.name,
       },
-      approximateCity: 'Buenos Aires (CABA y alrededores)',
-      timeline,
+      cartel: {
+        code: cartel.code,
+        name: cartel.name,
+        role: cartel.role,
+        status: cartel.status,
+      },
+      reviewUrl: cartel.reviewUrl || this.businessProfile.reviewUrl || 'https://maps.google.com',
+      blocks: this.hubConfig.blocks,
+      receipt: activeReceipt || null,
+      club: this.clubConfig.active
+        ? {
+            config: this.clubConfig,
+            member: null,
+          }
+        : null,
+      config: this.hubConfig,
     };
   }
 
-  // --- Canales y Personal (Feature flags) ---
+  async claimReceipt(id: string): Promise<{ success: boolean; receipt: Receipt }> {
+    const receipt = this.receipts.find(r => r.id === id);
+    if (!receipt) throw new Error('El comprobante no está disponible o ya venció.');
 
-  async listChannels(businessId: string): Promise<ChannelMetric[]> {
-    return [
-      {
-        id: 'ch-table',
-        name: 'Mesa y Barra física',
-        shortCode: 'mesa1',
-        scansCount: 412,
-        estimatedReviews: 45,
-        conversionRate: 11,
-        icon: 'Table',
-      },
-      {
-        id: 'ch-whatsapp',
-        name: 'WhatsApp atención post-visita',
-        shortCode: 'wa-post',
-        scansCount: 184,
-        estimatedReviews: 32,
-        conversionRate: 17,
-        icon: 'MessageCircle',
-      },
-      {
-        id: 'ch-receipt',
-        name: 'Ticket y Factura impresa',
-        shortCode: 'tkt-qr',
-        scansCount: 95,
-        estimatedReviews: 12,
-        conversionRate: 13,
-        icon: 'Receipt',
-      },
-      {
-        id: 'ch-instagram',
-        name: 'Instagram Link en Bio',
-        shortCode: 'ig-bio',
-        scansCount: 62,
-        estimatedReviews: 6,
-        conversionRate: 10,
-        icon: 'Instagram',
-      },
-    ];
-  }
+    receipt.status = 'claimed';
+    receipt.claimedAt = new Date().toISOString();
 
-  async listStaff(businessId: string): Promise<StaffMember[]> {
-    const key = `toque_mock_staff_${businessId}`;
-    try {
-      const stored = localStorage.getItem(key);
-      if (stored) return JSON.parse(stored);
-    } catch {
-      // ignore
-    }
-    return [];
-  }
-
-  async addStaff(businessId: string, member: { name: string; role: string }): Promise<StaffMember> {
-    const key = `toque_mock_staff_${businessId}`;
-    const list = await this.listStaff(businessId);
-    const shortCode = member.name.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 4) + Math.floor(Math.random() * 90 + 10);
-    const newMember: StaffMember = {
-      id: 'staff-' + Date.now(),
-      name: member.name.trim(),
-      role: member.role.trim(),
-      shortCode,
-      scansThisMonth: 0,
-      rank: list.length + 1,
-    };
-    list.push(newMember);
-    localStorage.setItem(key, JSON.stringify(list));
-    return newMember;
-  }
-
-  async updateStaff(businessId: string, staffId: string, patch: { name?: string; role?: string }): Promise<StaffMember> {
-    const key = `toque_mock_staff_${businessId}`;
-    const list = await this.listStaff(businessId);
-    const idx = list.findIndex(s => s.id === staffId);
-    if (idx === -1) throw new Error('Colaborador no encontrado');
-    const updated = {
-      ...list[idx],
-      name: patch.name ? patch.name.trim() : list[idx].name,
-      role: patch.role ? patch.role.trim() : list[idx].role,
-    };
-    list[idx] = updated;
-    localStorage.setItem(key, JSON.stringify(list));
-    return updated;
-  }
-
-  async deleteStaff(businessId: string, staffId: string): Promise<void> {
-    const key = `toque_mock_staff_${businessId}`;
-    const list = await this.listStaff(businessId);
-    const filtered = list.filter((s) => s.id !== staffId).map((s, idx) => ({ ...s, rank: idx + 1 }));
-    localStorage.setItem(key, JSON.stringify(filtered));
-  }
-
-  // --- Métodos del Panel del Fabricante ---
-
-  async getBusinessesAtRisk(manufacturerId: string): Promise<BusinessAtRisk[]> {
-    const businesses = await this.listBusinesses(manufacturerId);
-    const atRisk: BusinessAtRisk[] = [];
-
-    for (const biz of businesses) {
-      const bizCartels = this.db.carteles.filter(s => s.businessId === biz.id && s.status !== 'trash');
-      if (bizCartels.length === 0) continue;
-
-      // Buscar último escaneo
-      let maxTimestamp = 0;
-      for (const s of bizCartels) {
-        if (s.lastScannedAt) {
-          const t = new Date(s.lastScannedAt).getTime();
-          if (t > maxTimestamp) maxTimestamp = t;
-        }
-      }
-
-      const daysWithoutScans = maxTimestamp > 0
-        ? Math.floor((Date.now() - maxTimestamp) / (1000 * 60 * 60 * 24))
-        : 21;
-
-      if (daysWithoutScans >= 14) {
-        atRisk.push({
-          business: biz,
-          cartelesCount: bizCartels.length,
-          daysWithoutScans,
-          phone: '+54 9 11 4455-8899',
-          suggestedMessage: `Hola! Vimos que en ${biz.name} el cartel de reseñas no registra toques hace ${daysWithoutScans} días. ¿Querés que revisemos juntos la visibilidad en el mostrador o el chip NFC para no perder opiniones de tus clientes?`,
-        });
-      }
+    // Actualizar estado de la venta vinculada
+    const sale = this.sales.find(s => s.id === receipt.saleId);
+    if (sale) {
+      // Marcamos que el cliente ya vio el recibo
     }
 
-    // Asegurar al menos 2 para la demo
-    if (atRisk.length === 0 && businesses.length > 0) {
-      atRisk.push({
-        business: businesses[1] || businesses[0],
-        cartelesCount: 3,
-        daysWithoutScans: 16,
-        phone: '+54 9 11 5566-7788',
-        suggestedMessage: `Hola! Vimos que en ${businesses[1]?.name || 'tu negocio'} el cartel de reseñas no registra toques hace 16 días. ¿Querés que revisemos la visibilidad en las mesas para no perder opiniones de tus clientes?`,
-      });
+    return { success: true, receipt };
+  }
+
+  async joinClub(data: {
+    cartelCode: string;
+    contact: string;
+    name?: string;
+    consent: boolean;
+  }): Promise<{ member: ClubMember; pointsAwarded: number }> {
+    if (!data.consent) {
+      throw new Error('Para sumarte al Club necesitás aceptar el consentimiento.');
     }
 
-    return atRisk;
-  }
-
-  async createBusinessQuick(data: {
-    manufacturerId: string;
-    name: string;
-    email: string;
-    phone: string;
-    category: string;
-    reviewUrl: string;
-  }): Promise<{ business: Tenant; cartel: Cartel; shortCode: string; inviteToken: string }> {
-    const slug = data.name.toLowerCase().replace(/[^a-z0-9]/g, '-').replace(/-+/g, '-').slice(0, 30);
-    const newBiz: Tenant = {
-      id: `biz-${Date.now()}`,
-      type: 'business',
-      name: data.name,
-      slug,
-      manufacturerId: data.manufacturerId,
-      contactEmail: data.email,
-      isDemo: false,
-      features: { channels: true, staff: true },
-      createdAt: new Date().toISOString(),
-    };
-
-    const shortCode = Math.random().toString(36).substring(2, 7);
-    const newCartel: Cartel = {
-      id: `cartel-${Date.now()}`,
-      tenantId: newBiz.id,
-      businessId: newBiz.id,
-      manufacturerId: data.manufacturerId,
-      shortCode,
-      name: 'Cartel 1 — Mostrador Principal',
-      locationDescription: 'Mostrador / Recepción',
-      targetUrl: data.reviewUrl,
-      nfcEnabled: true,
-      qrEnabled: true,
-      status: 'active',
-      createdAt: new Date().toISOString(),
-    };
-
-    this.db.tenants.push(newBiz);
-    this.db.carteles.push(newCartel);
-    this.saveDatabase(this.db);
-
-    return {
-      business: newBiz,
-      cartel: newCartel,
-      shortCode,
-      inviteToken: `tok_${Math.random().toString(36).substring(2, 12)}`,
-    };
-  }
-
-  async batchCreateBusinesses(
-    manufacturerId: string,
-    rows: BatchImportRow[]
-  ): Promise<{ createdCount: number; errors: { row: number; error: string }[] }> {
-    let createdCount = 0;
-    const errors: { row: number; error: string }[] = [];
-
-    for (const r of rows) {
-      if (!r.isValid) {
-        errors.push({ row: r.index, error: r.error || 'Fila no válida' });
-        continue;
-      }
-
-      await this.createBusinessQuick({
-        manufacturerId,
-        name: r.name,
-        email: r.email,
-        phone: r.phone,
-        category: r.category,
-        reviewUrl: r.reviewUrl,
-      });
-      createdCount++;
+    const cleanContact = data.contact.trim();
+    if (!cleanContact || cleanContact.length < 6) {
+      throw new Error('Por favor ingresá un número de WhatsApp o correo electrónico válido.');
     }
 
-    return { createdCount, errors };
-  }
+    let member = this.clubMembers.find(m => m.contact.toLowerCase() === cleanContact.toLowerCase());
+    const pointsAwarded = 1;
 
-  async updateBusinessStatus(businessId: string, status: 'active' | 'paused' | 'transferred'): Promise<Tenant> {
-    const biz = this.db.tenants.find(t => t.id === businessId);
-    if (!biz) throw new Error('Negocio no encontrado');
-    // Guardar flag de status si es paused
-    if (status === 'paused') {
-      (biz as any).isPaused = true;
+    if (member) {
+      member.points += pointsAwarded;
     } else {
-      delete (biz as any).isPaused;
+      member = {
+        id: `member-${Date.now()}`,
+        name: data.name?.trim(),
+        contact: cleanContact,
+        points: pointsAwarded,
+        joinedAt: new Date().toISOString(),
+        consent: true,
+      };
+      this.clubMembers.push(member);
     }
-    this.saveDatabase(this.db);
-    return biz;
+
+    return { member, pointsAwarded };
   }
 
-  async listReplacementOrders(manufacturerId: string): Promise<ReplacementOrder[]> {
-    return this.db.replacementOrders || [];
-  }
+  // --- CAJA Y COBROS ---
 
-  async updateReplacementOrderStatus(
-    orderId: string,
-    status: ReplacementOrder['status']
-  ): Promise<ReplacementOrder> {
-    const order = (this.db.replacementOrders || []).find(o => o.id === orderId);
-    if (!order) throw new Error('Pedido de reposición no encontrado');
-    order.status = status;
-    if (status === 'completed') {
-      order.completedAt = new Date().toISOString();
+  async createSale(data: {
+    cartelId: string;
+    amount: number;
+    items?: SaleItem[];
+    method: PaymentMethod;
+  }): Promise<{ sale: Sale; qrData?: string; receipt?: Receipt }> {
+    if (data.amount <= 0) {
+      throw new Error('El importe debe ser mayor a cero.');
     }
-    this.saveDatabase(this.db);
-    return order;
-  }
 
-  async getManufacturerPlan(manufacturerId: string): Promise<ManufacturerPlan> {
-    const cartelesCount = this.db.carteles.filter(s => s.status !== 'trash').length;
-    if (this.db.plan) {
-      this.db.plan.cartelesUsed = cartelesCount;
-      return this.db.plan;
-    }
-    return {
-      planName: 'Plan Taller 50',
-      cartelesUsed: cartelesCount,
-      cartelesLimit: 50,
-      pricePerMonth: 24899,
+    const cartel = this.carteles.find(c => c.id === data.cartelId);
+    if (!cartel) throw new Error('Caja o cartel no encontrado.');
+
+    const saleId = `sale-${Date.now()}`;
+    const isManual = data.method === 'cash' || data.method === 'card_manual';
+
+    const sale: Sale = {
+      id: saleId,
+      cartelId: cartel.id,
+      cartelName: cartel.name,
+      amount: data.amount,
       currency: 'ARS',
-      status: 'active',
-      graceDaysRemaining: 15,
-      nextBillingDate: '2026-11-01',
-      paymentMethod: { brand: 'Visa', last4: '4242', expiry: '10/28' },
+      items: data.items && data.items.length > 0 ? data.items : [{ id: 'item-1', name: 'Consumo en mostrador', price: data.amount, quantity: 1 }],
+      method: data.method,
+      status: isManual ? 'paid' : 'pending',
+      createdAt: new Date().toISOString(),
+      paidAt: isManual ? new Date().toISOString() : undefined,
+      cashierName: this.currentUser?.name || 'Cajero',
     };
-  }
 
-  async addCartelesPack(manufacturerId: string, packSize: number): Promise<ManufacturerPlan> {
-    const plan = await this.getManufacturerPlan(manufacturerId);
-    plan.cartelesLimit += packSize;
-    this.db.plan = plan;
-    this.saveDatabase(this.db);
-    return plan;
-  }
+    this.sales.unshift(sale);
 
-  async listManufacturerStaff(manufacturerId: string): Promise<ManufacturerStaffUser[]> {
-    return this.db.manufacturerStaff || [];
-  }
-
-  async addManufacturerStaff(
-    manufacturerId: string,
-    userData: { name: string; email: string; role: 'owner' | 'admin' | 'viewer'; isBackupAdmin?: boolean }
-  ): Promise<ManufacturerStaffUser> {
-    const newUser: ManufacturerStaffUser = {
-      id: `mfg-staff-${Date.now()}`,
-      ...userData,
-      addedAt: new Date().toISOString(),
-    };
-    if (!this.db.manufacturerStaff) this.db.manufacturerStaff = [];
-    this.db.manufacturerStaff.push(newUser);
-    this.saveDatabase(this.db);
-    return newUser;
-  }
-
-  async removeManufacturerStaff(manufacturerId: string, staffId: string): Promise<void> {
-    if (this.db.manufacturerStaff) {
-      this.db.manufacturerStaff = this.db.manufacturerStaff.filter(s => s.id !== staffId);
-      this.saveDatabase(this.db);
+    // Si es manual, generamos el recibo efímero listo para que el cliente lo reclame al apoyar el celular
+    let receipt: Receipt | undefined;
+    if (isManual) {
+      receipt = this.createEphemeralReceipt(sale, cartel.code);
     }
+
+    // Si es Mercado Pago, devolvemos los datos para el QR
+    const qrData = data.method === 'mp_qr'
+      ? `00020101021243650016COM.MERCADOPAGO0224toque-cobro-${sale.id}5204000053030325406${data.amount.toFixed(2)}5802AR5915${this.businessProfile.name.slice(0, 15)}6004CABA62070503***6304`
+      : undefined;
+
+    return { sale, qrData, receipt };
   }
 
-  async listInvoices(manufacturerId: string): Promise<InvoiceItem[]> {
-    return this.db.invoices || [];
-  }
+  private createEphemeralReceipt(sale: Sale, cartelCode: string): Receipt {
+    // Vence en 3 minutos exactos
+    const expiresAt = new Date(Date.now() + 180000).toISOString();
 
-  // --- Métodos Anexo A (Backend Real & Simulación) ---
-
-  async testCartelLink(cartelId: string): Promise<{ valid: boolean; httpStatus: number; finalUrl: string }> {
-    const cartel = await this.getCartel(cartelId);
-    return {
-      valid: true,
-      httpStatus: 200,
-      finalUrl: cartel?.targetUrl || 'https://maps.app.goo.gl/toque-demo',
+    const receipt: Receipt = {
+      id: `rcp-${Date.now()}`,
+      saleId: sale.id,
+      cartelCode: cartelCode,
+      status: 'ready',
+      expiresAt,
+      businessName: this.businessProfile.name,
+      items: sale.items,
+      total: sale.amount,
+      currency: 'ARS',
+      method: sale.method,
+      createdAt: new Date().toISOString(),
     };
+
+    // Reemplazar recibo previo del cartel si existía
+    this.receipts = this.receipts.filter(r => r.cartelCode !== cartelCode);
+    this.receipts.unshift(receipt);
+
+    return receipt;
   }
 
-  async getCartelQr(cartelId: string, size = 300): Promise<{ qrUrl: string }> {
-    const cartel = await this.getCartel(cartelId);
-    const short = cartel?.shortCode || 'demo';
-    const origin = typeof window !== 'undefined' && window.location?.origin ? window.location.origin : 'https://toque.ar';
-    const destinationUrl = `${origin}/r/${short}`;
-    return {
-      qrUrl: `https://api.qrserver.com/v1/create-qr-code/?size=${size}x${size}&data=${encodeURIComponent(destinationUrl)}`,
-    };
+  async getSale(id: string): Promise<Sale> {
+    const sale = this.sales.find(s => s.id === id);
+    if (!sale) throw new Error('Venta no encontrada.');
+    return sale;
   }
 
-  async inviteBusiness(businessId: string): Promise<{ success: boolean; inviteToken: string }> {
-    return {
-      success: true,
-      inviteToken: `tok_inv_${Math.random().toString(36).slice(2, 10)}`,
-    };
+  async confirmManualSale(id: string): Promise<{ sale: Sale; receipt: Receipt }> {
+    const sale = this.sales.find(s => s.id === id);
+    if (!sale) throw new Error('Venta no encontrada.');
+
+    sale.status = 'paid';
+    sale.paidAt = new Date().toISOString();
+
+    const cartel = this.carteles.find(c => c.id === sale.cartelId);
+    const receipt = this.createEphemeralReceipt(sale, cartel ? cartel.code : 'CAJA01');
+
+    return { sale, receipt };
   }
 
-  async getPrintKit(businessId: string): Promise<{ pdfUrl: string; csvUrl: string }> {
-    return {
-      pdfUrl: `/api/manufacturer/kit/${businessId}?format=pdf`,
-      csvUrl: `/api/manufacturer/kit/${businessId}?format=csv`,
-    };
+  async simulatePaymentApproved(id: string): Promise<{ sale: Sale; receipt: Receipt }> {
+    const sale = this.sales.find(s => s.id === id);
+    if (!sale) throw new Error('Venta no encontrada.');
+
+    sale.status = 'paid';
+    sale.paidAt = new Date().toISOString();
+
+    const cartel = this.carteles.find(c => c.id === sale.cartelId);
+    const receipt = this.createEphemeralReceipt(sale, cartel ? cartel.code : 'CAJA01');
+
+    return { sale, receipt };
   }
 
-  async subscribeManufacturer(plan: string): Promise<{ checkoutUrl: string; status: string }> {
-    return {
-      checkoutUrl: 'https://www.mercadopago.com.ar/subscriptions/checkout?preapproval_plan_id=toque_beta',
-      status: 'pending',
-    };
-  }
+  async cancelSale(id: string): Promise<Sale> {
+    const sale = this.sales.find(s => s.id === id);
+    if (!sale) throw new Error('Venta no encontrada.');
 
-  async calibrateReviews(placeId?: string): Promise<GoogleReviewsProfile> {
-    return {
-      isConnected: true,
-      businessName: 'Ficha Calibrada en Google Maps',
-      placeId: placeId || 'ChIJN1t_tDeuEmsRUsoyG83frY4',
-      rating: 4.9,
-      reviewCount: 142,
-      newReviewsThisMonth: 18,
-      ratingEvolution: 0.2,
-    };
-  }
+    sale.status = 'cancelled';
 
-  async getManufacturerSummary(): Promise<{
-    businessesCount: number;
-    activeCartelesCount: number;
-    atRiskCount: number;
-    mrr: number;
-  }> {
-    const businesses = await this.listBusinesses();
-    const carteles = await this.listCarteles();
-    const atRisk = await this.getBusinessesAtRisk('tenant-mfg-demo');
-    const plan = await this.getManufacturerPlan('tenant-mfg-demo');
-    return {
-      businessesCount: businesses.length,
-      activeCartelesCount: carteles.filter(c => c.status === 'active').length,
-      atRiskCount: atRisk.length,
-      mrr: plan.pricePerMonth,
-    };
-  }
-
-  async getPlatformStats(): Promise<PlatformStats> {
-    const totalScans = this.db.scans.length;
-    const nfcScans = this.db.scans.filter(s => s.channel === 'nfc').length;
-    const qrScans = this.db.scans.filter(s => s.channel === 'qr').length;
-    const manufacturers = this.db.tenants.filter(t => t.type === 'manufacturer');
-    const businesses = this.db.tenants.filter(t => t.type === 'business');
-    const carteles = this.db.carteles;
-    const activeCarteles = carteles.filter(c => c.status === 'active').length;
-
-    // Recaudación real en base a planes
-    // Fabricante Demo = $24.899/mes + 12 comercios ($11.899/mes promedio facturado o cuota de servicio)
-    const mrr = 24899 + (businesses.length * 11899);
-    const arr = mrr * 12;
-
-    return {
-      totalScans,
-      nfcScans,
-      qrScans,
-      totalManufacturers: manufacturers.length,
-      totalBusinesses: businesses.length,
-      totalCarteles: carteles.length,
-      activeCarteles,
-      monthlyRevenueArs: mrr,
-      annualizedRevenueArs: arr,
-      openIncidents: 0,
-      linkHealthPercentage: 99.4,
-      avgRedirectLatencyMs: 42,
-      uptimePercentage: 99.98,
-      manufacturers: manufacturers.map(m => ({
-        id: m.id,
-        name: m.name,
-        slug: m.slug,
-        contactEmail: m.contactEmail,
-        businessesCount: businesses.filter(b => b.manufacturerId === m.id).length,
-        cartelesCount: carteles.filter(c => c.manufacturerId === m.id).length,
-        monthlyFeeArs: 24899,
-        plan: 'Plan Taller 50',
-        health: 'excellent',
-        createdAt: m.createdAt,
-      })),
-      recentIncidents: [
-        {
-          id: 'inc-1',
-          title: 'Mantenimiento preventivo de proxies Google Maps',
-          status: 'resolved',
-          severity: 'maintenance',
-          date: '02 de Octubre 2026',
-          resolutionTime: '12 minutos',
-          description: 'Optimización de DNS Anycast en nodos de Buenos Aires y San Pablo sin impacto en usuarios finales.',
-        },
-        {
-          id: 'inc-2',
-          title: 'Ajuste en crawler de validación Place ID',
-          status: 'resolved',
-          severity: 'minor',
-          date: '24 de Septiembre 2026',
-          resolutionTime: '5 minutos',
-          description: 'Actualización del parser para links generados desde la nueva versión de Google Maps Android.',
-        },
-      ],
-    };
-  }
-
-  async getSystemHealth(): Promise<SystemHealthItem[]> {
-    return [
-      {
-        name: 'Enrutador Edge & Redirección Dinámica (toque.ar/*)',
-        category: 'redirect',
-        status: 'operational',
-        latencyMs: 38,
-        uptime90d: 99.99,
-        description: 'Enrutamiento en menos de 50ms hacia fichas verificadas de Google Reviews.',
-      },
-      {
-        name: 'API Central & Persistencia Multi-Tenant',
-        category: 'core',
-        status: 'operational',
-        latencyMs: 44,
-        uptime90d: 99.98,
-        description: 'Base de datos replicada con separación estricta de fabricantes y comercios.',
-      },
-      {
-        name: 'Servicio de Códigos QR Vectoriales y SVG',
-        category: 'core',
-        status: 'operational',
-        latencyMs: 22,
-        uptime90d: 100,
-        description: 'Renderizado instantáneo en alta resolución para imprentas y grabadores.',
-      },
-      {
-        name: 'Crawler de Salud de Enlaces Google Reviews',
-        category: 'crawler',
-        status: 'operational',
-        latencyMs: 95,
-        uptime90d: 99.95,
-        description: 'Verificación periódica que detecta cambios de URLs y previene enlaces rotos.',
-      },
-      {
-        name: 'CDN y Servidor de Recursos Estáticos',
-        category: 'cdn',
-        status: 'operational',
-        latencyMs: 18,
-        uptime90d: 99.99,
-        description: 'Distribución ultrarrápida de interfaces y kits de impresión física.',
-      },
-    ];
-  }
-
-  async runSystemDiagnostic(): Promise<SystemHealthItem[]> {
-    const list = await this.getSystemHealth();
-    // Simular variación en tiempo real con latencias frescas
-    return list.map(item => ({
-      ...item,
-      latencyMs: Math.max(15, Math.round(item.latencyMs + (Math.random() * 8 - 4))),
-    }));
-  }
-
-  async adminListTenants(): Promise<Tenant[]> {
-    return this.db.tenants || [];
-  }
-
-  async adminSuspendTenant(id: string): Promise<{ success: boolean }> {
-    const tenant = this.db.tenants.find(t => t.id === id);
-    if (tenant) {
-      tenant.isDemo = false;
-      this.saveDatabase(this.db);
+    // Cancelar recibo asociado si existía
+    const rcp = this.receipts.find(r => r.saleId === id);
+    if (rcp) {
+      rcp.status = 'cancelled';
     }
-    return { success: true };
+
+    return sale;
   }
 
-  async adminRestoreTenant(id: string): Promise<{ success: boolean }> {
-    return { success: true };
+  async listSales(filters?: {
+    dateFrom?: string;
+    dateTo?: string;
+    method?: PaymentMethod;
+    cartelId?: string;
+  }): Promise<Sale[]> {
+    let list = [...this.sales];
+
+    if (filters?.method) {
+      list = list.filter(s => s.method === filters.method);
+    }
+    if (filters?.cartelId) {
+      list = list.filter(s => s.cartelId === filters.cartelId);
+    }
+
+    return list;
   }
 
-  async adminHealth(): Promise<{ status: string; kv: boolean; d1: boolean; uptime: number }> {
-    return {
-      status: 'ok',
-      kv: true,
-      d1: true,
-      uptime: 99.98,
+  // --- CLUB DE FIDELIDAD ---
+
+  async getClubConfig(): Promise<ClubConfig> {
+    return { ...this.clubConfig };
+  }
+
+  async updateClubConfig(patch: Partial<ClubConfig>): Promise<ClubConfig> {
+    this.clubConfig = {
+      ...this.clubConfig,
+      ...patch,
     };
+    return { ...this.clubConfig };
+  }
+
+  async listClubMembers(): Promise<ClubMember[]> {
+    return [...this.clubMembers];
+  }
+
+  async deleteClubMember(id: string): Promise<void> {
+    this.clubMembers = this.clubMembers.filter(m => m.id !== id);
+  }
+
+  // --- MERCADO PAGO ---
+
+  async getMercadoPagoStatus(): Promise<MercadoPagoStatus> {
+    return { ...this.mpStatus };
+  }
+
+  async connectMercadoPago(): Promise<{ connected: boolean }> {
+    this.mpStatus = {
+      connected: true,
+      collectorId: `MP-${Math.floor(10000000 + Math.random() * 90000000)}`,
+      connectedAt: new Date().toISOString(),
+    };
+    return { connected: true };
+  }
+
+  async disconnectMercadoPago(): Promise<{ connected: boolean }> {
+    this.mpStatus = {
+      connected: false,
+    };
+    return { connected: false };
+  }
+
+  // --- RESUMEN DEL PANEL ---
+
+  async getDashboardSummary(): Promise<DashboardSummary> {
+    // Calculamos según ventas reales en memoria
+    const today = new Date().toDateString();
+    const todaySales = this.sales.filter(s => s.status === 'paid' && new Date(s.createdAt).toDateString() === today);
+    const todaySalesAmount = todaySales.reduce((acc, s) => acc + s.amount, 0);
+
+    const weeklySales = this.sales.filter(s => s.status === 'paid');
+    const weeklySalesAmount = weeklySales.reduce((acc, s) => acc + s.amount, 0);
+
+    const claimedReceiptsCount = this.receipts.filter(r => r.status === 'claimed').length;
+
+    return {
+      todaySalesAmount,
+      todaySalesCount: todaySales.length,
+      weeklySalesAmount,
+      weeklySalesCount: weeklySales.length,
+      claimedReceiptsCount,
+      newClubMembersCount: this.clubMembers.length,
+      reviewButtonClicks: this.reviewClicks,
+      isExample: this.sales.length === 0, // Si está vacío, se rotularán cifras sugeridas con "Ejemplo"
+    };
+  }
+
+  // --- LOTES DE CARTELES PARA FABRICANTE ---
+
+  async createCartelBatch(data: { count: number }): Promise<CartelBatch> {
+    const count = Math.max(1, Math.min(100, data.count));
+    const batchId = `lote-${Date.now().toString(36)}`;
+    const newCarteles: CartelBatch['carteles'] = [];
+
+    for (let i = 0; i < count; i++) {
+      const randomSuffix = Math.floor(1000 + Math.random() * 9000).toString();
+      const code = `TQ-${randomSuffix}`;
+      const pinChars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+      let pin = '';
+      for (let p = 0; p < 6; p++) {
+        pin += pinChars.charAt(Math.floor(Math.random() * pinChars.length));
+      }
+
+      const cartel: Cartel = {
+        id: `cartel-${batchId}-${i}`,
+        code,
+        pin,
+        name: `Cartel ${code}`,
+        role: 'caja',
+        status: 'sin_activar',
+        mode: 'hub',
+        createdAt: new Date().toISOString(),
+        batchId,
+      };
+
+      this.carteles.push(cartel);
+
+      newCarteles.push({
+        code,
+        pin,
+        status: 'sin_activar',
+        shortUrl: `https://toque.ar/h/${code}`,
+      });
+    }
+
+    const batch: CartelBatch = {
+      id: batchId,
+      count,
+      createdAt: new Date().toISOString(),
+      carteles: newCarteles,
+    };
+
+    this.batches.unshift(batch);
+    return batch;
+  }
+
+  async listCartelBatch(): Promise<CartelBatch[]> {
+    return [...this.batches];
+  }
+
+  // --- PERFIL DEL NEGOCIO ---
+
+  async getBusinessProfile(): Promise<BusinessProfile> {
+    return { ...this.businessProfile };
+  }
+
+  async updateBusinessProfile(patch: Partial<BusinessProfile>): Promise<BusinessProfile> {
+    this.businessProfile = {
+      ...this.businessProfile,
+      ...patch,
+    };
+    return { ...this.businessProfile };
+  }
+
+  async requestCartelFromManufacturer(data: {
+    quantity: number;
+    role: CartelRole;
+    notes?: string;
+  }): Promise<{ success: boolean; requestId: string }> {
+    const requestId = `sol-${Date.now()}`;
+    return { success: true, requestId };
   }
 }
 
-export const mockApi = new MockApiImpl();
-
+export const mockApi = new MockApi();

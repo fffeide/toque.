@@ -1,47 +1,36 @@
-/**
- * Toque — Tarjeta de Contenido Liquid Glass (Card)
- * Basada en la receta oficial de Liquid Glass:
- * Gradiente vertical de vidrio, desenfoque de 26px, borde sutil de 20%,
- * esquinas de 24px y specular sheen opcional.
- */
+import React from 'react';
 
-import React, { HTMLAttributes, forwardRef } from 'react';
-
-export interface CardProps extends HTMLAttributes<HTMLDivElement> {
-  variant?: 'solid' | 'subtle' | 'glass';
-  interactive?: boolean;
-  sheen?: boolean;
+export interface CardProps extends React.HTMLAttributes<HTMLDivElement> {
+  children: React.ReactNode;
+  className?: string;
+  padding?: 'none' | 'sm' | 'md' | 'lg';
+  variant?: 'glass' | 'solid';
 }
 
-export const Card = forwardRef<HTMLDivElement, CardProps>(({
+export const Card: React.FC<CardProps> = ({
   children,
-  variant = 'solid',
-  interactive = false,
-  sheen = false,
   className = '',
+  padding = 'md',
+  variant = 'glass',
   ...props
-}, ref) => {
-  const variantClasses = {
-    solid: 'aurora-card-glass',
-    subtle: 'bg-[rgba(14,26,45,0.75)] backdrop-blur-md border border-white/15 rounded-[var(--radius-lg)] text-white',
-    glass: 'aurora-card-glass',
-  }[variant];
+}) => {
+  const paddingStyles = {
+    none: '',
+    sm: 'p-3',
+    md: 'p-5 sm:p-6',
+    lg: 'p-6 sm:p-8',
+  }[padding];
 
-  const interactiveClasses = interactive
-    ? 'hover:scale-[1.01] hover:border-white/40 cursor-pointer active:scale-[0.99] transition-all'
-    : '';
-
-  const sheenClass = sheen ? 'aurora-sheen' : '';
+  const variantStyles = variant === 'glass'
+    ? 'bg-white/[0.09] backdrop-blur-xl border border-white/[0.16] shadow-lg text-white'
+    : 'bg-white border border-[#E3DDD2] shadow-xs text-[#0B1030]';
 
   return (
     <div
-      ref={ref}
-      className={`p-5 sm:p-6 text-white ${variantClasses} ${interactiveClasses} ${sheenClass} ${className}`}
+      className={`rounded-2xl transition-all duration-200 relative overflow-hidden ${variantStyles} ${paddingStyles} ${className}`}
       {...props}
     >
       {children}
     </div>
   );
-});
-
-Card.displayName = 'Card';
+};

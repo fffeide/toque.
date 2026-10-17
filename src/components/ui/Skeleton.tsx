@@ -1,19 +1,10 @@
-/**
- * Toque — Esqueleto de Carga (Skeleton)
- * Regla: Usar esqueletos estructurados, nunca spinners sueltos en pantallas.
- */
-
 import React from 'react';
 
-export interface SkeletonProps {
-  className?: string;
-}
-
-export const Skeleton: React.FC<SkeletonProps> = ({ className = 'w-full h-5' }) => {
+export const Skeleton: React.FC<{ className?: string }> = ({ className = 'h-4 w-full' }) => {
   return (
     <div
       aria-hidden="true"
-      className={`animate-pulse bg-slate-200/80 dark:bg-slate-800/80 rounded-xl ${className}`}
+      className={`bg-[#E3DDD2]/60 animate-pulse rounded-md ${className}`}
     />
   );
 };

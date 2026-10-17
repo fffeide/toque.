@@ -1,10 +1,10 @@
 /**
- * Toque — Capa de Datos Unificada
- * Exporta el cliente activo con persistencia real en Google Cloud Firestore.
+ * Toque — Módulo Recibo: Selector de API
+ * Selecciona la implementación según la variable de entorno VITE_API_MODE ("mock" o "http").
+ * Por defecto utiliza mockApi en memoria.
  */
 
 import { ToqueApi } from './ToqueApi';
-import { firestoreApi } from './firestoreApi';
 import { mockApi } from './mockApi';
 import { httpApi } from './httpApi';
 
@@ -13,7 +13,4 @@ export * from './ToqueApi';
 
 const apiMode = import.meta.env.VITE_API_MODE;
 
-export const api: ToqueApi =
-  apiMode === 'http' ? httpApi : apiMode === 'mock' ? mockApi : firestoreApi;
-
-export { firestoreApi, mockApi, httpApi };
+export const api: ToqueApi = apiMode === 'http' ? httpApi : mockApi;

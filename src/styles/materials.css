@@ -9,13 +9,13 @@
   --glass: rgba(255, 255, 255, 0.22);
   --glass-line: rgba(255, 255, 255, 0.22);
   --glass-rail: linear-gradient(180deg,
-    rgba(14, 25, 42, 0.88) 0%,
-    rgba(10, 19, 34, 0.92) 50%,
-    rgba(7, 14, 26, 0.96) 100%);
+    rgba(34, 48, 70, 0.72) 0%,
+    rgba(26, 38, 56, 0.80) 50%,
+    rgba(20, 29, 44, 0.86) 100%);
   --glass-sidebar: linear-gradient(180deg,
-    rgba(14, 25, 42, 0.88) 0%,
-    rgba(10, 19, 34, 0.90) 50%,
-    rgba(7, 14, 26, 0.94) 100%);
+    rgba(18, 20, 26, 0.95) 0%,
+    rgba(13, 15, 20, 0.97) 50%,
+    rgba(9, 10, 14, 0.98) 100%);
   --e-out: cubic-bezier(0.16, 1, 0.3, 1);
   --e-soft: cubic-bezier(0.22, 0.61, 0.36, 1);
   --e-pen: cubic-bezier(0.37, 0.01, 0.2, 1);
@@ -27,14 +27,14 @@
   }
 }
 
-/* Nivel 1: Fondo de Escenario Atmosférico Líquido (Sin foto de tormenta) */
+/* Nivel 1: Fondo de Escenario Atmosférico Líquido (Fondo más claro Liquid Glass) */
 .aurora-stage {
-  background-color: #08121e;
+  background-color: #2b3547;
   background-image:
-    radial-gradient(ellipse 80% 50% at 50% -10%, rgba(30, 64, 120, 0.45) 0%, transparent 70%),
-    radial-gradient(ellipse 60% 40% at 85% 55%, rgba(14, 116, 144, 0.22) 0%, transparent 60%),
-    radial-gradient(ellipse 60% 45% at 15% 75%, rgba(20, 45, 90, 0.35) 0%, transparent 60%),
-    linear-gradient(180deg, #08121e 0%, #040911 100%);
+    radial-gradient(ellipse 95% 65% at 50% -10%, rgba(95, 140, 220, 0.42) 0%, transparent 75%),
+    radial-gradient(ellipse 80% 55% at 85% 45%, rgba(70, 170, 215, 0.32) 0%, transparent 65%),
+    radial-gradient(ellipse 75% 60% at 15% 75%, rgba(90, 130, 210, 0.38) 0%, transparent 65%),
+    linear-gradient(180deg, #2b3547 0%, #202938 100%);
   background-attachment: fixed;
   color: var(--ink);
   position: relative;
@@ -43,30 +43,30 @@
 }
 
 .aurora-stage.aurora-bg-navy {
-  background-color: #08121e;
+  background-color: #2b3547;
   background-image:
-    radial-gradient(ellipse 80% 50% at 50% -10%, rgba(30, 64, 120, 0.45) 0%, transparent 70%),
-    radial-gradient(ellipse 60% 40% at 85% 55%, rgba(14, 116, 144, 0.22) 0%, transparent 60%),
-    radial-gradient(ellipse 60% 45% at 15% 75%, rgba(20, 45, 90, 0.35) 0%, transparent 60%),
-    linear-gradient(180deg, #08121e 0%, #040911 100%);
+    radial-gradient(ellipse 95% 65% at 50% -10%, rgba(95, 140, 220, 0.42) 0%, transparent 75%),
+    radial-gradient(ellipse 80% 55% at 85% 45%, rgba(70, 170, 215, 0.32) 0%, transparent 65%),
+    radial-gradient(ellipse 75% 60% at 15% 75%, rgba(90, 130, 210, 0.38) 0%, transparent 65%),
+    linear-gradient(180deg, #2b3547 0%, #202938 100%);
   background-attachment: fixed;
 }
 
 .aurora-stage.aurora-bg-obsidian {
-  background-color: #090a0f;
+  background-color: #2a2e38;
   background-image:
-    radial-gradient(ellipse 70% 40% at 50% -10%, rgba(45, 50, 65, 0.45) 0%, transparent 70%),
-    radial-gradient(ellipse 50% 35% at 80% 50%, rgba(30, 35, 48, 0.3) 0%, transparent 60%),
-    linear-gradient(180deg, #090a0f 0%, #030407 100%);
+    radial-gradient(ellipse 85% 50% at 50% -10%, rgba(90, 98, 122, 0.42) 0%, transparent 75%),
+    radial-gradient(ellipse 65% 45% at 80% 50%, rgba(70, 78, 100, 0.32) 0%, transparent 65%),
+    linear-gradient(180deg, #2a2e38 0%, #1c1f26 100%);
   background-attachment: fixed;
 }
 
 .aurora-stage.aurora-bg-teal {
-  background-color: #041417;
+  background-color: #1e333a;
   background-image:
-    radial-gradient(ellipse 80% 50% at 50% -10%, rgba(13, 148, 136, 0.35) 0%, transparent 70%),
-    radial-gradient(ellipse 60% 40% at 85% 60%, rgba(6, 78, 59, 0.3) 0%, transparent 60%),
-    linear-gradient(180deg, #041417 0%, #020b0d 100%);
+    radial-gradient(ellipse 85% 55% at 50% -10%, rgba(30, 170, 160, 0.38) 0%, transparent 75%),
+    radial-gradient(ellipse 65% 45% at 85% 60%, rgba(20, 125, 105, 0.32) 0%, transparent 65%),
+    linear-gradient(180deg, #1e333a 0%, #142227 100%);
   background-attachment: fixed;
 }
 

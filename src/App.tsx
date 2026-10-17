@@ -1,129 +1,96 @@
-import React from 'react';
+import React, { Suspense, lazy } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
-import { AuthProvider, useAuth } from './lib/authContext';
-import { ThemeProvider } from './lib/themeContext';
+import { AuthProvider } from './lib/authContext';
 import { ToastProvider } from './components/ui/Toast';
+import { ErrorBoundary } from './components/ErrorBoundary';
+import { Skeleton } from './components/ui/Skeleton';
+import { PanelLayout } from './components/layout/PanelLayout';
 
-import { AppLayout } from './components/layout/AppLayout';
-import { LandingView } from './features/public/LandingView';
-import { LoginView } from './features/auth/LoginView';
-import { RegisterView } from './features/auth/RegisterView';
-import { ArrepentimientoView } from './features/public/ArrepentimientoView';
-import { UiGalleryView } from './features/public/UiGalleryView';
-import { LegalPageView } from './features/public/LegalPageView';
-import { NotFoundView } from './features/public/NotFoundView';
-import { RedirectScanView } from './features/public/RedirectScanView';
+// Carga perezosa de todas las pantallas con React.lazy según requerimiento
+const LoginView = lazy(() => import('./features/auth/LoginView').then(m => ({ default: m.LoginView })));
+const RegisterView = lazy(() => import('./features/auth/RegisterView').then(m => ({ default: m.RegisterView })));
+const ActivationView = lazy(() => import('./features/activation/ActivationView').then(m => ({ default: m.ActivationView })));
+const PublicHubView = lazy(() => import('./features/hub/PublicHubView').then(m => ({ default: m.PublicHubView })));
+const CashierView = lazy(() => import('./features/cashier/CashierView').then(m => ({ default: m.CashierView })));
 
-import { RoleProtectedRoute } from './components/auth/RoleProtectedRoute';
+// Vistas del Panel
+const DashboardSummaryView = lazy(() => import('./features/panel/DashboardSummaryView').then(m => ({ default: m.DashboardSummaryView })));
+const SalesView = lazy(() => import('./features/panel/SalesView').then(m => ({ default: m.SalesView })));
+const CartelesManagementView = lazy(() => import('./features/panel/CartelesManagementView').then(m => ({ default: m.CartelesManagementView })));
+const HubEditorView = lazy(() => import('./features/panel/HubEditorView').then(m => ({ default: m.HubEditorView })));
+const ClubView = lazy(() => import('./features/panel/ClubView').then(m => ({ default: m.ClubView })));
+const ConnectionsView = lazy(() => import('./features/panel/ConnectionsView').then(m => ({ default: m.ConnectionsView })));
+const ReviewsStatsView = lazy(() => import('./features/panel/ReviewsStatsView').then(m => ({ default: m.ReviewsStatsView })));
+const AccountSettingsView = lazy(() => import('./features/panel/AccountSettingsView').then(m => ({ default: m.AccountSettingsView })));
 
-// Business views (wrapped inside AppLayout)
-import { BusinessDashboard } from './features/business/BusinessDashboard';
-import { CartelesView } from './features/business/CartelesView';
-import { ChannelsView } from './features/business/ChannelsView';
-import { ReportsView } from './features/business/ReportsView';
-import { StaffView } from './features/business/StaffView';
-import { AccountView } from './features/business/AccountView';
-import { ManufacturersDirectoryView } from './features/business/ManufacturersDirectoryView';
+// Fabricante Admin
+const BatchAdminView = lazy(() => import('./features/admin/BatchAdminView').then(m => ({ default: m.BatchAdminView })));
 
-// Manufacturer view (wrapped inside AppLayout)
-import { ManufacturerDashboard } from './features/manufacturer/ManufacturerDashboard';
+// Precios y Planes
+const PricingView = lazy(() => import('./features/public/PricingView').then(m => ({ default: m.PricingView })));
 
-// Super Admin & Status views
-import { AdminDashboard } from './features/admin/AdminDashboard';
-import { StatusPageView } from './features/status/StatusPageView';
+// Landing Page Oficial
+const LandingView = lazy(() => import('./features/public/LandingView').then(m => ({ default: m.LandingView })));
 
-// Redirección dinámica según el rol del usuario
-const DynamicPanelRedirect: React.FC = () => {
-  const { user } = useAuth();
-  if (user?.role === 'platform_admin') return <Navigate to="/admin" replace />;
-  if (user?.role === 'manufacturer_admin') return <Navigate to="/fabricante" replace />;
-  return <Navigate to="/resumen" replace />;
-};
+const PageFallback: React.FC = () => (
+  <div className="min-h-screen bg-[#F7F4EE] flex items-center justify-center p-6">
+    <div className="max-w-sm w-full space-y-4">
+      <Skeleton className="h-10 w-44 mx-auto rounded-xl" />
+      <Skeleton className="h-44 w-full rounded-2xl" />
+    </div>
+  </div>
+);
 
 export default function App() {
   return (
-    <ThemeProvider>
+    <ErrorBoundary>
       <AuthProvider>
         <ToastProvider>
           <BrowserRouter>
-            <Routes>
-              {/* Página Principal (Home con Hero RIVR + Secciones Toque) */}
-              <Route path="/" element={<LandingView />} />
+            <Suspense fallback={<PageFallback />}>
+              <Routes>
+                {/* Landing Page Principal */}
+                <Route path="/" element={<LandingView />} />
+                <Route path="/landing" element={<LandingView />} />
 
-              {/* Registro y autenticación */}
-              <Route path="/login" element={<LoginView />} />
-              <Route path="/registro" element={<RegisterView />} />
-              <Route path="/comenzar" element={<RegisterView />} />
+                {/* Autenticación */}
+                <Route path="/login" element={<LoginView />} />
+                <Route path="/registro" element={<RegisterView />} />
 
-              {/* Redirección rápida de escaneo de cartel físico (/r/:shortCode) */}
-              <Route path="/r/:shortCode" element={<RedirectScanView />} />
+                {/* Activación guiada de cartel (/activar/:code) */}
+                <Route path="/activar/:code" element={<ActivationView />} />
 
-              {/* Rutas de Paneles montadas sobre AppLayout */}
-              <Route element={<AppLayout />}>
-                {/* 1. Panel de Negocio (Exclusivo comercios y staff) */}
-                <Route element={<RoleProtectedRoute allowedRoles={['business_owner', 'business_staff']} />}>
-                  <Route path="/resumen" element={<BusinessDashboard />} />
-                  <Route path="/carteles" element={<CartelesView />} />
-                  <Route path="/canales" element={<ChannelsView />} />
-                  <Route path="/reportes" element={<ReportsView />} />
-                  <Route path="/equipo" element={<StaffView />} />
-                  <Route path="/fabricantes" element={<ManufacturersDirectoryView />} />
+                {/* Hub público del cliente (/h/:code) */}
+                <Route path="/h/:code" element={<PublicHubView />} />
+
+                {/* Pantalla del cajero (/caja) */}
+                <Route path="/caja" element={<CashierView />} />
+
+                {/* Panel de administración del negocio (/panel) */}
+                <Route path="/panel" element={<PanelLayout />}>
+                  <Route index element={<DashboardSummaryView />} />
+                  <Route path="ventas" element={<SalesView />} />
+                  <Route path="carteles" element={<CartelesManagementView />} />
+                  <Route path="hub" element={<HubEditorView />} />
+                  <Route path="club" element={<ClubView />} />
+                  <Route path="conexiones" element={<ConnectionsView />} />
+                  <Route path="resenas" element={<ReviewsStatsView />} />
+                  <Route path="cuenta" element={<AccountSettingsView />} />
                 </Route>
 
-                {/* 2. Panel de Fabricante (Exclusivo imprentas y talleres) */}
-                <Route element={<RoleProtectedRoute allowedRoles={['manufacturer_admin']} />}>
-                  <Route path="/fabricante" element={<ManufacturerDashboard />} />
-                  <Route path="/fabricante/*" element={<ManufacturerDashboard />} />
-                </Route>
+                {/* Admin del fabricante (/admin/lotes) */}
+                <Route path="/admin/lotes" element={<BatchAdminView />} />
 
-                {/* 3. Panel de Super Admin (Exclusivo administradores de plataforma) */}
-                <Route element={<RoleProtectedRoute allowedRoles={['platform_admin']} />}>
-                  <Route path="/admin" element={<AdminDashboard />} />
-                  <Route path="/admin/*" element={<AdminDashboard />} />
-                </Route>
+                {/* Planes y Precios (/precios) */}
+                <Route path="/precios" element={<PricingView />} />
 
-                {/* 4. Configuración de Cuenta y Perfil (Para cualquier usuario autenticado) */}
-                <Route element={<RoleProtectedRoute allowedRoles={['business_owner', 'business_staff', 'manufacturer_admin', 'platform_admin']} />}>
-                  <Route path="/cuenta" element={<AccountView />} />
-                </Route>
-              </Route>
-
-              {/* Redirecciones canónicas que respetan el rol */}
-              <Route
-                path="/panel"
-                element={
-                  <RoleProtectedRoute allowedRoles={['business_owner', 'business_staff', 'manufacturer_admin', 'platform_admin']}>
-                    <DynamicPanelRedirect />
-                  </RoleProtectedRoute>
-                }
-              />
-              <Route
-                path="/dashboard"
-                element={
-                  <RoleProtectedRoute allowedRoles={['business_owner', 'business_staff', 'manufacturer_admin', 'platform_admin']}>
-                    <DynamicPanelRedirect />
-                  </RoleProtectedRoute>
-                }
-              />
-
-              {/* Monitor de Estado en Vivo */}
-              <Route path="/status" element={<StatusPageView />} />
-
-              {/* Galería de Componentes UI */}
-              <Route path="/ui" element={<UiGalleryView />} />
-
-              {/* Páginas Legales y Auxiliares */}
-              <Route path="/terminos" element={<LegalPageView forcedDocId="terminos" />} />
-              <Route path="/privacidad" element={<LegalPageView forcedDocId="privacidad" />} />
-              <Route path="/cookies" element={<LegalPageView forcedDocId="cookies" />} />
-              <Route path="/arrepentimiento" element={<ArrepentimientoView />} />
-
-              {/* 404 No Encontrado */}
-              <Route path="*" element={<NotFoundView />} />
-            </Routes>
+                {/* 404 No encontrado */}
+                <Route path="*" element={<Navigate to="/panel" replace />} />
+              </Routes>
+            </Suspense>
           </BrowserRouter>
         </ToastProvider>
       </AuthProvider>
-    </ThemeProvider>
+    </ErrorBoundary>
   );
 }

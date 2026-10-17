@@ -1,246 +1,137 @@
-/**
- * Toque — Pantalla de Ingreso (LoginView)
- * Características:
- * - Título claro: Iniciar sesión (para usuarios registrados)
- * - Enlace directo a "Crear cuenta nueva / Registrarse" (/registro)
- * - Redirección según rol:
- *     platform_admin -> /admin
- *     manufacturer_admin -> /fabricante
- *     business_owner / business_staff -> /resumen
- * - Accesos rápidos para probar cada rol con 1 toque.
- */
-
-import React, { useState, useEffect } from 'react';
-import { useNavigate, Link, useSearchParams } from 'react-router-dom';
+import React, { useState } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../lib/authContext';
-import { BrandLogo } from '../../components/ui/Avatar';
 import { Card } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
-import {
-  Mail,
-  Lock,
-  ArrowRight,
-  Store,
-  Factory,
-  Shield,
-  UserPlus,
-} from 'lucide-react';
 import { useToast } from '../../components/ui/Toast';
 
 export const LoginView: React.FC = () => {
-  const [searchParams] = useSearchParams();
-  const [identifier, setIdentifier] = useState(searchParams.get('email') || '');
-  const [password, setPassword] = useState(searchParams.get('pass') || '');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const isRegistered = searchParams.get('registered') === '1';
-
-  const { user, isAuthenticated, loginDirect, loginWithCredentials } = useAuth();
-  const navigate = useNavigate();
+  const { login } = useAuth();
   const { success, error: toastError } = useToast();
-
-  // Redirección si ya está autenticado
-  useEffect(() => {
-    if (isAuthenticated && user && !isSubmitting) {
-      const from = searchParams.get('from');
-      if (from) {
-        navigate(from, { replace: true });
-        return;
-      }
-      const welcomeSuffix = isRegistered ? '?welcome=1' : '';
-      if (user.role === 'platform_admin') {
-        navigate('/admin', { replace: true });
-      } else if (user.role === 'manufacturer_admin') {
-        navigate(`/fabricante${welcomeSuffix}`, { replace: true });
-      } else {
-        navigate(`/resumen${welcomeSuffix}`, { replace: true });
-      }
-    }
-  }, [isAuthenticated, user, isSubmitting, navigate, searchParams, isRegistered]);
+  const navigate = useNavigate();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const cleanId = identifier.trim();
-    const cleanPass = password.trim();
-
-    if (!cleanId || !cleanPass) {
-      toastError('Datos incompletos', 'Ingresá tu correo o usuario y tu contraseña.');
+    if (!email.trim()) {
+      toastError('Completá tu correo electrónico');
       return;
     }
-
     setIsSubmitting(true);
     try {
-      const res = await loginWithCredentials(cleanId, cleanPass);
-      success('Acceso correcto', `Hola, ${res.user.name}`);
-      const welcomeSuffix = isRegistered ? '?welcome=1' : '';
-      if (res.user.role === 'platform_admin') {
-        navigate('/admin');
-      } else if (res.user.role === 'manufacturer_admin') {
-        navigate(`/fabricante${welcomeSuffix}`);
-      } else {
-        navigate(`/resumen${welcomeSuffix}`);
-      }
+      await login({ email, password });
+      success('¡Bienvenido a Toque!', 'Iniciaste sesión correctamente.');
+      navigate('/panel');
     } catch (err) {
-      toastError('No pudimos iniciar sesión', err instanceof Error ? err.message : 'Verificá los datos ingresados');
+      toastError('No pudimos iniciar sesión', err instanceof Error ? err.message : 'Revisá tus datos.');
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  const handleQuickDemoAccess = async (role: 'business_owner' | 'manufacturer_admin' | 'platform_admin') => {
+  const handleGoogleLogin = async () => {
     setIsSubmitting(true);
     try {
-      const email = role === 'platform_admin' ? 'admin@toque.ar' : role === 'manufacturer_admin' ? 'fabricante@toque.ar' : 'negocio@toque.ar';
-      const res = await loginDirect(email, role);
-      success('Acceso demo iniciado', `Sesión iniciada como ${res.user.name}`);
-      if (role === 'platform_admin') {
-        navigate('/admin');
-      } else if (role === 'manufacturer_admin') {
-        navigate('/fabricante');
-      } else {
-        navigate('/resumen');
-      }
-    } catch {
-      toastError('Error al iniciar demo', 'Intentá con credenciales');
+      await login({ email: 'comercio@toque.ar', isGoogle: true });
+      success('Acceso con Google completado', 'Sesión iniciada con éxito.');
+      navigate('/panel');
+    } catch (err) {
+      toastError('Error al conectar con Google', err instanceof Error ? err.message : 'Probá de nuevo.');
     } finally {
       setIsSubmitting(false);
     }
   };
 
   return (
-    <div className="aurora-stage min-h-screen flex items-center justify-center p-4 selection:bg-white/20 selection:text-white">
-      <div className="w-full max-w-md space-y-6">
+    <div className="min-h-screen bg-[#F7F4EE] flex flex-col justify-center items-center p-4">
+      <div className="max-w-md w-full space-y-6">
+        {/* Logo */}
         <div className="text-center space-y-2">
-          <div className="flex justify-center mb-3">
-            <Link to="/" className="p-3 rounded-2xl bg-white/10 border border-white/20 hover:bg-white/15 transition group">
-              <BrandLogo showToqueBadge={false} />
-            </Link>
+          <div className="w-12 h-12 rounded-2xl bg-[#3A3FE0] text-white flex items-center justify-center font-display font-bold text-2xl mx-auto shadow-xs">
+            T
           </div>
-          <h1 className="font-display text-2xl sm:text-3xl font-bold text-white tracking-tight">
-            Iniciar sesión en Toque
+          <h1 className="font-display font-bold text-2xl text-[#0B1030]">
+            Ingresá a tu cuenta
           </h1>
-          <p className="text-xs text-white/70 max-w-sm mx-auto">
-            Ingresá a tu cuenta registrada para gestionar carteles, métricas y reseñas.
+          <p className="text-xs text-[#5E6072]">
+            Administrá tus cobros en caja, carteles y comprobantes digitales.
           </p>
         </div>
 
-        <Card className="p-6 sm:p-7 space-y-5 border-white/20 bg-[rgba(10,20,36,0.96)] backdrop-blur-2xl shadow-2xl">
-          {isRegistered && (
-            <div className="p-3.5 rounded-xl bg-emerald-500/20 border border-emerald-400/40 text-xs text-emerald-200 flex items-start gap-2.5">
-              <span className="w-2 h-2 rounded-full bg-emerald-400 mt-1 shrink-0 animate-pulse" />
-              <div>
-                <strong className="text-white block font-semibold">¡Registro exitoso!</strong>
-                <span>Confirmá tu contraseña para entrar directamente a tu panel oficial.</span>
-              </div>
-            </div>
-          )}
-
+        <Card padding="lg" className="space-y-5">
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
-              <label className="block text-xs font-medium text-white/90 mb-1.5">
-                Correo electrónico o usuario
+              <label className="block text-xs font-semibold text-[#0B1030] mb-1.5" htmlFor="email">
+                Correo electrónico
               </label>
-              <div className="relative">
-                <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-white/50">
-                  <Mail className="w-4 h-4" />
-                </div>
-                <input
-                  type="text"
-                  required
-                  autoComplete="username"
-                  value={identifier}
-                  onChange={(e) => setIdentifier(e.target.value)}
-                  placeholder="ejemplo@minegocio.com"
-                  className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-black/40 border border-white/20 text-white placeholder-white/30 text-sm focus:outline-none focus:border-white focus:ring-1 focus:ring-white/50 transition"
-                />
-              </div>
+              <input
+                id="email"
+                type="email"
+                required
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="ejemplo@tunegocio.com"
+                className="w-full px-3.5 py-2.5 rounded-xl border border-[#E3DDD2] bg-[#F7F4EE]/50 text-sm text-[#0B1030] focus:bg-white focus:outline-none focus:border-[#3A3FE0]"
+              />
             </div>
 
             <div>
-              <label className="block text-xs font-medium text-white/90 mb-1.5">
-                Contraseña
-              </label>
-              <div className="relative">
-                <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-white/50">
-                  <Lock className="w-4 h-4" />
-                </div>
-                <input
-                  type="password"
-                  required
-                  autoComplete="current-password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="••••••••"
-                  className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-black/40 border border-white/20 text-white placeholder-white/30 text-sm focus:outline-none focus:border-white focus:ring-1 focus:ring-white/50 transition"
-                />
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="block text-xs font-semibold text-[#0B1030]" htmlFor="password">
+                  Contraseña
+                </label>
               </div>
+              <input
+                id="password"
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="••••••••"
+                className="w-full px-3.5 py-2.5 rounded-xl border border-[#E3DDD2] bg-[#F7F4EE]/50 text-sm text-[#0B1030] focus:bg-white focus:outline-none focus:border-[#3A3FE0]"
+              />
             </div>
 
             <Button
               type="submit"
-              variant="primary"
-              isLoading={isSubmitting}
-              className="w-full justify-center bg-white text-slate-900 hover:bg-slate-100 font-semibold mt-4"
-              rightIcon={<ArrowRight className="w-4 h-4 text-slate-900" />}
+              variant="ultramar"
+              fullWidth
+              size="touch"
+              disabled={isSubmitting}
             >
-              Iniciar sesión
+              {isSubmitting ? 'Ingresando…' : 'Iniciar sesión'}
             </Button>
           </form>
 
-          {/* Enlace claro para registrarse si es nuevo */}
-          <div className="pt-3 border-t border-white/10 text-center space-y-2">
-            <p className="text-xs text-white/60">
-              ¿No tenés una cuenta en Toque?
-            </p>
-            <Link
-              to="/registro"
-              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-white/10 hover:bg-white/15 border border-white/20 text-xs font-semibold text-white transition"
-            >
-              <UserPlus className="w-3.5 h-3.5 text-emerald-400" />
-              <span>Registrate aquí gratis</span>
-            </Link>
+          <div className="relative flex items-center justify-center my-4">
+            <div className="border-t border-[#E3DDD2] w-full" />
+            <span className="bg-white px-3 text-[11px] text-[#5E6072] uppercase font-medium absolute">
+              o
+            </span>
           </div>
 
-          {/* Accesos rápidos de prueba */}
-          <div className="pt-3 border-t border-white/10">
-            <p className="text-[11px] font-medium text-white/50 uppercase tracking-wider text-center mb-2">
-              Ingreso directo de prueba
-            </p>
-            <div className="grid grid-cols-3 gap-2">
-              <button
-                type="button"
-                onClick={() => handleQuickDemoAccess('business_owner')}
-                className="p-2 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-400/30 text-center transition cursor-pointer"
-                title="Acceder como Dueño de Comercio"
-              >
-                <Store className="w-3.5 h-3.5 text-emerald-300 mx-auto mb-1" />
-                <span className="text-[10px] text-emerald-200 font-medium block">Negocio</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => handleQuickDemoAccess('manufacturer_admin')}
-                className="p-2 rounded-lg bg-blue-500/15 hover:bg-blue-500/25 border border-blue-400/30 text-center transition cursor-pointer"
-                title="Acceder como Fabricante"
-              >
-                <Factory className="w-3.5 h-3.5 text-blue-300 mx-auto mb-1" />
-                <span className="text-[10px] text-blue-200 font-medium block">Fabricante</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => handleQuickDemoAccess('platform_admin')}
-                className="p-2 rounded-lg bg-purple-500/15 hover:bg-purple-500/25 border border-purple-400/30 text-center transition cursor-pointer"
-                title="Acceder como Super Administrador"
-              >
-                <Shield className="w-3.5 h-3.5 text-purple-300 mx-auto mb-1" />
-                <span className="text-[10px] text-purple-200 font-medium block">Admin</span>
-              </button>
-            </div>
-          </div>
+          <button
+            type="button"
+            onClick={handleGoogleLogin}
+            disabled={isSubmitting}
+            className="w-full min-h-[48px] px-4 rounded-xl border border-[#E3DDD2] bg-white hover:bg-[#F7F4EE] active:bg-[#EAE4D9] text-xs font-semibold text-[#0B1030] flex items-center justify-center gap-3 transition cursor-pointer"
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24">
+              <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
+              <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
+              <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" />
+              <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" />
+            </svg>
+            <span>Continuar con Google</span>
+          </button>
         </Card>
 
-        <p className="text-center text-xs text-white/50">
-          Toque™ • Más opiniones reales en tu local.
+        <p className="text-center text-xs text-[#5E6072]">
+          ¿Todavía no tenés cuenta?{' '}
+          <Link to="/registro" className="font-semibold text-[#3A3FE0] hover:underline">
+            Registrate acá
+          </Link>
         </p>
       </div>
     </div>

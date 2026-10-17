@@ -1,11 +1,5 @@
-/**
- * Toque — Estado Vacío (EmptyState)
- * Incluye título claro, explicación orientadora y una acción principal.
- */
-
 import React from 'react';
 import { Button } from './Button';
-import { Card } from './Card';
 
 export interface EmptyStateProps {
   icon?: React.ReactNode;
@@ -13,7 +7,7 @@ export interface EmptyStateProps {
   description: string;
   actionLabel?: string;
   onAction?: () => void;
-  className?: string;
+  actionVariant?: 'estrella' | 'ultramar' | 'secundario';
 }
 
 export const EmptyState: React.FC<EmptyStateProps> = ({
@@ -22,28 +16,26 @@ export const EmptyState: React.FC<EmptyStateProps> = ({
   description,
   actionLabel,
   onAction,
-  className = '',
+  actionVariant = 'ultramar',
 }) => {
   return (
-    <Card className={`text-center py-12 px-6 flex flex-col items-center justify-center max-w-lg mx-auto ${className}`}>
+    <div className="py-12 px-6 text-center max-w-md mx-auto flex flex-col items-center">
       {icon && (
-        <div className="w-14 h-14 rounded-2xl bg-[var(--brand)]/10 text-[var(--brand)] flex items-center justify-center mb-4">
+        <div className="w-14 h-14 rounded-2xl bg-[#ECEDFC] text-[#3A3FE0] flex items-center justify-center mb-4">
           {icon}
         </div>
       )}
-      <h3 className="font-display text-title-3 font-semibold text-[var(--text-main)]">
+      <h3 className="font-display font-bold text-lg text-[#0B1030] mb-2">
         {title}
       </h3>
-      <p className="text-small text-[var(--text-muted)] mt-2 max-w-md mx-auto">
+      <p className="text-sm text-[#5E6072] leading-relaxed mb-6">
         {description}
       </p>
       {actionLabel && onAction && (
-        <div className="mt-6">
-          <Button variant="primary" onClick={onAction}>
-            {actionLabel}
-          </Button>
-        </div>
+        <Button variant={actionVariant} onClick={onAction}>
+          {actionLabel}
+        </Button>
       )}
-    </Card>
+    </div>
   );
 };

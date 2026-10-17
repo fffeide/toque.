@@ -1,108 +1,160 @@
-# Desacoplamiento Estricto de Paneles y Control de Acceso por Roles (RBAC)
+# Módulo Recibo de Toque — Plan de Implementación
 
-Separar de forma definitiva las interfaces y permisos de **Negocio**, **Fabricante** y **Super Admin** en Toque, garantizando que cada usuario acceda únicamente a su panel correspondiente sin mezcla de rutas, menús cruzados ni selectores inapropiados.
+> Módulo integral de cobranza en caja, emisión de comprobantes digitales efímeros, club de fidelidad y captación transparente de reseñas en Google a través de carteles físicos inteligentes con NFC y QR.
 
-### Decisiones Críticas Confirmadas
+---
+
+### Decisiones Críticas y Preferencias del Usuario
 
 > [!IMPORTANT]
-> - **Protección y Bloqueo de Rutas por Rol (RBAC)**: Si un usuario con rol de Negocio intenta entrar a `/admin` o `/fabricante`, el sistema lo redirecciona automáticamente a `/resumen`. Si un Fabricante intenta acceder a `/admin`, se lo redirige a `/fabricante`. Nadie puede ver paneles ajenos a su nivel de cuenta.
-> - **Eliminación del Selector de Cambio de Rol en la Cabecera Global**: Se remueve el interruptor "Negocio / Fabricante" del header para todos los usuarios regulares y comercios. Se confina un switcher de simulación exclusivamente para la cuenta `@pruebas` dentro de una pestaña protegida en el panel Super Admin (`/admin`).
-> - **Redirección de Inicio de Sesión Inteligente**: Al iniciar sesión o entrar a la app, cada usuario es enviado directamente a su destino canónico:
->   - `platform_admin` (Dueño/Admin) → `/admin`
->   - `manufacturer_admin` (Taller/Fabricante) → `/fabricante`
->   - `business_owner` / `business_staff` (Comercio/Café) → `/resumen`
-> - **Menú Lateral y Mobile Dock Exclusivos**: Los íconos y accesos rápidos de la barra lateral y dock móvil solo mostrarán los módulos que corresponden al rol activo (un negocio nunca verá íconos de fabricante ni de admin; un fabricante nunca verá la navegación de café).
+> Se han incorporado las preferencias confirmadas por el usuario:
+> - **Inicialización de datos**: Base limpia y estados vacíos honestos para nuevos comercios (con cartel de prueba `sin_activar` y PIN `ABC123` rotulado como *"Ejemplo"* para validar la activación).
+> - **Pantalla de Caja**: Teclado numérico grande por defecto con interruptor rápido para detallar ítems (nombre + precio).
+> - **Descarga en el Hub**: Generación y guardado local del comprobante como imagen PNG y archivo PDF ligero descargable en el navegador.
 
 ---
 
-## 1. Visión General del Sistema y Arquitectura de Acceso
+## 1. Visión General y Concepto Central
 
-El sistema contará con un componente guardián (`RoleProtectedRoute`) que evalúa el estado del usuario autenticado antes de renderizar cualquier vista. Si el usuario no tiene la sesión requerida o su rol no coincide con el panel solicitado, es redirigido a su espacio canónico.
+### Qué es y qué resuelve
+El módulo **Recibo** complementa el ecosistema de **Toque**. Permite que el comerciante registre cobros en segundos desde cualquier tablet o computadora en la caja, y que el cliente, al apoyar su celular o escanear el cartel acrílico físico, visualice su comprobante de compra digital sin papel, acceda al programa de fidelidad (Club), conozca productos destacados y acceda de inmediato a calificar en Google Reviews con un botón neutral y sin condicionamientos.
+
+### Personas y Contexto de Uso
+1. **El Cajero / Empleado**: Opera en la pantalla `/caja` (tablet o monitor táctil), ingresa el importe rápidamente, selecciona el medio de cobro (Mercado Pago QR, Efectivo o Posnet) y solicita al cliente que apoye su dispositivo.
+2. **El Cliente del Comercio**: Escanea el cartel o apoya su teléfono (NFC). Llega a `/h/:code` en su navegador móvil; sin necesidad de registrarse ni instalar aplicaciones, descarga su recibo, se suma al Club si lo desea y deja una reseña en Google Maps.
+3. **El Titular del Comercio**: Administra en `/panel` sus carteles, el diseño del Hub en vivo, las ventas, el Club de fidelidad y la configuración de su cuenta.
+4. **El Fabricante de Carteles**: Ingresa en `/admin/lotes` para generar partidas de carteles físicos (código corto + PIN interior) y exportar el CSV de impresión.
+
+---
+
+## 2. Experiencia de Usuario y Diseño Visual
+
+### Identidad Visual y Sistema de Diseño (Sin Vidrio, Estética Editorial Sólida)
+Se abandona cualquier efecto de vidrio o degradados oscuros para abrazar una estética editorial limpia, táctil y de alto contraste inspirada en papel y tinta de imprenta:
+
+- **Paleta Estricta (5 Colores y Tonos Derivados)**:
+  - `Papel` (`#F7F4EE`): Lienzo de fondo cálido, descansado y de lectura natural.
+  - `Tinta` (`#0B1030`): Tipografía principal, bordes estructurales e íconos.
+  - `Ultramar` (`#3A3FE0`): Acciones principales, enlaces y foco interactivo.
+  - `Estrella` (`#FFC21A`): Botón principal en el Hub y acentos destacados (siempre con texto en color Tinta `#0B1030`, nunca blanco ni sobre claro).
+  - `Coral` (`#B8332A`): Errores y cancelaciones.
+  - *Tonos suaves*: Líneas `#E3DDD2`, Texto secundario `#5E6072`, Fondos suaves `#ECEDFC` (ultramar), `#FFF1C7` (estrella), `#FCE9E6` (coral).
+- **Tipografías**:
+  - `Sora`: Títulos, totales y números grandes en Caja y Comprobante.
+  - `Inter`: Texto corrido, etiquetas, botones y cuerpo de interfaz.
+  - `JetBrains Mono`: Exclusivamente para códigos de cartel (`TQ-4829`, PIN de activación).
+- **Tarjetas y Superficies**: Sólidas, fondo blanco puro o papel con borde sutil `#E3DDD2` y sombra suave (sin transparencias ni desenfoques).
+- **Ergonomía Táctil**:
+  - Botones de Caja de $\ge 48\text{px}$, teclas numéricas grandes con respuesta táctil inmediata.
+  - Mobile-first en el Hub del cliente con zona de pulgar optimizada.
+  - Cumplimiento total de `prefers-reduced-motion` (desactivación de desplazamientos).
+
+---
+
+## 3. Decisiones Clave de Producto y Reglas de Oro
+
+1. **Cero Firebase / Cero Backend en Servidor**:
+   - Se construye una arquitectura pura en frontend con desacoplamiento total en `src/api`:
+     - `ToqueApi.ts`: Interfaz TypeScript con contratos estrictos.
+     - `mockApi.ts`: Implementación en memoria sin persistencia en Firebase ni localStorage como base de datos.
+     - `httpApi.ts`: Cliente HTTP estándar con `fetch('/api/...')`, `credentials: 'include'` y manejo de errores `{ error: { code, message } }`.
+     - `src/api/index.ts`: Switch dinámico basado en `VITE_API_MODE`.
+2. **Sin Review Gating ni Premios por Opinar**:
+   - El botón de Google Reviews siempre dice *"Dejar reseña en Google"*, es visible para todos los clientes (incluso si falló el recibo) y nunca se condiciona a premios o descuentos.
+3. **Comprobante No Fiscal Seguro**:
+   - Cada comprobante incluye la leyenda obligatoria: *"Comprobante de compra. No es una factura."*
+   - Reclamable una única vez: tras su visualización/reclamo o pasados 3 minutos, desaparece del cartel para resguardar la privacidad del siguiente cliente.
+4. **Privacidad Estricta**:
+   - Sin registro de IPs.
+   - El Club de Fidelidad solicita consentimiento explícito con casilla sin marcar y pide datos mínimos (nombre opcional + WhatsApp o correo).
+
+---
+
+## 4. Arquitectura del Sistema y Flujo de Componentes
 
 ```
-                  ┌─────────────────────────────────────┐
-                  │          Usuario Autenticado        │
-                  │   (email, role, tenantId, type)     │
-                  └──────────────────┬──────────────────┘
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                            APP ROUTER (React 19)                            │
+│                  Cargado con React.lazy + ErrorBoundary                     │
+└──────┬───────────────────┬───────────────────┬──────────────────────┬───────┘
+       │                   │                   │                      │
+       ▼                   ▼                   ▼                      ▼
+┌──────────────┐    ┌──────────────┐    ┌──────────────┐       ┌──────────────┐
+│  /login &    │    │  /activar/   │    │  /h/:code    │       │    /caja     │
+│  /registro   │    │    :code     │    │  Hub Público │       │  Pantalla de │
+│  (Auth)      │    │  (6 pasos)   │    │  (Mobile)    │       │  Cobro POS   │
+└──────┬───────┘    └──────┬───────┘    └──────┬───────┘       └──────┬───────┘
+       │                   │                   │                      │
+       └───────────────────┴─────────┬─────────┴──────────────────────┘
+                                     ▼
+                    ┌──────────────────────────────────┐
+                    │       PANEL DEL NEGOCIO          │
+                    │  /panel (Resumen, Ventas,        │
+                    │   Carteles, Hub, Club, Conex.)   │
+                    └────────────────┬─────────────────┘
                                      │
-           ┌─────────────────────────┼─────────────────────────┐
-           ▼                         ▼                         ▼
-   [platform_admin]        [manufacturer_admin]         [business_owner]
-           │                         │                         │
- ┌─────────┴─────────┐     ┌─────────┴─────────┐     ┌─────────┴─────────┐
- │   Ruta: /admin    │     │ Ruta: /fabricante │     │  Ruta: /resumen   │
- │   Panel Toque     │     │  Panel Producción │     │  /carteles        │
- │   • Métricas Red  │     │  • Mis Comercios  │     │  /reportes        │
- │   • Recaudación   │     │  • Kit Impresión  │     │  /equipo          │
- │   • Salud Sistema │     │  • Marca Blanca   │     │  /cuenta          │
- │   • Sandbox QA    │     │  • Chips NTAG215  │     │  (Solo su local)  │
- │     (@pruebas)    │     └───────────────────┘     └───────────────────┘
- └───────────────────┘
+                                     ▼
+                    ┌──────────────────────────────────┐
+                    │     CAPA DE DATOS (src/api)      │
+                    │   ToqueApi (Contrato Común)      │
+                    │  ├── mockApi.ts (En memoria)     │
+                    │  └── httpApi.ts (/api/...)       │
+                    └──────────────────────────────────┘
+```
+
+### Mapa de Archivos a Implementar
+
+```
+src/
+├── api/
+│   ├── types.ts              // Tipos de dominio: Cartel, Sale, Receipt, Club, Hub
+│   ├── ToqueApi.ts           // Interfaz abstracta de todos los métodos requeridos
+│   ├── mockApi.ts            // Implementación mock en memoria con datos limpios y ejemplo rotulado
+│   ├── httpApi.ts            // Implementación REST fetch a /api/...
+│   └── index.ts              // Exporta api según VITE_API_MODE
+├── lib/
+│   ├── authContext.tsx       // Contexto liviano de autenticación (usuario y negocio)
+│   ├── formatters.ts         // Formateo de pesos argentinos (ARS), fechas y números
+│   └── receiptGenerator.ts   // Renderizado de comprobante como imagen PNG y PDF descargable
+├── components/
+│   ├── ErrorBoundary.tsx     // Captura de errores con mensaje claro y botón de reintento
+│   ├── layout/
+│   │   ├── PanelLayout.tsx   // Barra lateral en desktop + barra inferior en mobile
+│   │   └── PublicHeader.tsx  // Cabecera limpia para Hub y Activación
+│   └── ui/                   // Botones (Estrella/Ultramar), Teclado Numérico, Modal, Alertas
+├── features/
+│   ├── auth/
+│   │   ├── LoginView.tsx     // Inicio de sesión con correo y Google simulado
+│   │   └── RegisterView.tsx  // Registro de comercio y usuario
+│   ├── activation/
+│   │   └── ActivationView.tsx// Flujo guiado de 6 pasos con PIN, validación y prueba
+│   ├── hub/
+│   │   ├── PublicHubView.tsx // Hub público del cliente con recibo, reseña, club y redes
+│   │   └── ReceiptBlock.tsx  // Comprobante no fiscal con descarga de imagen/PDF
+│   ├── cashier/
+│   │   └── CashierView.tsx   // Pantalla de caja táctil con Mercado Pago QR y simulación
+│   ├── panel/
+│   │   ├── DashboardSummaryView.tsx // Resumen con cobros, recibos y socios
+│   │   ├── SalesView.tsx            // Historial de ventas y filtros
+│   │   ├── CartelesManagementView.tsx// Gestión de carteles (estado, rol, enlaces)
+│   │   ├── HubEditorView.tsx        // Editor accesible de bloques con vista previa
+│   │   ├── ClubView.tsx             // Configuración de reglas, metas y lista de socios
+│   │   ├── ConnectionsView.tsx      // Conexión con Mercado Pago
+│   │   ├── ReviewsStatsView.tsx     // Toques de reseñas y aviso institucional
+│   │   └── AccountSettingsView.tsx  // Perfil del negocio y link de Google Maps
+│   └── admin/
+│       └── BatchAdminView.tsx       // Generador de lotes y exportación CSV para fabricante
+├── App.tsx                   // Enrutador con React.lazy y Suspense
+├── main.tsx
+└── index.css                 // Definición de variables CSS (#F7F4EE, #0B1030, #3A3FE0, etc.)
 ```
 
 ---
 
-## 2. Experiencia de Usuario y Separación de Interfaz
+## 5. Criterios de Aceptación y Validación
 
-### A. Panel de Negocio (`/resumen`, `/carteles`, `/canales`, `/reportes`, `/equipo`, `/cuenta`)
-- **Público**: Dueños de cafeterías, bares, restaurantes y locales comerciales.
-- **Navegación Lateral**:
-  - Resumen del Salón (Toques hoy, curva de horas, alertas).
-  - Mis Carteles (Gestión de carteles de mesa, cambiar link de QR, cómo escanear).
-  - Canales de Escaneo (Próximamente: WhatsApp, Instagram, ticket).
-  - Reportes (Informe mensual imprimible en PDF con métricas limpias).
-  - Equipo (Código individual por empleado y reto del mes ético).
-  - Mi Cuenta (Datos del negocio y WhatsApp de su fabricante asignado).
-- **Aislamiento**: Ninguna mención o acceso a listas de otros clientes, cotizadores de imprenta ni recaudación de plataforma.
-
-### B. Panel del Fabricante (`/fabricante`)
-- **Público**: Imprentas, grabadores láser y talleres de cartelería acrílica.
-- **Navegación Lateral y Pestañas**:
-  - Tablero de Taller (Capacidad activa de carteles, comercios asociados).
-  - Mis Comercios (Directorio de clientes, comercios sin toques, WhatsApp directo).
-  - Kit de Impresión (Descarga de CSV para chips NFC y plantillas QR a escala).
-  - Marca Blanca y Dominio (Personalización del logo que ven sus clientes).
-  - Pedidos de Reposición (Reposiciones de acrílicos rotos o extraviados).
-  - Plan de Fabricación (Arranque / Taller / Fábrica con SSO).
-- **Aislamiento**: No ve las pantallas de salón de un café específico; interactúa a nivel B2B de producción.
-
-### C. Panel Super Admin de Toque (`/admin`)
-- **Público**: Dueños y equipo fundador de Toque SaaS.
-- **Navegación**:
-  - Visión de Red y Métricas Totales (Escaneos globales, ratio NFC/QR).
-  - Recaudación y Suscripciones (MRR, ARR en pesos argentinos).
-  - Directorio Maestro de Fabricantes y Comercios.
-  - Enlaces a Monitor de Estado en Vivo (`/status`) y Galería de Diseño (`/ui`).
-  - **Sandbox Exclusivo para `@pruebas`**: Solo visible si el usuario logueado es `@pruebas`, permitiendo auditar la experiencia de cada rol para control de calidad.
-
----
-
-## 3. Plan de Ejecución Técnico
-
-1. **Crear `RoleProtectedRoute.tsx`**:
-   - Componente envoltorio que valida `isAuthenticated` y contrasta `user.role` con una lista de roles permitidos (`allowedRoles`).
-   - Redirección automática inmediata al destino canónico según el rol del usuario si intenta ingresar a una ruta indebida.
-
-2. **Reestructurar las Rutas en `App.tsx`**:
-   - Desagrupar el layout genérico único. Crear sub-árboles de rutas protegidas:
-     - Rama `/admin/*` protegida exclusivamente para `platform_admin`.
-     - Rama `/fabricante/*` protegida exclusivamente para `manufacturer_admin`.
-     - Rama `/resumen`, `/carteles`, `/canales`, `/reportes`, `/equipo`, `/cuenta` protegida para `business_owner` y `business_staff`.
-   - Crear una ruta `/dashboard` o resolver la redirección en `/` y `/login` para dirigir a cada perfil a su URL correspondiente sin mezclas.
-
-3. **Limpiar `AppLayout.tsx`**:
-   - Eliminar el banner superior de "Cambiar vista: Negocio / Fabricante" del layout general.
-   - Renderizar en la barra lateral (`aside`) y en el dock móvil (`nav`) **únicamente** los enlaces permitidos para el rol activo.
-   - Si un usuario es de Negocio, la barra lateral no renderiza íconos de Fabricante ni de Admin.
-
-4. **Actualizar el Flujo de Login en `LoginView.tsx`**:
-   - Tras iniciar sesión (sea por email directo, credenciales `@pruebas`, OAuth o SSO), el usuario es redirigido a su panel específico:
-     - `platform_admin` → `/admin`
-     - `manufacturer_admin` → `/fabricante`
-     - `business_owner` → `/resumen`
-
-5. **Sandbox de QA Confinado en `AdminDashboard.tsx`**:
-   - La opción de simular y conmutar roles se mantiene disponible exclusivamente dentro del panel Admin cuando el usuario es `@pruebas`, sin invadir la navegación principal del resto de los usuarios.
-
-6. **Verificación y Compilación**:
-   - Ejecutar `lint_applet` y `compile_applet` para confirmar la integridad de tipos de TypeScript y validar que no existan advertencias ni rupturas en la navegación.
+- [x] **Activación en < 60s**: Cartel de ejemplo con PIN `ABC123` rotulado como *"Ejemplo"*, validación de URL de Google Maps y éxito inmediato.
+- [x] **Flujo de Cobro y Recibo Efímero**: Se cobra un monto en `/caja`, se aprueba y en `/h/CODIGO` aparece el comprobante en la cabecera. Al recargar o ingresar de nuevo, desaparece por haber sido reclamado.
+- [x] **Botón de Reseña Inquebrantable**: En `/h/:code` el botón *"Dejar reseña en Google"* permanece activo y accesible incluso ante cualquier desconexión o falla de los otros bloques.
+- [x] **Accesibilidad y Movimiento**: Todo operable por teclado, sin fondos animados, con soporte para `prefers-reduced-motion` y contraste $\ge 4.5:1$.
+- [x] **Verificación Técnica**: Compilación sin errores (`tsc --noEmit` y `vite build`).

@@ -1,87 +1,116 @@
 @import "tailwindcss";
 @import "./styles/tokens.css";
 @import "./styles/materials.css";
-@import "./styles/typography.css";
-@import "./styles/motion.css";
 
 :root {
-  --font-inter: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-  --font-inter-tight: 'Inter Tight', 'Inter', sans-serif;
-  font-family: var(--font-inter);
-  font-feature-settings: "kern" 1;
-  text-rendering: optimizeLegibility;
+  /* 5 Colores Canónicos de Toque */
+  --color-papel: #F7F4EE;
+  --color-tinta: #0B1030;
+  --color-ultramar: #3A3FE0;
+  --color-estrella: #FFC21A;
+  --color-coral: #B8332A;
+
+  /* Tonos Suaves Derivados */
+  --color-texto-secundario: #5E6072;
+  --color-lineas: #E3DDD2;
+  --color-fondo-ultramar-suave: #ECEDFC;
+  --color-fondo-estrella-suave: #FFF1C7;
+  --color-fondo-coral-suave: #FCE9E6;
+
+  /* Tipografías */
+  --font-display: 'Sora', sans-serif;
+  --font-body: 'Inter', sans-serif;
+  --font-code: 'JetBrains Mono', monospace;
+}
+
+@theme {
+  --color-papel: #F7F4EE;
+  --color-tinta: #0B1030;
+  --color-ultramar: #3A3FE0;
+  --color-estrella: #FFC21A;
+  --color-coral: #B8332A;
+
+  --color-texto-secundario: #5E6072;
+  --color-lineas: #E3DDD2;
+  --color-fondo-ultramar-suave: #ECEDFC;
+  --color-fondo-estrella-suave: #FFF1C7;
+  --color-fondo-coral-suave: #FCE9E6;
+
+  --font-display: 'Sora', sans-serif;
+  --font-body: 'Inter', sans-serif;
+  --font-code: 'JetBrains Mono', monospace;
+}
+
+body {
+  background-color: var(--color-papel);
+  color: var(--color-tinta);
+  font-family: var(--font-body);
+  margin: 0;
+  padding: 0;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
-body {
-  margin: 0;
-  overflow-x: hidden;
-  background-color: #04121b;
-  color: #ffffff;
-  min-height: 100%;
+/* Títulos con espaciado -0.02em en Sora */
+h1, h2, h3, .font-display {
+  font-family: var(--font-display);
+  letter-spacing: -0.02em;
 }
 
-html, body, #root {
-  min-height: 100%;
+/* Códigos de cartel exclusivamente en JetBrains Mono */
+.font-code, .cartel-code {
+  font-family: var(--font-code);
+  font-variant-numeric: tabular-nums;
 }
 
-h1, h2, h3, .font-headline, .font-display {
-  font-family: 'Sora', sans-serif;
+/* Foco visible para accesibilidad */
+*:focus-visible {
+  outline: 2px solid var(--color-ultramar);
+  outline-offset: 2px;
 }
 
-/* Área táctil mínima de 44px */
-.min-touch {
-  min-width: var(--touch-target);
-  min-height: var(--touch-target);
+/* Movimiento respetando prefers-reduced-motion */
+@media (prefers-reduced-motion: reduce) {
+  *, ::before, ::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
 
-/* Reglas de impresión y guardado como PDF limpio */
-@media print {
-  body, html, #root {
-    background-color: #ffffff !important;
-    background-image: none !important;
-    color: #0f172a !important;
-    margin: 0 !important;
-    padding: 0 !important;
-  }
+/* Tarjetas casi sólidas sin efecto vidrio */
+.toque-card {
+  background-color: #FFFFFF;
+  border: 1px solid var(--color-lineas);
+  border-radius: 1rem;
+  box-shadow: 0 1px 3px 0 rgba(11, 16, 48, 0.05);
+}
 
-  .aurora-stage,
-  .aurora-stage::after {
-    background: #ffffff !important;
-    background-image: none !important;
-    color: #0f172a !important;
-  }
+/* Botón táctil para caja (mínimo 48px de alto y respuesta limpia) */
+.btn-touch {
+  min-height: 48px;
+  min-width: 48px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.12s ease, opacity 0.12s ease;
+  user-select: none;
+}
 
-  /* Ocultar elementos de navegación en la impresión */
-  header,
-  aside,
-  nav,
-  button:not(.printable-btn),
-  .no-print,
-  .aurora-sidebar-glass,
-  .dock-mobile,
-  .toque-chat-widget {
-    display: none !important;
-  }
+.btn-touch:active {
+  transform: scale(0.97);
+}
 
-  /* Asegurar que las tarjetas imprimibles salgan con fondo blanco y bordes nítidos */
-  .aurora-card-glass,
-  .printable-sheet {
-    background: #ffffff !important;
-    border: 1px solid #cbd5e1 !important;
-    box-shadow: none !important;
-    color: #0f172a !important;
-    backdrop-filter: none !important;
-    page-break-inside: avoid;
-  }
-
-  .printable-sheet * {
-    color: #0f172a !important;
-  }
-
-  .printable-sheet img,
-  .printable-sheet svg {
-    filter: none !important;
-  }
+/* Scrollbar sutil */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: var(--color-papel);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-lineas);
+  border-radius: 9999px;
 }
