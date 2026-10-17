@@ -1,6 +1,6 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "toque-app",
+  "name": "toque",
   "main": "worker/index.ts",
   "compatibility_date": "2025-03-01",
   "compatibility_flags": ["nodejs_compat"],
@@ -15,7 +15,7 @@
     { "binding": "DB", "database_name": "toque-db", "database_id": "REEMPLAZAR_CON_EL_ID_DE_D1", "migrations_dir": "migrations" }
   ],
   "kv_namespaces": [
-    { "binding": "KV", "id": "REEMPLAZAR_CON_EL_ID_DE_KV" }
+    { "binding": "KV", "id": "801398c54de749248b084536b64d3b4a" }
   ],
   "triggers": { "crons": ["0 6 1 * *"] },
   "observability": {
