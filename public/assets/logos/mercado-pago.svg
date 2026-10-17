@@ -1,0 +1,139 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 260 190" fill="none">
+  <defs>
+    <clipPath id="mpOvalClip">
+      <ellipse cx="130" cy="95" rx="106" ry="73" />
+    </clipPath>
+  </defs>
+
+  <!-- Outer dark navy base for bottom crescent rim -->
+  <ellipse cx="130" cy="98" rx="108" ry="75" fill="#000B76" />
+
+  <g clip-path="url(#mpOvalClip)">
+    <!-- Sky blue interior -->
+    <ellipse cx="130" cy="91" rx="106" ry="71" fill="#00B2FF" />
+
+    <!-- White handshake & cuffs -->
+    <path
+      d="M16 54C42 62 66 68 85 65C97 63 111 54 126 54C140 54 152 62 166 64C184 66 212 60 244 50L252 84C224 91 198 98 179 104L142 132L96 124L74 102C52 94 30 88 10 84L16 54Z"
+      fill="#FFFFFF"
+    />
+
+    <!-- Handshake palm & fingers fill -->
+    <path
+      d="M84 96L116 64C124 58 134 58 144 66L182 98C188 104 186 114 178 116C177 124 169 128 161 126C159 133 150 137 142 133C136 138 126 137 121 130L84 96Z"
+      fill="#FFFFFF"
+    />
+
+    <!-- Left arm top line -->
+    <path
+      d="M18 55C48 66 72 70 96 63"
+      stroke="#000B76"
+      stroke-width="6.5"
+      stroke-linecap="round"
+    />
+    <!-- Left arm bottom line -->
+    <path
+      d="M14 85C38 90 58 96 73 104"
+      stroke="#000B76"
+      stroke-width="6.5"
+      stroke-linecap="round"
+    />
+
+    <!-- Right arm top & thumb contour -->
+    <path
+      d="M242 54C214 64 190 67 168 62C152 57 139 51 125 53C111 55 98 67 90 77C86 82 91 89 99 88C107 87 115 80 123 73C129 68 136 68 143 73L180 103C185 107 184 115 177 117C169 119 162 114 156 108"
+      fill="#FFFFFF"
+      stroke="#000B76"
+      stroke-width="6.5"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+    />
+
+    <!-- Right arm bottom line -->
+    <path
+      d="M246 86C222 92 200 98 182 105"
+      stroke="#000B76"
+      stroke-width="6.5"
+      stroke-linecap="round"
+    />
+
+    <!-- Right hand fingers -->
+    <path
+      d="M156 98L172 114C176 118 174 125 167 127C161 128 155 124 149 118"
+      stroke="#000B76"
+      stroke-width="6.5"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+    />
+    <path
+      d="M146 108L159 121C163 125 160 132 153 133C147 134 141 130 135 124"
+      stroke="#000B76"
+      stroke-width="6.5"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+    />
+    <path
+      d="M135 117L144 126C148 130 144 136 138 136C132 136 127 132 123 127"
+      stroke="#000B76"
+      stroke-width="6.5"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+    />
+
+    <!-- Left hand 4 curled fingers (bottom-left) -->
+    <rect
+      x="69"
+      y="97"
+      width="18"
+      height="22"
+      rx="9"
+      transform="rotate(22 69 97)"
+      fill="#FFFFFF"
+      stroke="#000B76"
+      stroke-width="6.5"
+    />
+    <rect
+      x="84"
+      y="100"
+      width="20"
+      height="25"
+      rx="10"
+      transform="rotate(22 84 100)"
+      fill="#FFFFFF"
+      stroke="#000B76"
+      stroke-width="6.5"
+    />
+    <rect
+      x="101"
+      y="105"
+      width="20"
+      height="25"
+      rx="10"
+      transform="rotate(22 101 105)"
+      fill="#FFFFFF"
+      stroke="#000B76"
+      stroke-width="6.5"
+    />
+    <rect
+      x="117"
+      y="113"
+      width="19"
+      height="23"
+      rx="9.5"
+      transform="rotate(22 117 113)"
+      fill="#FFFFFF"
+      stroke="#000B76"
+      stroke-width="6.5"
+    />
+  </g>
+
+  <!-- Outer dark navy oval border -->
+  <ellipse
+    cx="130"
+    cy="95"
+    rx="106"
+    ry="73"
+    stroke="#000B76"
+    stroke-width="7.5"
+  />
+</svg>

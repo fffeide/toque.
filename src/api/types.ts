@@ -1,14 +1,74 @@
 /**
- * Toque — Módulo Recibo: Definición de Tipos
- * Estructuras de datos para Carteles, Ventas, Comprobantes, Club de Fidelidad y Hub Público.
+ * Toque — Smart Receipt & Post-Purchase Hub: Definición de Tipos
+ * Estructuras de datos para Carteles, Ventas, Comprobantes, Club de Fidelidad, Smart Hub, Wallet y Partners.
  */
 
 export type CartelRole = 'resena' | 'caja';
 export type CartelStatus = 'sin_activar' | 'active' | 'inactive' | 'trash';
 
-export type HubMode = 'direct' | 'hub';
+export type HubMode = 'direct' | 'hub' | 'direct_review' | 'smart_hub';
+export type TileColor = 'white' | 'black';
+export type ClaimStatus = 'unclaimed' | 'claimed';
 
 export type HubBlockKey = 'receipt' | 'review' | 'club' | 'socials' | 'products' | 'details';
+
+// Los 7 bloques del modelo Smart Receipt & Post-Purchase Hub
+export type SmartHubSectionKey =
+  | 'loyalty'
+  | 'reviews'
+  | 'receipt'
+  | 'offers'
+  | 'socials'
+  | 'signup'
+  | 'footer';
+
+export interface SmartHubSectionItem {
+  key: SmartHubSectionKey;
+  enabled: boolean;
+}
+
+export interface SmartHubConfig {
+  tenantId: string;
+  sectionsOrder: SmartHubSectionItem[];
+  brandColor: string;
+  logoUrl?: string;
+  reviewPrompt: string;
+  loyaltyTitle: string;
+  loyaltyReward: string;
+  stampsRequired: number;
+  offerTitle: string;
+  offerDesc: string;
+  offerCta: string;
+  offerUrl?: string;
+  offerImage?: string;
+  socials: {
+    instagram?: string;
+    tiktok?: string;
+    facebook?: string;
+    whatsapp?: string;
+    web?: string;
+  };
+}
+
+export interface WalletPassResponse {
+  success: boolean;
+  provider: string;
+  passId?: string;
+  validationCode: string;
+  appleWalletUrl: string;
+  googleWalletUrl: string;
+  qrUrl?: string;
+}
+
+export interface PartnerReferral {
+  id: string;
+  partnerCode: string;
+  merchantName: string;
+  merchantEmail: string;
+  status: 'pending' | 'activated' | 'paid';
+  commissionRate: number;
+  createdAt: string;
+}
 
 export interface HubBlockConfig {
   key: HubBlockKey;
@@ -28,6 +88,7 @@ export interface HubSocials {
   tiktok?: string;
   facebook?: string;
   whatsapp?: string;
+  web?: string;
 }
 
 export interface HubDetails {
@@ -38,8 +99,8 @@ export interface HubDetails {
 
 export interface HubConfig {
   mode: HubMode;
-  blocks: HubBlockConfig[]; // El orden del array determina el orden visual
-  accentColor: string; // Por defecto Ultramar (#3A3FE0)
+  blocks: HubBlockConfig[];
+  accentColor: string;
   logoUrl?: string;
   socials: HubSocials;
   products: HubProduct[];
@@ -49,14 +110,16 @@ export interface HubConfig {
 
 export interface Cartel {
   id: string;
-  code: string; // Código corto (ej: "TQ-4829")
-  pin: string; // PIN de activación de 6 caracteres
+  code: string;
+  pin: string;
   businessId?: string;
-  name: string; // "Caja 1", "Mesa 3"
+  name: string;
   role: CartelRole;
   status: CartelStatus;
   reviewUrl?: string;
   mode: HubMode;
+  tileColor?: TileColor;
+  claimStatus?: ClaimStatus;
   createdAt: string;
   activatedAt?: string;
   lastScannedAt?: string;
@@ -94,7 +157,7 @@ export interface Receipt {
   saleId: string;
   cartelCode: string;
   status: ReceiptStatus;
-  expiresAt: string; // 3 minutos desde el cobro
+  expiresAt: string;
   businessName: string;
   items: SaleItem[];
   total: number;
@@ -110,14 +173,14 @@ export type ClubRuleType = 'per_amount' | 'per_visit';
 export interface ClubReward {
   id: string;
   label: string;
-  target: number; // Puntos o visitas requeridas
+  target: number;
 }
 
 export interface ClubConfig {
   name: string;
   rule: {
     type: ClubRuleType;
-    value: number; // Ej: 1 punto cada $1000, o 1 sello por visita
+    value: number;
   };
   rewards: ClubReward[];
   active: boolean;
@@ -126,10 +189,12 @@ export interface ClubConfig {
 export interface ClubMember {
   id: string;
   name?: string;
-  contact: string; // Teléfono celular o correo
+  contact: string;
   points: number;
+  stamps?: number;
+  passUrl?: string;
   joinedAt: string;
-  consent: true; // Consentimiento explícito obligatorio
+  consent: true;
 }
 
 export interface BusinessProfile {
@@ -154,6 +219,9 @@ export interface PublicHub {
     name: string;
     role: CartelRole;
     status: CartelStatus;
+    mode?: HubMode;
+    tileColor?: TileColor;
+    claimStatus?: ClaimStatus;
   };
   reviewUrl: string;
   blocks: HubBlockConfig[];
@@ -163,6 +231,7 @@ export interface PublicHub {
     member?: ClubMember | null;
   } | null;
   config: HubConfig;
+  smartHubConfig?: SmartHubConfig;
 }
 
 export interface User {
@@ -200,5 +269,7 @@ export interface CartelBatch {
     pin: string;
     status: CartelStatus;
     shortUrl: string;
+    tileColor?: TileColor;
+    claimStatus?: ClaimStatus;
   }>;
 }

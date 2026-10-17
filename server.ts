@@ -3,7 +3,6 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import dotenv from 'dotenv';
-import { GoogleGenAI } from '@google/genai';
 
 dotenv.config();
 
@@ -12,15 +11,6 @@ const __dirname = path.dirname(__filename);
 
 const PORT = parseInt(process.env.PORT || '3000', 10);
 const DIST_DIR = path.resolve(__dirname, 'dist');
-
-let ai: GoogleGenAI | null = null;
-if (process.env.GEMINI_API_KEY) {
-  try {
-    ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-  } catch (err) {
-    console.warn('GoogleGenAI init warning:', err);
-  }
-}
 
 const MIME_TYPES: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
@@ -67,45 +57,138 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  // 2. Endpoint /api/chat
-  if (pathname === '/api/chat' && req.method === 'POST') {
+  // 2. Enrutamiento en el borde /r/:code (Simula el mismo flujo del Worker)
+  if (pathname.startsWith('/r/') && req.method === 'GET') {
+    const rawCode = pathname.replace('/r/', '').split('/')[0]?.trim().toUpperCase();
+    if (!rawCode) {
+      res.writeHead(302, { Location: '/' });
+      res.end();
+      return;
+    }
+
+    if (rawCode === 'DEMO01' || rawCode === 'VIRGEN01') {
+      res.writeHead(302, { Location: `/activar/${rawCode}` });
+      res.end();
+      return;
+    }
+
+    if (rawCode === 'DIRECT01') {
+      res.writeHead(302, { Location: 'https://maps.google.com' });
+      res.end();
+      return;
+    }
+
+    res.writeHead(302, { Location: `/hub/${rawCode}` });
+    res.end();
+    return;
+  }
+
+  // 3. Endpoint de Apple Wallet & Google Wallet (POST /api/wallet/pass y /api/wallet/create)
+  if (
+    (pathname === '/api/wallet/pass' || pathname === '/api/wallet/create') &&
+    req.method === 'POST'
+  ) {
     try {
       const raw = await readBody(req);
-      const data = raw ? JSON.parse(raw) : {};
-      const { message, context } = data;
+      const body = raw ? JSON.parse(raw) : {};
+      const businessName = body.businessName || 'Café & Panadería La Esquina';
+      const brandColor = body.brandColor || '#3A3FE0';
+      const stamps = typeof body.stamps === 'number' ? body.stamps : 4;
+      const stampsRequired = typeof body.stampsRequired === 'number' ? body.stampsRequired : 5;
+      const rewardText = body.rewardText || '10% OFF en tu próxima compra';
+      const code = (body.code || 'CAJA01').toUpperCase();
+      const qrUrl = body.qrUrl || `${url.origin}/r/${code}`;
 
-      if (!message) {
-        res.writeHead(400, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: 'El mensaje es requerido.' }));
-        return;
-      }
-
-      if (ai) {
-        const systemInstruction = `Sos el copiloto oficial de Inteligencia Artificial de Toque (toque.ar), la plataforma líder para carteles inteligentes con tecnología dual NFC y Códigos QR dinámicos para comercios físicos. Responde de forma cálida, concisa, profesional y práctica en español rioplatense o neutro. Contexto: ${JSON.stringify(context || {})}`;
-        const chatResponse = await ai.models.generateContent({
-          model: 'gemini-2.5-flash',
-          contents: message,
-          config: { systemInstruction, temperature: 0.7 },
+      if (process.env.WALLETWALLET_API_KEY) {
+        const walletRes = await fetch('https://walletwallet.dev/api/v1/pass', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${process.env.WALLETWALLET_API_KEY}`,
+          },
+          body: JSON.stringify({
+            merchantName: businessName,
+            backgroundColor: brandColor,
+            labelColor: '#FFFFFF',
+            foregroundColor: '#FFFFFF',
+            headerField: {
+              key: 'stamps',
+              label: 'SELLOS',
+              value: `${stamps}/${stampsRequired}`,
+            },
+            primaryField: {
+              key: 'member',
+              label: 'BENEFICIO ACTIVO',
+              value: rewardText,
+            },
+            secondaryField: {
+              key: 'customer',
+              label: 'SOCIO',
+              value: body.customerName || 'Cliente Toque',
+            },
+            barcode: {
+              format: 'PKBarcodeFormatQR',
+              message: qrUrl,
+              messageEncoding: 'iso-8859-1',
+              altText: `TOQUE-${code}`,
+            },
+          }),
         });
-        const reply = chatResponse.text || 'Entendido. ¿En qué más puedo ayudarte hoy en Toque?';
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ reply }));
-        return;
-      } else {
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({
-          reply: '¡Hola! Soy el copiloto de Toque. Puedo ayudarte con cualquier consulta sobre tus carteles inteligentes, códigos QR o fichas de reseñas en Google.',
-        }));
-        return;
+
+        if (walletRes.ok) {
+          const passData: any = await walletRes.json();
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(
+            JSON.stringify({
+              success: true,
+              provider: 'walletwallet.dev',
+              appleWalletUrl: passData.applePassUrl || passData.pkpassUrl,
+              googleWalletUrl: passData.googlePassUrl || passData.saveUrl,
+              validationCode: `TQ-${code}-${stamps}S`,
+            })
+          );
+          return;
+        }
       }
+
+      // Fallback limpio a tarjeta web PWA instalable
+      const passId = `pass-${code.toLowerCase()}-${Date.now().toString(36)}`;
+      const queryParams = new URLSearchParams({
+        biz: businessName,
+        stamps: `${stamps}/${stampsRequired}`,
+        reward: rewardText,
+        code,
+        color: brandColor,
+      }).toString();
+
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(
+        JSON.stringify({
+          success: true,
+          provider: 'toque-pwa-wallet',
+          passId,
+          validationCode: `TQ-${code}-${stamps}${stampsRequired}`,
+          appleWalletUrl: `${url.origin}/hub/${code}?wallet=apple&${queryParams}`,
+          googleWalletUrl: `${url.origin}/hub/${code}?wallet=google&${queryParams}`,
+          qrUrl,
+        })
+      );
+      return;
     } catch (err: any) {
       res.writeHead(500, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ error: err?.message || 'Error interno' }));
+      res.end(
+        JSON.stringify({
+          error: {
+            code: 'WALLET_PASS_ERROR',
+            message: err?.message || 'Error al generar pase de billetera',
+          },
+        })
+      );
       return;
     }
   }
 
-  // 3. Endpoint /api/telemetry/scan
+  // 4. Endpoint /api/telemetry/scan
   if (pathname === '/api/telemetry/scan' && req.method === 'POST') {
     try {
       const raw = await readBody(req);
@@ -121,12 +204,11 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
-  // 4. Servir archivos estáticos de dist/
+  // 5. Servir archivos estáticos de dist/
   if (req.method === 'GET' || req.method === 'HEAD') {
     const cleanPath = path.normalize(pathname).replace(/^(\.\.[\/\\])+/, '');
     const filePath = path.join(DIST_DIR, cleanPath);
 
-    // Comprobar si el archivo físico existe en dist/
     if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
       const ext = path.extname(filePath).toLowerCase();
       const contentType = MIME_TYPES[ext] || 'application/octet-stream';
@@ -142,7 +224,7 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
-    // 5. Fallback para SPA (Single Page Application - React Router)
+    // 6. Fallback para SPA (Single Page Application - React Router)
     const indexPath = path.join(DIST_DIR, 'index.html');
     if (fs.existsSync(indexPath)) {
       res.writeHead(200, {

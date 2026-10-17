@@ -1,6 +1,7 @@
 @import "tailwindcss";
 @import "./styles/tokens.css";
 @import "./styles/materials.css";
+@import "./styles/hero-landing.css";
 
 :root {
   /* 5 Colores Canónicos de Toque */

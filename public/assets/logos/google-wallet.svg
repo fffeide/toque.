@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 200" fill="none">
+  <defs>
+    <clipPath id="gwClip">
+      <rect x="16" y="16" width="208" height="168" rx="38" />
+    </clipPath>
+  </defs>
+  <g clip-path="url(#gwClip)">
+    <!-- Green top card -->
+    <rect x="16" y="16" width="208" height="90" rx="38" fill="#2DA94F" />
+    <!-- Yellow middle card -->
+    <rect x="16" y="45" width="208" height="90" rx="38" fill="#FABC05" />
+    <!-- Red lower card -->
+    <rect x="16" y="73" width="208" height="90" rx="36" fill="#EA4335" />
+    <!-- Blue front pocket with asymmetric wave -->
+    <path
+      d="M16 92L144 122C164 126.5 184 121 200 109L224 91V184H16V92Z"
+      fill="#3880F6"
+    />
+  </g>
+</svg>

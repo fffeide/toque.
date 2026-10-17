@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 240" fill="none">
+  <defs>
+    <linearGradient id="awBg" x1="120" y1="12" x2="120" y2="228" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#1E1E1E" />
+      <stop offset="100%" stop-color="#0A0A0A" />
+    </linearGradient>
+    <linearGradient id="awWalletBack" x1="120" y1="56" x2="120" y2="188" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#D6D3CB" />
+      <stop offset="100%" stop-color="#ABA89F" />
+    </linearGradient>
+    <linearGradient id="awPocket" x1="120" y1="118" x2="120" y2="188" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#DDDAD2" />
+      <stop offset="100%" stop-color="#9E9B93" />
+    </linearGradient>
+  </defs>
+  <!-- Black squircle background -->
+  <rect x="12" y="12" width="216" height="216" rx="50" fill="url(#awBg)" />
+  <!-- Wallet back housing -->
+  <rect x="38" y="58" width="164" height="128" rx="22" fill="url(#awWalletBack)" />
+  <!-- Inner recessed slot -->
+  <rect x="48" y="68" width="144" height="70" rx="14" fill="#8E8B84" opacity="0.45" />
+  <!-- Blue card -->
+  <rect x="48" y="69" width="144" height="52" rx="12" fill="#0095FF" />
+  <!-- Yellow card -->
+  <rect x="48" y="85" width="144" height="52" rx="12" fill="#FFC107" />
+  <!-- Red/Orange card -->
+  <rect x="48" y="101" width="144" height="52" rx="12" fill="#FF5636" />
+  <!-- Front wallet pocket with center thumb notch -->
+  <path
+    d="M38 120H78C87 120 93.5 124.5 99 131.5C104.5 138.5 111.5 143 120 143C128.5 143 135.5 138.5 141 131.5C146.5 124.5 153 120 162 120H202V164C202 176.15 192.15 186 180 186H60C47.85 186 38 176.15 38 164V120Z"
+    fill="url(#awPocket)"
+  />
+  <path
+    d="M38 120H78C87 120 93.5 124.5 99 131.5C104.5 138.5 111.5 143 120 143C128.5 143 135.5 138.5 141 131.5C146.5 124.5 153 120 162 120H202"
+    stroke="#ECEAE4"
+    stroke-width="1.5"
+  />
+</svg>
