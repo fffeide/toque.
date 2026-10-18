@@ -1,6 +1,6 @@
 {
-  "summary": "Plan de implementación para el nuevo módulo Recibo de Toque: arquitectura sin backend/Firebase, capa de datos desacoplada (ToqueApi, mockApi en memoria y httpApi), diseño editorial sólido con paleta Papel/Tinta/Ultramar/Estrella/Coral, pantalla de Caja para tablets con simulación MP, Hub público del cliente con comprobante no fiscal descargable, club de fidelidad y botón neutro de reseñas de Google, y panel de negocio completo con editor accesible de bloques.",
-  "updatedAt": "2026-10-17T04:09:13.024820044Z",
+  "summary": "Plan de implementación actualizado con la arquitectura de sincronización en tiempo real entre Caja y Hub, integración segura de WalletWallet en backend, sistema RLS por roles con Firestore y datos 100% reales, diseño Matte Dark Flat con contraste WCAG AA, gestión de Equipo, eliminación de Conexiones y Lotes de Producción, y Microsoft Clarity (ywqriqpjun).",
+  "updatedAt": "2026-10-18T02:39:04.782152169Z",
   "requestFeedback": true,
   "userFacing": true
 }

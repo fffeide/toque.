@@ -1,69 +1,151 @@
 {
   "entities": {
+    "business": {
+      "title": "Business",
+      "description": "Comercio registrado en Toque con configuración de Hub, Club y estado de pasarela.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 64 },
+        "name": { "type": "string", "maxLength": 100 },
+        "ownerName": { "type": "string", "maxLength": 100 },
+        "email": { "type": "string", "format": "email", "maxLength": 120 },
+        "ownerUid": { "type": "string", "maxLength": 128 },
+        "reviewUrl": { "type": "string", "maxLength": 300 },
+        "createdAt": { "type": "string", "maxLength": 64 },
+        "scansCount": { "type": "number" },
+        "reviewClicksCount": { "type": "number" }
+      },
+      "required": ["id", "name", "email", "createdAt"]
+    },
     "cartel": {
       "title": "Cartel",
-      "description": "Cartel físico con NFC y código QR dinámico vinculado a reseñas de Google.",
+      "description": "Cartel físico inteligente con chip NFC y código QR vinculado a Caja y Hub.",
       "type": "object",
       "properties": {
-        "id": { "type": "string" },
-        "name": { "type": "string", "maxLength": 100 },
-        "location": { "type": "string", "maxLength": 100 },
-        "destinationUrl": { "type": "string", "maxLength": 500 },
-        "shortCode": { "type": "string", "maxLength": 32 },
-        "status": { "type": "string", "enum": ["active", "silent", "archived", "trash"] },
-        "tenantId": { "type": "string", "maxLength": 64 },
+        "id": { "type": "string", "maxLength": 64 },
+        "code": { "type": "string", "maxLength": 32 },
+        "pin": { "type": "string", "maxLength": 16 },
+        "businessId": { "type": "string", "maxLength": 64 },
+        "name": { "type": "string", "maxLength": 80 },
+        "role": { "type": "string", "enum": ["caja", "resena"] },
+        "status": { "type": "string", "enum": ["sin_activar", "active", "inactive", "trash"] },
+        "reviewUrl": { "type": "string", "maxLength": 300 },
+        "mode": { "type": "string", "enum": ["direct", "hub", "direct_review", "smart_hub"] },
         "scansCount": { "type": "number" },
-        "lastScannedAt": { "type": "string" },
-        "createdAt": { "type": "string" },
-        "updatedAt": { "type": "string" }
+        "reviewClicksCount": { "type": "number" },
+        "activeReceiptId": { "type": "string", "maxLength": 64 },
+        "activeReceiptExpiresAt": { "type": "string", "maxLength": 64 },
+        "createdAt": { "type": "string", "maxLength": 64 },
+        "activatedAt": { "type": "string", "maxLength": 64 },
+        "lastScannedAt": { "type": "string", "maxLength": 64 }
       },
-      "required": ["name", "destinationUrl", "shortCode", "status"]
+      "required": ["id", "code", "name", "role", "status", "createdAt"]
     },
-    "scan": {
-      "title": "Scan",
-      "description": "Registro de escaneo o contacto NFC en cartel físico.",
+    "sale": {
+      "title": "Sale",
+      "description": "Cobro emitido en la terminal de Caja de un comercio.",
       "type": "object",
       "properties": {
-        "id": { "type": "string" },
-        "cartelId": { "type": "string" },
-        "shortCode": { "type": "string" },
-        "channel": { "type": "string", "enum": ["nfc", "qr"] },
-        "userAgentDevice": { "type": "string" },
-        "browser": { "type": "string" },
-        "language": { "type": "string" },
-        "platform": { "type": "string" },
-        "timezone": { "type": "string" },
-        "touchSupported": { "type": "boolean" },
-        "timestamp": { "type": "string" }
+        "id": { "type": "string", "maxLength": 64 },
+        "businessId": { "type": "string", "maxLength": 64 },
+        "cartelId": { "type": "string", "maxLength": 64 },
+        "cartelCode": { "type": "string", "maxLength": 32 },
+        "cartelName": { "type": "string", "maxLength": 80 },
+        "receiptId": { "type": "string", "maxLength": 64 },
+        "amount": { "type": "number" },
+        "currency": { "type": "string", "enum": ["ARS"] },
+        "method": { "type": "string", "enum": ["mp_qr", "cash", "card_manual"] },
+        "status": { "type": "string", "enum": ["pending", "paid", "cancelled", "expired"] },
+        "createdAt": { "type": "string", "maxLength": 64 },
+        "paidAt": { "type": "string", "maxLength": 64 },
+        "cashierName": { "type": "string", "maxLength": 80 },
+        "cashierEmail": { "type": "string", "maxLength": 120 }
       },
-      "required": ["shortCode", "timestamp"]
+      "required": ["id", "businessId", "cartelId", "amount", "method", "status", "createdAt"]
     },
-    "tenant": {
-      "title": "Tenant",
-      "description": "Negocio o comercio suscriptor de Toque.",
+    "receipt": {
+      "title": "Receipt",
+      "description": "Comprobante digital de compra sincronizado en tiempo real entre Caja y Hub.",
       "type": "object",
       "properties": {
-        "id": { "type": "string" },
-        "name": { "type": "string", "maxLength": 100 },
-        "slug": { "type": "string", "maxLength": 60 },
-        "contactEmail": { "type": "string", "format": "email" },
-        "createdAt": { "type": "string" }
+        "id": { "type": "string", "maxLength": 64 },
+        "saleId": { "type": "string", "maxLength": 64 },
+        "businessId": { "type": "string", "maxLength": 64 },
+        "cartelCode": { "type": "string", "maxLength": 32 },
+        "status": { "type": "string", "enum": ["ready", "claimed", "expired", "cancelled"] },
+        "expiresAt": { "type": "string", "maxLength": 64 },
+        "businessName": { "type": "string", "maxLength": 100 },
+        "total": { "type": "number" },
+        "currency": { "type": "string", "enum": ["ARS"] },
+        "method": { "type": "string", "enum": ["mp_qr", "cash", "card_manual"] },
+        "createdAt": { "type": "string", "maxLength": 64 },
+        "claimedAt": { "type": "string", "maxLength": 64 }
       },
-      "required": ["name"]
+      "required": ["id", "saleId", "businessId", "cartelCode", "status", "total", "createdAt"]
+    },
+    "member": {
+      "title": "ClubMember",
+      "description": "Socio registrado en el Club de Fidelidad con pase WalletWallet.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 64 },
+        "businessId": { "type": "string", "maxLength": 64 },
+        "name": { "type": "string", "maxLength": 80 },
+        "contact": { "type": "string", "maxLength": 100 },
+        "points": { "type": "number" },
+        "stamps": { "type": "number" },
+        "passId": { "type": "string", "maxLength": 80 },
+        "passUrl": { "type": "string", "maxLength": 500 },
+        "appleWalletUrl": { "type": "string", "maxLength": 500 },
+        "googleWalletUrl": { "type": "string", "maxLength": 500 },
+        "joinedAt": { "type": "string", "maxLength": 64 },
+        "consent": { "type": "boolean" }
+      },
+      "required": ["id", "contact", "points", "joinedAt", "consent"]
+    },
+    "teamMember": {
+      "title": "TeamMember",
+      "description": "Colaborador del comercio con rol y permisos RLS asignados.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 64 },
+        "businessId": { "type": "string", "maxLength": 64 },
+        "name": { "type": "string", "maxLength": 80 },
+        "email": { "type": "string", "format": "email", "maxLength": 120 },
+        "role": { "type": "string", "enum": ["owner", "manager", "cashier"] },
+        "assignedCartelId": { "type": "string", "maxLength": 64 },
+        "assignedCartelCode": { "type": "string", "maxLength": 32 },
+        "status": { "type": "string", "enum": ["active", "revoked"] },
+        "addedAt": { "type": "string", "maxLength": 64 },
+        "addedByEmail": { "type": "string", "maxLength": 120 }
+      },
+      "required": ["id", "businessId", "name", "email", "role", "status", "addedAt"]
     }
   },
   "firestore": {
+    "/businesses/{businessId}": {
+      "schema": "business",
+      "description": "Colección de comercios registrados y su configuración de Hub y Club."
+    },
     "/carteles/{cartelId}": {
       "schema": "cartel",
-      "description": "Colección de carteles físicos registrados por el comercio."
+      "description": "Colección de carteles físicos inteligentes NFC/QR."
     },
-    "/scans/{scanId}": {
-      "schema": "scan",
-      "description": "Colección de visitas y telemetría de escaneos."
+    "/sales/{saleId}": {
+      "schema": "sale",
+      "description": "Colección de cobros emitidos en mostrador."
     },
-    "/tenants/{tenantId}": {
-      "schema": "tenant",
-      "description": "Colección de datos de negocios y comercios."
+    "/receipts/{receiptId}": {
+      "schema": "receipt",
+      "description": "Colección de comprobantes digitales sincronizados en tiempo real con el Hub."
+    },
+    "/members/{memberId}": {
+      "schema": "member",
+      "description": "Colección de socios del Club de Fidelidad y pases WalletWallet."
+    },
+    "/team/{teamId}": {
+      "schema": "teamMember",
+      "description": "Colección de colaboradores y roles RLS por comercio."
     }
   }
 }

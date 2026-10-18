@@ -1,329 +1,253 @@
 import React, { useState, useEffect } from 'react';
-import { api, ClubConfig, ClubMember, ClubReward } from '../../api';
+import { api, ClubConfig, ClubMember } from '../../api';
 import { Card } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
+import { Input } from '../../components/ui/Input';
 import { Skeleton } from '../../components/ui/Skeleton';
+import { EmptyState } from '../../components/ui/EmptyState';
 import { useToast } from '../../components/ui/Toast';
 import { formatDate } from '../../lib/formatters';
-import {
-  Award,
-  Plus,
-  Trash2,
-  Users,
-  Check,
-  Sparkles,
-  Save,
-} from 'lucide-react';
+import { Wallet, Award, Download, CheckCircle2, ExternalLink, Sparkles } from 'lucide-react';
 
 export const ClubView: React.FC = () => {
   const [config, setConfig] = useState<ClubConfig | null>(null);
   const [members, setMembers] = useState<ClubMember[]>([]);
+  const [walletConfigured, setWalletConfigured] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
-  const { success, error: toastError } = useToast();
-
-  // Formulario de nuevo premio
-  const [newRewardLabel, setNewRewardLabel] = useState('');
-  const [newRewardTarget, setNewRewardTarget] = useState('5');
-
-  const loadData = async () => {
-    setIsLoading(true);
-    try {
-      const [cfg, mems] = await Promise.all([
-        api.getClubConfig(),
-        api.listClubMembers(),
-      ]);
-      setConfig(cfg);
-      setMembers(mems);
-    } catch {
-      // Ignorar
-    } finally {
-      setIsLoading(false);
-    }
-  };
+  const [isTestingWallet, setIsTestingWallet] = useState(false);
+  const { showToast } = useToast();
 
   useEffect(() => {
-    loadData();
+    Promise.all([api.getClubConfig(), api.listClubMembers(), api.getWalletStatus()])
+      .then(([cfg, mems, walletSt]) => {
+        setConfig(cfg);
+        setMembers(mems);
+        setWalletConfigured(walletSt.configured);
+      })
+      .finally(() => setIsLoading(false));
   }, []);
 
-  const handleSaveConfig = async () => {
+  const handleSaveConfig = async (e: React.FormEvent) => {
+    e.preventDefault();
     if (!config) return;
     setIsSaving(true);
     try {
-      await api.updateClubConfig(config);
-      success('Programa de fidelidad guardado', 'La configuración del Club se actualizó.');
-    } catch (err) {
-      toastError('Error al guardar Club', err instanceof Error ? err.message : 'Probá de nuevo.');
+      const updated = await api.updateClubConfig(config);
+      setConfig(updated);
+      showToast('Configuración del Club guardada en Firestore', 'success');
+    } catch {
+      showToast('Error al guardar la configuración', 'error');
     } finally {
       setIsSaving(false);
     }
   };
 
-  const handleAddReward = (e: React.FormEvent) => {
-    e.preventDefault();
-    const target = parseInt(newRewardTarget, 10);
-    if (!newRewardLabel.trim() || isNaN(target) || target <= 0 || !config) return;
-
-    const newRew: ClubReward = {
-      id: `rew-${Date.now()}`,
-      label: newRewardLabel.trim(),
-      target,
-    };
-
-    setConfig({
-      ...config,
-      rewards: [...config.rewards, newRew],
-    });
-    setNewRewardLabel('');
-    setNewRewardTarget('5');
-  };
-
-  const handleRemoveReward = (id: string) => {
-    if (!config) return;
-    setConfig({
-      ...config,
-      rewards: config.rewards.filter(r => r.id !== id),
-    });
-  };
-
-  const handleDeleteMember = async (id: string) => {
-    if (!window.confirm('¿Eliminar a este socio del Club? Se borrarán sus puntos acumulados.')) return;
+  const handleTestWalletPass = async (member: ClubMember) => {
+    setIsTestingWallet(true);
     try {
-      await api.deleteClubMember(id);
-      success('Socio eliminado');
-      loadData();
+      const res = await api.createWalletPass({
+        memberId: member.id,
+        customerName: member.name || member.contact,
+        contact: member.contact,
+        points: member.points,
+      });
+      // Recargar miembros para reflejar el nuevo pase
+      const updatedMembers = await api.listClubMembers();
+      setMembers(updatedMembers);
+      showToast(`Pase WalletWallet emitido (${res.passId})`, 'success');
     } catch {
-      toastError('Error al borrar socio');
+      showToast('No se pudo emitir el pase Wallet', 'error');
+    } finally {
+      setIsTestingWallet(false);
+    }
+  };
+
+  const handleExportCsv = async () => {
+    try {
+      const csvContent = await api.exportClubMembersCsv();
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `miembros-club-toque-${new Date().toISOString().slice(0, 10)}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+      showToast('Archivo CSV descargado', 'success');
+    } catch {
+      showToast('Error al exportar CSV', 'error');
     }
   };
 
   if (isLoading || !config) {
     return (
-      <div className="space-y-6">
-        <Skeleton className="h-8 w-64 bg-white/10" />
-        <Skeleton className="h-44 w-full rounded-2xl bg-white/10" />
+      <div className="space-y-4">
+        <Skeleton className="h-10 w-56 bg-[#111113]" />
+        <Skeleton className="h-64 w-full bg-[#111113]" />
       </div>
     );
   }
 
   return (
-    <div className="space-y-8">
-      {/* Encabezado */}
+    <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="font-display font-bold text-2xl sm:text-3xl text-white">
-            Club
+          <span className="block text-[11px] uppercase tracking-wider text-[#a1a1aa] font-semibold mb-1">
+            FIDELIZACIÓN + PASES DIGITALES WALLETWALLET
+          </span>
+          <h1 className="text-2xl font-bold text-[#f1f1ee] tracking-tight">
+            Club del Negocio & Wallet
           </h1>
-          <p className="text-xs text-white/70 mt-0.5">
-            Fidelizá a tus clientes con sellos y beneficios digitales sin papel ni tarjetas físicas.
+          <p className="text-sm text-[#a1a1aa] mt-0.5">
+            Tus clientes suman puntos desde el recibo digital y guardan su tarjeta en Apple Wallet o Google Wallet.
           </p>
         </div>
 
-        <Button
-          variant="estrella"
-          size="touch"
-          onClick={handleSaveConfig}
-          disabled={isSaving}
-          icon={<Save className="w-4 h-4 text-[#0B1030]" />}
-        >
-          {isSaving ? 'Guardando…' : 'Guardar configuración'}
-        </Button>
+        <div className="flex items-center gap-2.5">
+          <div className="px-3.5 py-2 rounded-xl bg-[#111113] border border-[#242426] flex items-center gap-2 text-xs">
+            <Wallet className="w-4 h-4 text-[#34d399]" />
+            <span className="text-[#a1a1aa]">API WalletWallet:</span>
+            <span className="font-bold text-[#34d399]">
+              {walletConfigured ? 'Conectada (Proxy Seguro)' : 'Modo Local'}
+            </span>
+          </div>
+          {members.length > 0 && (
+            <Button variant="outline" size="sm" onClick={handleExportCsv}>
+              <Download className="w-3.5 h-3.5 mr-1.5" />
+              Exportar CSV ({members.length})
+            </Button>
+          )}
+        </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-        {/* Columna Izquierda: Reglas y Premios (lg:col-span-6) */}
-        <div className="lg:col-span-6 space-y-6">
-          <Card className="space-y-4">
-            <div className="flex items-center justify-between pb-2 border-b border-white/15">
-              <h2 className="font-display font-bold text-base text-white">
-                Programa y Regla de Acumulación
-              </h2>
-              <button
-                type="button"
-                onClick={() => setConfig({ ...config, active: !config.active })}
-                className={`text-xs px-3 py-1 rounded-full font-bold transition cursor-pointer border ${
-                  config.active
-                    ? 'bg-[#19C37D]/20 text-[#19C37D] border-[#19C37D]/40'
-                    : 'bg-white/10 text-white/60 border-white/15'
-                }`}
-              >
-                {config.active ? 'Club Activo' : 'Pausado'}
-              </button>
-            </div>
-
-            <div className="space-y-3 text-xs">
-              <div>
-                <label className="block text-white/80 font-semibold mb-1" htmlFor="clubTitle">
-                  Nombre del programa
-                </label>
-                <input
-                  id="clubTitle"
-                  type="text"
-                  value={config.name}
-                  onChange={(e) => setConfig({ ...config, name: e.target.value })}
-                  placeholder="Ej. Club La Esquina"
-                  className="w-full px-3 py-2 rounded-xl border border-white/20 bg-white/10 text-white placeholder-white/40 text-sm focus:bg-white/15 focus:outline-none"
-                />
-              </div>
-
-              <div>
-                <span className="block text-white/80 font-semibold mb-2">
-                  Forma de sumar puntos
-                </span>
-                <div className="grid grid-cols-2 gap-2.5">
-                  <button
-                    type="button"
-                    onClick={() => setConfig({
-                      ...config,
-                      rule: { type: 'per_visit', value: 1 },
-                    })}
-                    className={`p-3 rounded-xl border text-left cursor-pointer transition ${
-                      config.rule.type === 'per_visit'
-                        ? 'bg-white/15 border-white/30 text-white font-bold shadow-xs'
-                        : 'bg-white/[0.04] border-white/10 text-white/60 hover:bg-white/[0.08]'
-                    }`}
-                  >
-                    <span className="block text-xs text-white">1 Sello por visita</span>
-                    <span className="block text-[10px] font-normal text-white/60 mt-0.5">Al apoyar el celular</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setConfig({
-                      ...config,
-                      rule: { type: 'per_amount', value: 1000 },
-                    })}
-                    className={`p-3 rounded-xl border text-left cursor-pointer transition ${
-                      config.rule.type === 'per_amount'
-                        ? 'bg-white/15 border-white/30 text-white font-bold shadow-xs'
-                        : 'bg-white/[0.04] border-white/10 text-white/60 hover:bg-white/[0.08]'
-                    }`}
-                  >
-                    <span className="block text-xs text-white">Puntos por importe</span>
-                    <span className="block text-[10px] font-normal text-white/60 mt-0.5">1 punto cada $1.000</span>
-                  </button>
-                </div>
-              </div>
-            </div>
-          </Card>
-
-          {/* Premios y Metas */}
-          <Card className="space-y-4">
-            <h2 className="font-display font-bold text-base text-white">
-              Premios configurados
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="lg:col-span-1">
+          <Card>
+            <h2 className="text-base font-bold text-[#f1f1ee] mb-4 flex items-center gap-2">
+              <Award className="w-4 h-4 text-[#bec8ff]" />
+              <span>Reglas del Club</span>
             </h2>
-
-            <div className="space-y-2">
-              {config.rewards.map((rew) => (
-                <div
-                  key={rew.id}
-                  className="p-3 rounded-xl bg-white/[0.06] border border-white/10 flex items-center justify-between text-xs text-white"
-                >
-                  <div className="flex items-center gap-2.5">
-                    <div className="w-8 h-8 rounded-lg bg-white/10 border border-white/20 flex items-center justify-center font-bold text-[#FFC21A]">
-                      {rew.target}
-                    </div>
-                    <div>
-                      <p className="font-semibold text-white">{rew.label}</p>
-                      <p className="text-[10px] text-white/60">
-                        Requiere {rew.target} {config.rule.type === 'per_visit' ? 'sellos' : 'puntos'}
-                      </p>
-                    </div>
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={() => handleRemoveReward(rew.id)}
-                    className="text-[#FF6B6B] p-1.5 hover:bg-white/10 rounded-lg transition"
-                    title="Eliminar premio"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              ))}
-            </div>
-
-            <form onSubmit={handleAddReward} className="pt-2 border-t border-white/15 space-y-2 text-xs">
-              <span className="font-semibold text-white block">Agregar nuevo beneficio</span>
-              <div className="flex gap-2">
+            <form onSubmit={handleSaveConfig} className="space-y-4">
+              <div className="flex items-center justify-between pb-3 border-b border-[#242426]">
+                <span className="text-sm font-medium text-[#f1f1ee]">Club Activo en el Hub</span>
                 <input
-                  type="text"
-                  required
-                  value={newRewardLabel}
-                  onChange={(e) => setNewRewardLabel(e.target.value)}
-                  placeholder="Premio (ej. Porción de torta)"
-                  className="flex-1 px-3 py-2 rounded-xl border border-white/20 bg-white/10 text-white placeholder-white/40 focus:bg-white/15 focus:outline-none"
+                  type="checkbox"
+                  checked={config.enabled}
+                  onChange={(e) => setConfig({ ...config, enabled: e.target.checked })}
+                  className="h-4 w-4 rounded border-[#28282a] text-[#bec8ff] focus:ring-[#bec8ff]"
                 />
-                <input
-                  type="number"
-                  required
-                  min={1}
-                  value={newRewardTarget}
-                  onChange={(e) => setNewRewardTarget(e.target.value)}
-                  placeholder="Sellos"
-                  className="w-20 px-3 py-2 rounded-xl border border-white/20 bg-white/10 text-white text-center focus:bg-white/15 focus:outline-none"
-                />
-                <Button type="submit" variant="secundario" size="sm" icon={<Plus className="w-3.5 h-3.5" />} className="bg-white/10 text-white border-white/20 hover:bg-white/15">
-                  Sumar
-                </Button>
               </div>
+
+              <Input
+                label="Nombre de tu programa"
+                value={config.clubName}
+                onChange={(e) => setConfig({ ...config, clubName: e.target.value })}
+                placeholder="Ej: Club Café La Esquina"
+                required
+              />
+
+              <Input
+                label="Beneficio de bienvenida / meta"
+                value={config.welcomeBenefitText}
+                onChange={(e) => setConfig({ ...config, welcomeBenefitText: e.target.value })}
+                placeholder="Ej: 10% OFF en tu próxima visita"
+                required
+              />
+
+              <Input
+                label="Puntos otorgados por cada visita/compra"
+                type="number"
+                min={1}
+                max={100}
+                value={config.pointsPerVisit}
+                onChange={(e) =>
+                  setConfig({ ...config, pointsPerVisit: Number(e.target.value) || 1 })
+                }
+                required
+              />
+
+              <Button type="submit" fullWidth isLoading={isSaving}>
+                Guardar reglas del Club
+              </Button>
             </form>
           </Card>
         </div>
 
-        {/* Columna Derecha: Lista de Socios Registrados (lg:col-span-6) */}
-        <div className="lg:col-span-6 space-y-4">
-          <Card className="space-y-4">
-            <div className="flex items-center justify-between pb-2 border-b border-white/15">
-              <div className="flex items-center gap-2">
-                <Users className="w-4 h-4 text-[#FFC21A]" />
-                <h2 className="font-display font-bold text-base text-white">
-                  Socios del Club ({members.length})
-                </h2>
-              </div>
-              <span className="text-[10px] text-white/60">
-                Consentimiento explícito verificado
+        <div className="lg:col-span-2">
+          <Card padding="none" className="overflow-hidden">
+            <div className="p-4 border-b border-[#242426] bg-[#141416] flex items-center justify-between">
+              <h2 className="text-sm font-bold text-[#f1f1ee]">
+                Clientes adheridos ({members.length})
+              </h2>
+              <span className="text-xs text-[#a1a1aa]">
+                Datos reales con consentimiento explícito
               </span>
             </div>
 
             {members.length === 0 ? (
-              <div className="py-12 text-center text-xs text-white/60 space-y-2">
-                <p>Todavía no tenés socios registrados.</p>
-                <p className="text-[11px] text-white/50">
-                  Cuando tus clientes escaneen el cartel y acepten sumarse al Club, aparecerán acá.
-                </p>
+              <div className="p-6">
+                <EmptyState
+                  icon="🪪"
+                  title="Todavía no hay socios registrados"
+                  description="Cuando un cliente deje su WhatsApp o email en el Hub público de tu cartel, aparecerá en esta tabla con su pase Wallet."
+                />
               </div>
             ) : (
-              <div className="space-y-2 max-h-[500px] overflow-y-auto pr-1">
-                {members.map((member) => (
-                  <div
-                    key={member.id}
-                    className="p-3 rounded-xl bg-white/[0.06] border border-white/10 flex items-center justify-between text-xs text-white"
-                  >
-                    <div>
-                      <p className="font-semibold text-white">
-                        {member.name || 'Cliente sin nombre'}
-                      </p>
-                      <p className="text-[11px] font-mono text-white/60">
-                        {member.contact} · {formatDate(member.joinedAt)}
-                      </p>
-                    </div>
-
-                    <div className="flex items-center gap-3">
-                      <span className="font-display font-bold text-sm text-[#FFC21A] bg-white/10 px-2.5 py-1 rounded-lg border border-white/20 tabular-nums">
-                        {member.points} pts
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => handleDeleteMember(member.id)}
-                        className="text-[#FF6B6B] p-1.5 hover:bg-white/10 rounded-lg transition"
-                        title="Eliminar socio"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  </div>
-                ))}
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse">
+                  <thead>
+                    <tr className="border-b border-[#242426] bg-[#111113] text-[11px] font-semibold text-[#a1a1aa] uppercase tracking-wider">
+                      <th className="py-3 px-4">Cliente / Contacto</th>
+                      <th className="py-3 px-4">Puntos</th>
+                      <th className="py-3 px-4">Alta</th>
+                      <th className="py-3 px-4 text-right">Pase WalletWallet</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-[#242426] text-sm">
+                    {members.map((m) => (
+                      <tr key={m.id} className="hover:bg-[#18181b]/60">
+                        <td className="py-3.5 px-4">
+                          <div className="font-bold text-[#f1f1ee]">
+                            {m.name || 'Cliente Toque'}
+                          </div>
+                          <div className="text-xs text-[#a1a1aa] font-mono">{m.contact}</div>
+                        </td>
+                        <td className="py-3.5 px-4">
+                          <span className="inline-flex items-center px-2.5 py-0.5 rounded-lg text-xs font-bold bg-[#bec8ff]/15 text-[#bec8ff] border border-[#bec8ff]/30">
+                            {m.points} pts
+                          </span>
+                        </td>
+                        <td className="py-3.5 px-4 text-xs text-[#a1a1aa]">
+                          {formatDate(m.joinedAt)}
+                        </td>
+                        <td className="py-3.5 px-4 text-right">
+                          {m.walletPassUrl ? (
+                            <a
+                              href={m.walletPassUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center gap-1 text-xs font-bold text-[#34d399] hover:underline"
+                            >
+                              <CheckCircle2 className="w-3.5 h-3.5" />
+                              <span>Pase activo</span>
+                              <ExternalLink className="w-3 h-3" />
+                            </a>
+                          ) : (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              isLoading={isTestingWallet}
+                              onClick={() => handleTestWalletPass(m)}
+                            >
+                              <Sparkles className="w-3.5 h-3.5 mr-1 text-[#bec8ff]" />
+                              Emitir Pase Wallet
+                            </Button>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             )}
           </Card>

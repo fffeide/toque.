@@ -368,7 +368,9 @@ export const LandingView: React.FC = () => {
 
             {/* Headline: Two lines in BubbledotICG-FinePos */}
             <h1 className="headline anim">
-              <span className="headline-line line-1">Tu cartel físico,</span>
+              <span className="headline-line line-1" style={{ color: '#000000' }}>
+                Tu cartel físico,
+              </span>
               <span className="headline-line line-2">con datos en cada toque</span>
             </h1>
 

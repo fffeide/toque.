@@ -7,14 +7,9 @@ import { useToast } from '../../components/ui/Toast';
 import {
   ArrowUp,
   ArrowDown,
-  Eye,
-  EyeOff,
   Save,
-  Palette,
   Share2,
   MapPin,
-  Clock,
-  Phone,
   Receipt,
   Star,
   Award,
@@ -89,8 +84,8 @@ export const HubEditorView: React.FC = () => {
   if (isLoading || !config) {
     return (
       <div className="space-y-6">
-        <Skeleton className="h-8 w-64 bg-white/10" />
-        <Skeleton className="h-96 w-full rounded-2xl bg-white/10" />
+        <Skeleton className="h-8 w-64 bg-[#111113]" />
+        <Skeleton className="h-96 w-full rounded-2xl bg-[#111113]" />
       </div>
     );
   }
@@ -100,20 +95,23 @@ export const HubEditorView: React.FC = () => {
       {/* Encabezado */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="font-display font-bold text-2xl sm:text-3xl text-white">
-            Hub
+          <span className="block text-[11px] uppercase tracking-wider text-[#9c9c98] font-semibold mb-1">
+            EXPERIENCIA DEL CLIENTE
+          </span>
+          <h1 className="font-bold text-2xl sm:text-3xl text-[#f1f1ee] tracking-tight">
+            Canales y Hub
           </h1>
-          <p className="text-xs text-white/70 mt-0.5">
-            Personalizá el orden de los bloques, redes, productos y color de tu cartel.
+          <p className="text-xs text-[#9c9c98] mt-0.5">
+            Personalizá el orden de los bloques, redes y datos visibles en tu cartel.
           </p>
         </div>
 
         <Button
-          variant="estrella"
+          variant="ultramar"
           size="touch"
           onClick={handleSave}
           disabled={isSaving}
-          icon={<Save className="w-4 h-4 text-[#0B1030]" />}
+          icon={<Save className="w-4 h-4 text-[#0c0c0c]" />}
         >
           {isSaving ? 'Guardando…' : 'Guardar cambios'}
         </Button>
@@ -125,10 +123,10 @@ export const HubEditorView: React.FC = () => {
           {/* Orden y Visibilidad de Bloques (Accesible con teclado) */}
           <Card className="space-y-4">
             <div>
-              <h2 className="font-display font-bold text-base text-white">
+              <h2 className="font-bold text-base text-[#f1f1ee] tracking-tight">
                 Bloques y Orden en Pantalla
               </h2>
-              <p className="text-xs text-white/70 mt-0.5">
+              <p className="text-xs text-[#9c9c98] mt-0.5">
                 Usá las flechas arriba y abajo para cambiar el orden en que tus clientes ven el contenido.
               </p>
             </div>
@@ -143,30 +141,29 @@ export const HubEditorView: React.FC = () => {
                 return (
                   <div
                     key={block.key}
-                    className={`p-3.5 rounded-2xl border flex items-center justify-between gap-3 transition ${
+                    className={`p-3.5 rounded-2xl border flex items-center justify-between gap-3 transition-colors ${
                       block.enabled
-                        ? 'bg-white/[0.08] border-white/20 shadow-xs text-white'
-                        : 'bg-white/[0.02] border-dashed border-white/10 opacity-50 text-white/60'
+                        ? 'bg-[#18181b] border-[#28282a] text-[#f1f1ee]'
+                        : 'bg-[#0c0c0c] border-dashed border-[#242426] opacity-60 text-[#9c9c98]'
                     }`}
                   >
                     <div className="flex items-center gap-3 min-w-0">
-                      <div className="w-9 h-9 rounded-xl bg-white/10 border border-white/15 flex items-center justify-center shrink-0">
-                        <Icon className="w-4 h-4 text-[#FFC21A]" />
+                      <div className="w-9 h-9 rounded-xl bg-[#111113] border border-[#242426] flex items-center justify-center shrink-0">
+                        <Icon className="w-4 h-4 text-[#bec8ff]" />
                       </div>
                       <div className="min-w-0">
-                        <p className="font-semibold text-xs text-white truncate">{info.title}</p>
-                        <p className="text-[10px] text-white/60 truncate">{info.desc}</p>
+                        <p className="font-semibold text-xs text-[#f1f1ee] truncate">{info.title}</p>
+                        <p className="text-[10px] text-[#9c9c98] truncate">{info.desc}</p>
                       </div>
                     </div>
 
                     <div className="flex items-center gap-1.5 shrink-0">
-                      {/* Botones de accesibilidad por teclado */}
                       <button
                         type="button"
                         disabled={isFirst}
                         onClick={() => handleMoveBlock(index, 'up')}
                         aria-label={`Subir bloque ${info.title}`}
-                        className="p-1.5 rounded-xl border border-white/15 hover:bg-white/10 text-white/70 disabled:opacity-30 cursor-pointer"
+                        className="p-1.5 rounded-xl border border-[#28282a] bg-[#111113] hover:bg-[#1f1f23] text-[#9c9c98] hover:text-[#f1f1ee] disabled:opacity-30 cursor-pointer"
                       >
                         <ArrowUp className="w-3.5 h-3.5" />
                       </button>
@@ -176,7 +173,7 @@ export const HubEditorView: React.FC = () => {
                         disabled={isLast}
                         onClick={() => handleMoveBlock(index, 'down')}
                         aria-label={`Bajar bloque ${info.title}`}
-                        className="p-1.5 rounded-xl border border-white/15 hover:bg-white/10 text-white/70 disabled:opacity-30 cursor-pointer"
+                        className="p-1.5 rounded-xl border border-[#28282a] bg-[#111113] hover:bg-[#1f1f23] text-[#9c9c98] hover:text-[#f1f1ee] disabled:opacity-30 cursor-pointer"
                       >
                         <ArrowDown className="w-3.5 h-3.5" />
                       </button>
@@ -184,10 +181,10 @@ export const HubEditorView: React.FC = () => {
                       <button
                         type="button"
                         onClick={() => handleToggleBlock(block.key)}
-                        className={`text-xs px-3 py-1 rounded-full font-bold transition cursor-pointer border ${
+                        className={`text-xs px-3 py-1 rounded-full font-bold transition-colors cursor-pointer border ${
                           block.enabled
-                            ? 'bg-[#19C37D]/20 text-[#19C37D] border-[#19C37D]/40'
-                            : 'bg-white/10 text-white/60 border-white/15'
+                            ? 'bg-[#2fb36a]/15 text-[#2fb36a] border-[#2fb36a]/30'
+                            : 'bg-[#111113] text-[#9c9c98] border-[#28282a]'
                         }`}
                       >
                         {block.enabled ? 'Visible' : 'Oculto'}
@@ -201,16 +198,16 @@ export const HubEditorView: React.FC = () => {
 
           {/* Redes Sociales */}
           <Card className="space-y-4">
-            <h2 className="font-display font-bold text-base text-white">
+            <h2 className="font-bold text-base text-[#f1f1ee] tracking-tight">
               Redes Sociales
             </h2>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
               <div>
-                <label className="block text-white/80 font-semibold mb-1" htmlFor="ig">
+                <label className="block text-[#9c9c98] font-semibold mb-1" htmlFor="ig">
                   Usuario de Instagram
                 </label>
-                <div className="flex items-center rounded-xl border border-white/20 bg-white/10 px-3 py-2 text-white">
-                  <span className="text-white/60 mr-1">@</span>
+                <div className="flex items-center rounded-xl border border-[#28282a] bg-[#18181b] px-3 py-2 text-[#f1f1ee] focus-within:border-[#bec8ff]">
+                  <span className="text-[#9c9c98] mr-1">@</span>
                   <input
                     id="ig"
                     type="text"
@@ -220,13 +217,13 @@ export const HubEditorView: React.FC = () => {
                       socials: { ...config.socials, instagram: e.target.value },
                     })}
                     placeholder="laesquina.cafe"
-                    className="w-full bg-transparent text-white placeholder-white/40 focus:outline-none"
+                    className="w-full bg-transparent text-[#f1f1ee] placeholder-[#686865] focus:outline-none"
                   />
                 </div>
               </div>
 
               <div>
-                <label className="block text-white/80 font-semibold mb-1" htmlFor="wsp">
+                <label className="block text-[#9c9c98] font-semibold mb-1" htmlFor="wsp">
                   WhatsApp de Contacto
                 </label>
                 <input
@@ -238,7 +235,7 @@ export const HubEditorView: React.FC = () => {
                     socials: { ...config.socials, whatsapp: e.target.value },
                   })}
                   placeholder="+54 9 11 4455-8899"
-                  className="w-full rounded-xl border border-white/20 bg-white/10 px-3 py-2 text-white placeholder-white/40 focus:bg-white/15 focus:outline-none"
+                  className="w-full rounded-xl border border-[#28282a] bg-[#18181b] px-3 py-2 text-[#f1f1ee] placeholder-[#686865] focus:border-[#bec8ff] focus:outline-none"
                 />
               </div>
             </div>
@@ -246,12 +243,12 @@ export const HubEditorView: React.FC = () => {
 
           {/* Información del Local */}
           <Card className="space-y-4">
-            <h2 className="font-display font-bold text-base text-white">
+            <h2 className="font-bold text-base text-[#f1f1ee] tracking-tight">
               Datos del Local
             </h2>
             <div className="space-y-3 text-xs">
               <div>
-                <label className="block text-white/80 font-semibold mb-1" htmlFor="dir">
+                <label className="block text-[#9c9c98] font-semibold mb-1" htmlFor="dir">
                   Dirección física
                 </label>
                 <input
@@ -263,13 +260,13 @@ export const HubEditorView: React.FC = () => {
                     details: { ...config.details, address: e.target.value },
                   })}
                   placeholder="Av. Corrientes 1450, CABA"
-                  className="w-full rounded-xl border border-white/20 bg-white/10 px-3 py-2 text-white placeholder-white/40 focus:bg-white/15 focus:outline-none"
+                  className="w-full rounded-xl border border-[#28282a] bg-[#18181b] px-3 py-2 text-[#f1f1ee] placeholder-[#686865] focus:border-[#bec8ff] focus:outline-none"
                 />
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-white/80 font-semibold mb-1" htmlFor="hs">
+                  <label className="block text-[#9c9c98] font-semibold mb-1" htmlFor="hs">
                     Horarios de atención
                   </label>
                   <input
@@ -281,12 +278,12 @@ export const HubEditorView: React.FC = () => {
                       details: { ...config.details, hours: e.target.value },
                     })}
                     placeholder="Lun a Sáb 08:00 a 20:00"
-                    className="w-full rounded-xl border border-white/20 bg-white/10 px-3 py-2 text-white placeholder-white/40 focus:bg-white/15 focus:outline-none"
+                    className="w-full rounded-xl border border-[#28282a] bg-[#18181b] px-3 py-2 text-[#f1f1ee] placeholder-[#686865] focus:border-[#bec8ff] focus:outline-none"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-white/80 font-semibold mb-1" htmlFor="tel">
+                  <label className="block text-[#9c9c98] font-semibold mb-1" htmlFor="tel">
                     Teléfono fijo
                   </label>
                   <input
@@ -298,7 +295,7 @@ export const HubEditorView: React.FC = () => {
                       details: { ...config.details, phone: e.target.value },
                     })}
                     placeholder="+54 11 4371-2233"
-                    className="w-full rounded-xl border border-white/20 bg-white/10 px-3 py-2 text-white placeholder-white/40 focus:bg-white/15 focus:outline-none"
+                    className="w-full rounded-xl border border-[#28282a] bg-[#18181b] px-3 py-2 text-[#f1f1ee] placeholder-[#686865] focus:border-[#bec8ff] focus:outline-none"
                   />
                 </div>
               </div>
@@ -308,26 +305,26 @@ export const HubEditorView: React.FC = () => {
 
         {/* Columna Derecha: Vista Previa en Vivo Mobile (lg:col-span-5) */}
         <div className="lg:col-span-5 sticky top-20">
-          <Card className="p-4 bg-white/[0.08] border border-white/20 space-y-3">
-            <div className="flex items-center justify-between pb-2 border-b border-white/15">
-              <span className="text-xs font-bold uppercase tracking-wider text-white">
+          <Card className="p-5 space-y-4">
+            <div className="flex items-center justify-between pb-3 border-b border-[#242426]">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-[#f1f1ee]">
                 Vista previa en vivo
               </span>
-              <span className="text-[10px] text-white/60">
+              <span className="text-[10px] text-[#2fb36a] font-medium">
                 Actualización instantánea
               </span>
             </div>
 
-            {/* Teléfono simulado */}
-            <div className="w-full max-w-[320px] mx-auto bg-[#141824] rounded-3xl border-4 border-white/20 p-4 shadow-2xl space-y-3 text-white">
-              <div className="w-20 h-3 bg-white/20 rounded-full mx-auto mb-2" />
+            {/* Teléfono simulado Matte Dark Flat con colores del Home (/) */}
+            <div className="w-full max-w-[320px] mx-auto bg-[#0c0c0c] rounded-3xl border-2 border-[#28282a] p-4 space-y-3 text-[#f1f1ee]">
+              <div className="w-20 h-2.5 bg-[#242426] rounded-full mx-auto mb-2" />
 
               {/* Encabezado mock */}
               <div className="text-center space-y-1">
-                <div className="w-8 h-8 rounded-lg bg-[#3A3FE0] text-white flex items-center justify-center font-bold text-sm mx-auto">
-                  T
+                <div className="w-8 h-8 rounded-full bg-[#bec8ff] text-[#0c0c0c] flex items-center justify-center font-bold text-sm mx-auto">
+                  t
                 </div>
-                <p className="font-display font-bold text-xs text-white">Café La Esquina</p>
+                <p className="font-bold text-xs text-[#f1f1ee]">Café La Esquina</p>
               </div>
 
               {/* Bloques en el orden configurado */}
@@ -335,45 +332,45 @@ export const HubEditorView: React.FC = () => {
                 {config.blocks.filter(b => b.enabled).map(b => {
                   if (b.key === 'receipt') {
                     return (
-                      <div key="r" className="p-2.5 rounded-xl bg-white/[0.08] border border-white/15 text-[10px]">
-                        <span className="font-bold text-[#FFC21A] block">Comprobante de compra</span>
-                        <span className="text-white/60">Total: $14.500 (Ejemplo)</span>
+                      <div key="r" className="p-2.5 rounded-xl bg-[#18181b] border border-[#28282a] text-[10px]">
+                        <span className="font-bold text-[#34d399] block">Comprobante de compra en vivo</span>
+                        <span className="text-[#a1a1aa]">Sincronizado al instante con Caja</span>
                       </div>
                     );
                   }
                   if (b.key === 'review') {
                     return (
-                      <div key="rev" className="p-2.5 rounded-xl bg-[#FFC21A] text-[#0B1030] font-bold text-center text-[11px] shadow-xs">
+                      <div key="rev" className="p-2.5 rounded-xl bg-[#f1f1ee] text-[#0c0c0c] font-bold text-center text-[11px]">
                         Dejar reseña en Google
                       </div>
                     );
                   }
                   if (b.key === 'club') {
                     return (
-                      <div key="cl" className="p-2.5 rounded-xl bg-white/[0.08] border border-white/15 text-[10px] space-y-1">
-                        <span className="font-bold text-white block">Club de Fidelidad</span>
-                        <span className="text-white/60 block">5 sellos = 1 café gratis</span>
+                      <div key="cl" className="p-2.5 rounded-xl bg-[#18181b] border border-[#28282a] text-[10px] space-y-1">
+                        <span className="font-bold text-[#bec8ff] block">Club de Fidelidad</span>
+                        <span className="text-[#9c9c98] block">5 sellos = 1 café gratis</span>
                       </div>
                     );
                   }
                   if (b.key === 'socials') {
                     return (
-                      <div key="so" className="p-2 rounded-xl bg-white/[0.08] text-[10px] text-center text-[#FFC21A] font-semibold">
+                      <div key="so" className="p-2 rounded-xl bg-[#18181b] border border-[#28282a] text-[10px] text-center text-[#bec8ff] font-semibold">
                         Instagram · WhatsApp
                       </div>
                     );
                   }
                   if (b.key === 'products') {
                     return (
-                      <div key="pr" className="p-2 rounded-xl bg-white/[0.08] border border-white/15 text-[10px]">
-                        <span className="font-bold text-white block">Productos destacados</span>
-                        <span className="text-white/60">Café de especialidad + Medialuna</span>
+                      <div key="pr" className="p-2 rounded-xl bg-[#18181b] border border-[#28282a] text-[10px]">
+                        <span className="font-bold text-[#f1f1ee] block">Productos destacados</span>
+                        <span className="text-[#9c9c98]">Café de especialidad + Medialuna</span>
                       </div>
                     );
                   }
                   if (b.key === 'details') {
                     return (
-                      <div key="de" className="p-2 rounded-xl bg-white/[0.08] text-[9px] text-white/60">
+                      <div key="de" className="p-2 rounded-xl bg-[#18181b] border border-[#28282a] text-[9px] text-[#9c9c98]">
                         {config.details.address || 'Av. Corrientes 1450'}
                       </div>
                     );

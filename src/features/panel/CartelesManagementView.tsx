@@ -1,412 +1,512 @@
 import React, { useState, useEffect } from 'react';
-import { api, Cartel, BusinessProfile, CartelRole } from '../../api';
+import { Link } from 'react-router-dom';
+import { api, Cartel, CartelRole } from '../../api';
+import { useAuth } from '../../lib/authContext';
 import { Card } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
+import { Input } from '../../components/ui/Input';
+import { Modal } from '../../components/ui/Modal';
 import { Skeleton } from '../../components/ui/Skeleton';
+import { EmptyState } from '../../components/ui/EmptyState';
 import { useToast } from '../../components/ui/Toast';
-import { Link } from 'react-router-dom';
+import { generateQrSvg, downloadSvg, downloadPng } from '../../lib/qrGenerator';
+import { buildPublicShortUrl } from '../../lib/urls';
 import {
   QrCode,
+  Plus,
+  ExternalLink,
+  Download,
   Copy,
   Check,
-  Pause,
-  Play,
+  Edit3,
   Trash2,
-  ExternalLink,
-  Sparkles,
-  Factory,
-  Send,
-  X,
+  RotateCcw,
+  CreditCard,
+  Star,
 } from 'lucide-react';
 
 export const CartelesManagementView: React.FC = () => {
+  const { user } = useAuth();
   const [carteles, setCarteles] = useState<Cartel[]>([]);
-  const [businessProfile, setBusinessProfile] = useState<BusinessProfile | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [copiedCode, setCopiedCode] = useState<string | null>(null);
-  const { success, error: toastError } = useToast();
+  const [selectedQrCartel, setSelectedQrCartel] = useState<Cartel | null>(null);
+  const [editingCartel, setEditingCartel] = useState<Cartel | null>(null);
+  const [editName, setEditName] = useState('');
+  const [editRole, setEditRole] = useState<CartelRole>('caja');
+  const [isCreatingModalOpen, setIsCreatingModalOpen] = useState(false);
+  const [newName, setNewName] = useState('');
+  const [newRole, setNewRole] = useState<CartelRole>('caja');
+  const [isSaving, setIsSaving] = useState(false);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<'activos' | 'papelera'>('activos');
+  const { showToast } = useToast();
 
-  // Modal para solicitar cartel a fabricante
-  const [isRequestModalOpen, setIsRequestModalOpen] = useState(false);
-  const [requestQuantity, setRequestQuantity] = useState(1);
-  const [requestRole, setRequestRole] = useState<CartelRole>('caja');
-  const [requestNotes, setRequestNotes] = useState('');
-  const [isSubmittingRequest, setIsSubmittingRequest] = useState(false);
+  const canManage = user?.role === 'owner' || user?.role === 'manager' || user?.role === 'superadmin';
 
-  const loadData = async () => {
-    setIsLoading(true);
+  const loadCarteles = async () => {
     try {
-      const [cartelesData, profileData] = await Promise.all([
-        api.listCarteles(),
-        api.getBusinessProfile(),
-      ]);
-      setCarteles(cartelesData);
-      setBusinessProfile(profileData);
-    } catch {
-      // Ignorar
+      const data = await api.listCarteles();
+      setCarteles(data);
     } finally {
       setIsLoading(false);
     }
   };
 
   useEffect(() => {
-    loadData();
+    loadCarteles();
   }, []);
 
-  const handleCopyLink = (code: string) => {
-    const url = `${window.location.origin}/h/${code}`;
-    navigator.clipboard.writeText(url);
-    setCopiedCode(code);
-    success('Enlace copiado al portapapeles', url);
-    setTimeout(() => setCopiedCode(null), 2000);
+  const handleOpenEdit = (cartel: Cartel) => {
+    setEditingCartel(cartel);
+    setEditName(cartel.name);
+    setEditRole(cartel.role);
   };
 
-  const handleTogglePause = async (cartel: Cartel) => {
-    const nextStatus = cartel.status === 'active' ? 'inactive' : 'active';
-    try {
-      await api.updateCartel(cartel.id, { status: nextStatus });
-      success(
-        nextStatus === 'inactive' ? 'Cartel pausado' : 'Cartel reanudado',
-        `El cartel ${cartel.code} ahora está ${nextStatus === 'inactive' ? 'en pausa' : 'activo'}.`
-      );
-      loadData();
-    } catch (err) {
-      toastError('No pudimos actualizar el cartel', err instanceof Error ? err.message : 'Error inesperado.');
-    }
-  };
-
-  const handleRetire = async (cartel: Cartel) => {
-    if (!window.confirm(`¿Querés retirar el cartel ${cartel.code}? No recibirá más toques.`)) {
-      return;
-    }
-    try {
-      await api.updateCartel(cartel.id, { status: 'trash' });
-      success('Cartel retirado', `El cartel ${cartel.code} fue dado de baja.`);
-      loadData();
-    } catch {
-      toastError('Error al retirar cartel');
-    }
-  };
-
-  const handleToggleManufacturerAssociation = async () => {
-    if (!businessProfile) return;
-    const nextVal = !businessProfile.isAssociatedWithManufacturer;
-    try {
-      const updated = await api.updateBusinessProfile({
-        isAssociatedWithManufacturer: nextVal,
-        manufacturerName: nextVal ? 'Taller Acrílicos del Plata' : undefined,
-      });
-      setBusinessProfile(updated);
-      success(
-        nextVal ? 'Asociado a Fabricante' : 'Negocio Independiente',
-        nextVal
-          ? 'Ahora dependés de un fabricante: deberás solicitarle nuevos carteles.'
-          : 'Ahora sos independiente: podés crear y activar nuevos carteles directamente.'
-      );
-    } catch {
-      toastError('No pudimos actualizar la asociación');
-    }
-  };
-
-  const handleSendRequest = async (e: React.FormEvent) => {
+  const handleSaveEdit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setIsSubmittingRequest(true);
+    if (!editingCartel || !editName.trim()) return;
+
+    setIsSaving(true);
     try {
-      await api.requestCartelFromManufacturer({
-        quantity: requestQuantity,
-        role: requestRole,
-        notes: requestNotes.trim(),
+      const updated = await api.updateCartel(editingCartel.id, {
+        name: editName.trim(),
+        role: editRole,
       });
-      setIsRequestModalOpen(false);
-      setRequestNotes('');
-      success(
-        'Solicitud enviada a tu fabricante',
-        `Pediste ${requestQuantity} cartel(es) rol ${requestRole === 'caja' ? 'Caja' : 'Reseña'}. Te avisarán al tenerlos listos.`
-      );
+      setCarteles((prev) => prev.map((c) => (c.id === updated.id ? updated : c)));
+      showToast('Cartel actualizado en tiempo real', 'success');
+      setEditingCartel(null);
     } catch (err) {
-      toastError('No pudimos enviar la solicitud', err instanceof Error ? err.message : 'Error inesperado.');
+      showToast(err instanceof Error ? err.message : 'Error al actualizar', 'error');
     } finally {
-      setIsSubmittingRequest(false);
+      setIsSaving(false);
     }
   };
 
-  const isAssociated = !!businessProfile?.isAssociatedWithManufacturer;
-  const manufacturerName = businessProfile?.manufacturerName || 'Taller Oficial Toque';
+  const handleCreateCartel = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newName.trim()) return;
+
+    setIsSaving(true);
+    try {
+      const created = await api.createCartelForBusiness({
+        name: newName.trim(),
+        role: newRole,
+      });
+      setCarteles((prev) => [created, ...prev]);
+      setNewName('');
+      setNewRole('caja');
+      setIsCreatingModalOpen(false);
+      showToast(`Cartel ${created.code} creado y vinculado a tu comercio`, 'success');
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'Error al crear cartel', 'error');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleToggleTrash = async (cartel: Cartel) => {
+    const isMovingToTrash = cartel.status !== 'trash';
+    const nextStatus = isMovingToTrash ? 'trash' : 'active';
+    try {
+      const updated = await api.updateCartel(cartel.id, { status: nextStatus });
+      setCarteles((prev) => prev.map((c) => (c.id === updated.id ? updated : c)));
+      showToast(
+        isMovingToTrash ? 'Cartel movido a la papelera' : 'Cartel restaurado con éxito',
+        'info'
+      );
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'No se pudo actualizar el cartel', 'error');
+    }
+  };
+
+  const handleCopyUrl = async (cartel: Cartel) => {
+    const url = buildPublicShortUrl(cartel.code);
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopiedId(cartel.id);
+      showToast('Enlace del Hub copiado al portapapeles', 'success');
+      setTimeout(() => setCopiedId(null), 2000);
+    } catch {
+      showToast('No se pudo copiar el enlace', 'error');
+    }
+  };
+
+  if (isLoading) {
+    return (
+      <div className="space-y-4">
+        <Skeleton className="h-10 w-56 bg-[#111113]" />
+        <Skeleton className="h-36 w-full bg-[#111113]" />
+        <Skeleton className="h-36 w-full bg-[#111113]" />
+      </div>
+    );
+  }
+
+  const activeCarteles = carteles.filter((c) => c.status !== 'trash');
+  const trashedCarteles = carteles.filter((c) => c.status === 'trash');
+  const displayedCarteles = activeTab === 'activos' ? activeCarteles : trashedCarteles;
 
   return (
     <div className="space-y-6">
-      {/* Encabezado */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="font-display font-bold text-2xl sm:text-3xl text-white">
-            Mis Carteles
-          </h1>
-          <p className="text-xs text-white/70 mt-0.5">
-            Soportes físicos inteligentes con chip NFC y código QR.
+          <span className="block text-[11px] uppercase tracking-wider text-[#a1a1aa] font-semibold mb-1">
+            PUNTOS DE CONTACTO NFC + QR
+          </span>
+          <h1 className="text-2xl font-bold text-[#f1f1ee] tracking-tight">Mis Carteles</h1>
+          <p className="text-sm text-[#a1a1aa] mt-0.5">
+            Administrá tus carteles conectados en tiempo real con la Caja y el Hub del cliente.
           </p>
         </div>
 
-        {/* Regla de negocio: SOLO pueden crear más carteles si NO dependen de un fabricante */}
-        <div className="flex items-center gap-2">
-          {isAssociated ? (
+        <div className="flex items-center gap-2.5">
+          {canManage && (
             <Button
-              variant="estrella"
+              variant="primary"
               size="sm"
-              onClick={() => setIsRequestModalOpen(true)}
-              icon={<Factory className="w-4 h-4 text-[#0B1030]" />}
+              onClick={() => setIsCreatingModalOpen(true)}
             >
-              Solicitar cartel a fabricante
+              <Plus className="w-4 h-4 mr-1.5" />
+              Nuevo cartel
             </Button>
-          ) : (
-            <Link to="/activar/DEMO01">
-              <Button
-                variant="ultramar"
-                size="sm"
-                icon={<Sparkles className="w-3.5 h-3.5 text-[#FFC21A]" />}
-              >
-                Activar nuevo cartel
-              </Button>
-            </Link>
           )}
         </div>
       </div>
 
-      {/* Rótulo de Fabricante y conmutador para testeo en Liquid Glass */}
-      <div className="p-3.5 rounded-2xl bg-white/[0.08] border border-white/15 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs backdrop-blur-md text-white/80">
-        <div className="flex items-center gap-2.5">
-          <Factory className={`w-4 h-4 ${isAssociated ? 'text-[#FFC21A]' : 'text-white/60'}`} />
-          <span>
-            {isAssociated ? (
-              <>
-                Asociado al fabricante <strong className="text-white">{manufacturerName}</strong> (los nuevos carteles deben solicitarse).
-              </>
-            ) : (
-              <>
-                Negocio <strong className="text-white">independiente</strong> (podés activar carteles directamente sin fabricante intermediario).
-              </>
-            )}
-          </span>
-        </div>
-
+      {/* Pestañas: Activos vs Papelera */}
+      <div className="flex items-center gap-2 border-b border-[#242426] pb-3">
         <button
           type="button"
-          onClick={handleToggleManufacturerAssociation}
-          className="text-[11px] font-bold text-[#FFC21A] hover:underline self-start sm:self-auto"
+          onClick={() => setActiveTab('activos')}
+          className={`px-4 py-2 rounded-xl text-xs font-bold transition-colors cursor-pointer ${
+            activeTab === 'activos'
+              ? 'bg-[#bec8ff] text-[#0c0c0c]'
+              : 'bg-[#111113] text-[#a1a1aa] hover:text-[#f1f1ee] border border-[#242426]'
+          }`}
         >
-          {isAssociated ? 'Cambiar a modo Independiente (Demo)' : 'Simular Fabricante Asociado (Demo)'}
+          Activos ({activeCarteles.length})
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveTab('papelera')}
+          className={`px-4 py-2 rounded-xl text-xs font-bold transition-colors cursor-pointer ${
+            activeTab === 'papelera'
+              ? 'bg-[#bec8ff] text-[#0c0c0c]'
+              : 'bg-[#111113] text-[#a1a1aa] hover:text-[#f1f1ee] border border-[#242426]'
+          }`}
+        >
+          Papelera ({trashedCarteles.length})
         </button>
       </div>
 
-      {/* Modal para solicitar cartel al fabricante */}
-      {isRequestModalOpen && (
-        <div className="fixed inset-0 bg-[#0B1030]/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
-          <Card padding="lg" className="max-w-md w-full space-y-5 shadow-2xl animate-in zoom-in-95 bg-[#141824]/95 border border-white/20 text-white">
-            <div className="flex items-center justify-between border-b border-white/15 pb-3">
-              <div className="flex items-center gap-2">
-                <Factory className="w-5 h-5 text-[#FFC21A]" />
-                <h3 className="font-display font-bold text-lg text-white">
-                  Solicitar cartel al fabricante
-                </h3>
-              </div>
-              <button
-                type="button"
-                onClick={() => setIsRequestModalOpen(false)}
-                className="p-1 text-white/60 hover:text-white"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <p className="text-xs text-white/70 leading-relaxed">
-              Tu comercio está vinculado a <strong className="text-white">{manufacturerName}</strong>.
-              Ellos fabrican e imprimen los acrílicos con chip NFC y QR listo para tu local.
-            </p>
-
-            <form onSubmit={handleSendRequest} className="space-y-4 text-xs">
-              <div>
-                <label className="block font-semibold text-white mb-1" htmlFor="q">
-                  Cantidad de carteles solicitados
-                </label>
-                <select
-                  id="q"
-                  value={requestQuantity}
-                  onChange={(e) => setRequestQuantity(parseInt(e.target.value, 10))}
-                  className="w-full px-3 py-2 rounded-xl border border-white/20 bg-white/10 text-sm font-semibold text-white focus:bg-white/15 focus:outline-none"
-                >
-                  <option value={1} className="bg-[#141824] text-white">1 cartel</option>
-                  <option value={2} className="bg-[#141824] text-white">2 carteles</option>
-                  <option value={3} className="bg-[#141824] text-white">3 carteles</option>
-                  <option value={5} className="bg-[#141824] text-white">5 carteles</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block font-semibold text-white mb-1" htmlFor="r">
-                  Rol esperado del soporte
-                </label>
-                <select
-                  id="r"
-                  value={requestRole}
-                  onChange={(e) => setRequestRole(e.target.value as CartelRole)}
-                  className="w-full px-3 py-2 rounded-xl border border-white/20 bg-white/10 text-sm font-semibold text-white focus:bg-white/15 focus:outline-none"
-                >
-                  <option value="caja" className="bg-[#141824] text-white">Caja (Recibos al instante + Reseña)</option>
-                  <option value="resena" className="bg-[#141824] text-white">Reseña (Mostrador / Mesa directo)</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block font-semibold text-white mb-1" htmlFor="not">
-                  Indicaciones para el taller (opcional)
-                </label>
-                <textarea
-                  id="not"
-                  rows={2}
-                  value={requestNotes}
-                  onChange={(e) => setRequestNotes(e.target.value)}
-                  placeholder="Ej: Para la caja del patio, acrílico transparente"
-                  className="w-full px-3 py-2 rounded-xl border border-white/20 bg-white/10 text-xs text-white placeholder-white/40 focus:bg-white/15 focus:outline-none"
-                />
-              </div>
-
-              <div className="pt-2 flex gap-2">
-                <Button
-                  type="submit"
-                  variant="estrella"
-                  size="touch"
-                  fullWidth
-                  disabled={isSubmittingRequest}
-                  icon={<Send className="w-4 h-4 text-[#0B1030]" />}
-                >
-                  {isSubmittingRequest ? 'Enviando…' : 'Enviar solicitud'}
-                </Button>
-                <Button
-                  type="button"
-                  variant="secundario"
-                  size="touch"
-                  onClick={() => setIsRequestModalOpen(false)}
-                  className="bg-white/10 text-white border-white/20 hover:bg-white/15"
-                >
-                  Cancelar
-                </Button>
-              </div>
-            </form>
-          </Card>
-        </div>
-      )}
-
-      {/* Listado de Carteles */}
-      {isLoading ? (
-        <div className="space-y-4">
-          {[1, 2].map(i => (
-            <Skeleton key={i} className="h-28 rounded-2xl bg-white/10" />
-          ))}
-        </div>
-      ) : carteles.length === 0 ? (
-        <Card className="text-center py-12 space-y-4">
-          <p className="text-xs text-white/60">No tenés carteles registrados.</p>
+      {displayedCarteles.length === 0 ? (
+        <Card>
+          <EmptyState
+            icon="🏷️"
+            title={
+              activeTab === 'activos'
+                ? 'Todavía no tenés carteles activos'
+                : 'La papelera está vacía'
+            }
+            description={
+              activeTab === 'activos'
+                ? 'Creá un cartel para conectarlo con tu Caja y empezar a emitir recibos digitales y sumar reseñas.'
+                : 'Los carteles que archives aparecerán acá para que puedas restaurarlos cuando quieras.'
+            }
+          />
         </Card>
       ) : (
-        <div className="space-y-4">
-          {carteles.filter(c => c.status !== 'trash').map((cartel) => {
-            const isActive = cartel.status === 'active';
-            const isSinActivar = cartel.status === 'sin_activar';
-            const isInactive = cartel.status === 'inactive';
+        <div className="grid grid-cols-1 gap-4">
+          {displayedCarteles.map((cartel) => {
+            const publicUrl = buildPublicShortUrl(cartel.code);
+            const isCaja = cartel.role === 'caja';
 
             return (
-              <Card key={cartel.id} className="p-5 flex flex-col md:flex-row md:items-center justify-between gap-4">
-                <div className="flex items-start sm:items-center gap-4">
-                  <div className="w-12 h-12 rounded-2xl bg-white/10 border border-white/15 flex items-center justify-center shrink-0">
-                    <QrCode className="w-6 h-6 text-[#FFC21A]" />
-                  </div>
-                  <div>
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="cartel-code font-bold text-sm text-white bg-white/10 px-2.5 py-1 rounded-lg border border-white/20">
+              <Card key={cartel.id} className="hover:border-[#343438] transition-colors">
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                  <div className="space-y-1.5">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h2 className="text-lg font-bold text-[#f1f1ee]">{cartel.name}</h2>
+                      <span className="font-mono text-xs bg-[#18181b] text-[#bec8ff] px-2.5 py-0.5 rounded-lg border border-[#28282a] font-bold">
                         {cartel.code}
                       </span>
-                      {isActive && (
-                        <span className="text-[10px] font-bold uppercase tracking-wider bg-white/15 text-[#19C37D] px-2.5 py-0.5 rounded-full border border-[#19C37D]/30">
-                          Activo
-                        </span>
-                      )}
-                      {isSinActivar && (
-                        <span className="text-[10px] font-bold uppercase tracking-wider bg-[#FFC21A]/20 text-[#FFC21A] px-2.5 py-0.5 rounded-full border border-[#FFC21A]/40">
-                          Sin activar (Ejemplo)
-                        </span>
-                      )}
-                      {isInactive && (
-                        <span className="text-[10px] font-bold uppercase tracking-wider bg-[#FF6B6B]/20 text-[#FF6B6B] px-2.5 py-0.5 rounded-full border border-[#FF6B6B]/40">
-                          En pausa
-                        </span>
-                      )}
-                      <span className="text-[11px] text-white/70">
-                        · Rol: <strong className="text-white">{cartel.role === 'caja' ? 'Caja' : 'Reseña'}</strong>
+                      <span
+                        className={`text-xs font-semibold px-2.5 py-0.5 rounded-lg border inline-flex items-center gap-1 ${
+                          isCaja
+                            ? 'bg-[#bec8ff]/15 text-[#bec8ff] border-[#bec8ff]/30'
+                            : 'bg-[#2fb36a]/15 text-[#34d399] border-[#2fb36a]/30'
+                        }`}
+                      >
+                        {isCaja ? (
+                          <>
+                            <CreditCard className="w-3 h-3" />
+                            <span>Rol: Caja + Recibo en vivo</span>
+                          </>
+                        ) : (
+                          <>
+                            <Star className="w-3 h-3" />
+                            <span>Rol: Reseñas + Club</span>
+                          </>
+                        )}
                       </span>
                     </div>
 
-                    <h3 className="font-display font-bold text-base text-white mt-1.5">
-                      {cartel.name}
-                    </h3>
-                    <p className="text-xs text-white/60">
-                      Modo: {cartel.mode === 'hub' ? 'Hub público con recibos' : 'Directo a Google Reviews'}
-                    </p>
+                    <p className="text-xs text-[#a1a1aa] font-mono break-all">{publicUrl}</p>
+
+                    <div className="flex flex-wrap items-center gap-4 pt-1 text-xs text-[#a1a1aa]">
+                      <span>
+                        Escaneos reales:{' '}
+                        <strong className="text-[#f1f1ee] font-mono">
+                          {cartel.scansCount || 0}
+                        </strong>
+                      </span>
+                      <span>·</span>
+                      <span>
+                        Clics a reseñas:{' '}
+                        <strong className="text-[#34d399] font-mono">
+                          {cartel.reviewClicksCount || 0}
+                        </strong>
+                      </span>
+                      {cartel.activeReceiptId && (
+                        <>
+                          <span>·</span>
+                          <span className="text-[#34d399] font-semibold">
+                            ● Recibo activo en mostrador ({cartel.activeReceiptId})
+                          </span>
+                        </>
+                      )}
+                    </div>
                   </div>
-                </div>
 
-                {/* Acciones */}
-                <div className="flex items-center gap-2 flex-wrap pt-2 md:pt-0 border-t md:border-t-0 border-white/15">
-                  {isSinActivar ? (
-                    <Link to={`/activar/${cartel.code}`}>
-                      <Button variant="estrella" size="sm">
-                        Activar con PIN ({cartel.pin})
-                      </Button>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Link
+                      to={`/h/${cartel.code}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="px-3 py-2 rounded-xl bg-[#18181b] hover:bg-[#222226] border border-[#28282a] text-xs font-semibold text-[#f1f1ee] inline-flex items-center gap-1.5 transition-colors"
+                    >
+                      <ExternalLink className="w-3.5 h-3.5 text-[#bec8ff]" />
+                      <span>Abrir Hub</span>
                     </Link>
-                  ) : (
-                    <>
-                      <Button
-                        variant="secundario"
-                        size="sm"
-                        onClick={() => handleCopyLink(cartel.code)}
-                        icon={copiedCode === cartel.code ? <Check className="w-3.5 h-3.5 text-[#19C37D]" /> : <Copy className="w-3.5 h-3.5" />}
-                        className="bg-white/10 text-white border-white/20 hover:bg-white/15"
-                      >
-                        {copiedCode === cartel.code ? 'Copiado' : 'Copiar enlace'}
-                      </Button>
 
-                      <Link to={`/h/${cartel.code}`} target="_blank" rel="noopener noreferrer">
-                        <Button variant="secundario" size="sm" icon={<ExternalLink className="w-3.5 h-3.5" />} className="bg-white/10 text-white border-white/20 hover:bg-white/15">
-                          Abrir Hub
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handleCopyUrl(cartel)}
+                    >
+                      {copiedId === cartel.id ? (
+                        <>
+                          <Check className="w-3.5 h-3.5 mr-1 text-[#34d399]" />
+                          Copiado
+                        </>
+                      ) : (
+                        <>
+                          <Copy className="w-3.5 h-3.5 mr-1" />
+                          Copiar link
+                        </>
+                      )}
+                    </Button>
+
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setSelectedQrCartel(cartel)}
+                    >
+                      <QrCode className="w-3.5 h-3.5 mr-1" />
+                      Descargar QR
+                    </Button>
+
+                    {canManage && activeTab === 'activos' && (
+                      <>
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          onClick={() => handleOpenEdit(cartel)}
+                        >
+                          <Edit3 className="w-3.5 h-3.5 mr-1" />
+                          Editar
                         </Button>
-                      </Link>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleToggleTrash(cartel)}
+                          className="text-red-400 hover:text-red-300"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </Button>
+                      </>
+                    )}
 
+                    {canManage && activeTab === 'papelera' && (
                       <Button
-                        variant="secundario"
+                        variant="secondary"
                         size="sm"
-                        onClick={() => handleTogglePause(cartel)}
-                        icon={isActive ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
-                        title={isActive ? 'Pausar cartel' : 'Reanudar cartel'}
-                        className="bg-white/10 text-white border-white/20 hover:bg-white/15"
+                        onClick={() => handleToggleTrash(cartel)}
                       >
-                        {isActive ? 'Pausar' : 'Activar'}
+                        <RotateCcw className="w-3.5 h-3.5 mr-1.5" />
+                        Restaurar
                       </Button>
-
-                      <Button
-                        variant="fantasma"
-                        size="sm"
-                        onClick={() => handleRetire(cartel)}
-                        className="text-[#FF6B6B] hover:bg-white/10"
-                        title="Retirar cartel"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </Button>
-                    </>
-                  )}
+                    )}
+                  </div>
                 </div>
               </Card>
             );
           })}
         </div>
       )}
+
+      {/* Modal Crear Nuevo Cartel */}
+      <Modal
+        isOpen={isCreatingModalOpen}
+        onClose={() => setIsCreatingModalOpen(false)}
+        title="Crear nuevo cartel NFC + QR"
+      >
+        <form onSubmit={handleCreateCartel} className="space-y-4">
+          <Input
+            label="Nombre o ubicación del cartel"
+            placeholder="Ej: Caja Principal, Mostrador 2, Terraza"
+            value={newName}
+            onChange={(e) => setNewName(e.target.value)}
+            required
+          />
+
+          <div className="space-y-1.5">
+            <label className="block text-sm font-medium text-[#f1f1ee]">
+              Función principal del cartel
+            </label>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+              <button
+                type="button"
+                onClick={() => setNewRole('caja')}
+                className={`p-3.5 rounded-xl border text-left transition-colors cursor-pointer ${
+                  newRole === 'caja'
+                    ? 'bg-[#bec8ff]/15 border-[#bec8ff] text-[#f1f1ee]'
+                    : 'bg-[#18181b] border-[#28282a] text-[#a1a1aa]'
+                }`}
+              >
+                <p className="font-bold text-sm text-[#f1f1ee]">Caja y Comprobantes</p>
+                <p className="text-xs text-[#a1a1aa] mt-1">
+                  Sincroniza recibos en vivo con la terminal de Caja y suma puntos.
+                </p>
+              </button>
+              <button
+                type="button"
+                onClick={() => setNewRole('resena')}
+                className={`p-3.5 rounded-xl border text-left transition-colors cursor-pointer ${
+                  newRole === 'resena'
+                    ? 'bg-[#2fb36a]/15 border-[#2fb36a] text-[#f1f1ee]'
+                    : 'bg-[#18181b] border-[#28282a] text-[#a1a1aa]'
+                }`}
+              >
+                <p className="font-bold text-sm text-[#f1f1ee]">Reseñas y Mesas</p>
+                <p className="text-xs text-[#a1a1aa] mt-1">
+                  Ideal para mesas o vidrieras: prioriza Google Maps, Wi-Fi y Club.
+                </p>
+              </button>
+            </div>
+          </div>
+
+          <div className="flex justify-end gap-2 pt-3">
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={() => setIsCreatingModalOpen(false)}
+            >
+              Cancelar
+            </Button>
+            <Button type="submit" isLoading={isSaving}>
+              Crear Cartel Activo
+            </Button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* Modal QR */}
+      <Modal
+        isOpen={!!selectedQrCartel}
+        onClose={() => setSelectedQrCartel(null)}
+        title={selectedQrCartel ? `Código QR — ${selectedQrCartel.name}` : ''}
+      >
+        {selectedQrCartel && (
+          <div className="text-center space-y-5">
+            <div
+              className="w-56 h-56 mx-auto p-4 bg-[#f1f1ee] rounded-2xl border border-[#28282a] flex items-center justify-center"
+              dangerouslySetInnerHTML={{
+                __html: generateQrSvg(buildPublicShortUrl(selectedQrCartel.code), 220),
+              }}
+            />
+            <div>
+              <p className="font-mono text-sm font-bold text-[#bec8ff]">
+                {selectedQrCartel.code}
+              </p>
+              <p className="text-xs text-[#a1a1aa] mt-1 font-mono break-all">
+                {buildPublicShortUrl(selectedQrCartel.code)}
+              </p>
+              <p className="text-xs text-[#34d399] mt-2 font-medium">
+                Grabar este enlace como registro URI NDEF en el chip NFC NTAG213/215.
+              </p>
+            </div>
+            <div className="flex gap-3 justify-center pt-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  const svg = generateQrSvg(buildPublicShortUrl(selectedQrCartel.code), 600);
+                  downloadSvg(svg, `toque-${selectedQrCartel.code}.svg`);
+                }}
+              >
+                <Download className="w-3.5 h-3.5 mr-1.5" />
+                Descargar SVG
+              </Button>
+              <Button
+                variant="primary"
+                size="sm"
+                onClick={() => {
+                  const svg = generateQrSvg(buildPublicShortUrl(selectedQrCartel.code), 800);
+                  downloadPng(svg, `toque-${selectedQrCartel.code}.png`, 800);
+                }}
+              >
+                <Download className="w-3.5 h-3.5 mr-1.5" />
+                Descargar PNG Alta Res
+              </Button>
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      {/* Modal Editar */}
+      <Modal
+        isOpen={!!editingCartel}
+        onClose={() => setEditingCartel(null)}
+        title="Editar Cartel"
+      >
+        <form onSubmit={handleSaveEdit} className="space-y-4">
+          <Input
+            label="Nombre descriptivo"
+            value={editName}
+            onChange={(e) => setEditName(e.target.value)}
+            required
+          />
+          <div className="space-y-1.5">
+            <label className="block text-sm font-medium text-[#f1f1ee]">Rol del cartel</label>
+            <select
+              value={editRole}
+              onChange={(e) => setEditRole(e.target.value as CartelRole)}
+              className="w-full px-3.5 py-2.5 rounded-xl border border-[#28282a] bg-[#18181b] text-[#f1f1ee] text-sm focus:outline-none focus:ring-2 focus:ring-[#bec8ff]"
+            >
+              <option value="caja">Caja (Emitir recibos digitales en vivo + Hub)</option>
+              <option value="resena">Reseña (Priorizar Google Maps y Club)</option>
+            </select>
+          </div>
+          <div className="flex justify-end gap-2 pt-3">
+            <Button type="button" variant="ghost" onClick={() => setEditingCartel(null)}>
+              Cancelar
+            </Button>
+            <Button type="submit" isLoading={isSaving}>
+              Guardar cambios
+            </Button>
+          </div>
+        </form>
+      </Modal>
     </div>
   );
 };

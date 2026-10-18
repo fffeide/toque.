@@ -1,43 +1,41 @@
 /**
- * Toque — Tokens de Diseño (Liquid Glass Aurora Aesthetic)
- * Paleta sobre fondo atmosférico #04121b con texto blanco puro #ffffff.
+ * Toque — Tokens de Diseño (Matte Dark Flat · Paleta Home /)
  */
 
 :root {
-  /* Tokens Base Aurora */
-  --ink: #ffffff;
-  --bg-page: #04121b;
-  --bg-card: rgba(255, 255, 255, 0.16);
-  --bg-card-subtle: rgba(255, 255, 255, 0.10);
-  --bg-card-hover: rgba(255, 255, 255, 0.22);
-  --text-main: #ffffff;
-  --text-muted: rgba(255, 255, 255, 0.75);
-  --border-subtle: rgba(255, 255, 255, 0.20);
-  --border-strong: rgba(255, 255, 255, 0.35);
+  --ink: #0c0c0c;
+  --paper: #f1f1ee;
+  --bg-page: #000000;
+  --bg-card: #111113;
+  --bg-card-subtle: #18181b;
+  --bg-card-hover: #1f1f23;
+  --text-main: #f1f1ee;
+  --text-muted: #9c9c98;
+  --border-subtle: #242426;
+  --border-strong: #343438;
 
-  /* Acentos de Marca */
-  --ultramar: #3A3FE0;
-  --ultramar-hi: #6A6FFF;
-  --tinta: #04121b;
-  --estrella: #FFC21A;
-  --hielo: #04121b;
-  --niebla: rgba(255, 255, 255, 0.20);
-  --pizarra: rgba(255, 255, 255, 0.70);
-  --menta: #19C37D;
-  --ambar: #F59E0B;
-  --coral: #FF5A4E;
+  /* Acentos del Home (/) */
+  --ultramar: #bec8ff;
+  --ultramar-hi: #d6daf6;
+  --tinta: #0c0c0c;
+  --estrella: #f1f1ee;
+  --hielo: #000000;
+  --niebla: #242426;
+  --pizarra: #9c9c98;
+  --menta: #2fb36a;
+  --ambar: #bec8ff;
+  --coral: #f1f1ee;
 
-  --brand: #3A3FE0;
-  --brand-hi: #6A6FFF;
-  --brand-rgb: 58, 63, 224;
+  --brand: #bec8ff;
+  --brand-hi: #d6daf6;
+  --brand-rgb: 190, 200, 255;
 
-  /* Vidrio Líquido */
-  --glass-bg: rgba(255, 255, 255, 0.155);
-  --glass-border: rgba(255, 255, 255, 0.20);
-  --glass-shadow: 0 16px 40px -10px rgba(4, 16, 24, 0.5);
-  --glass-highlight: rgba(255, 255, 255, 0.35);
+  --glass-bg: #111113;
+  --glass-border: #242426;
+  --glass-shadow: none;
+  --glass-highlight: #343438;
 
-  --mesh-gradient: #04121b;
+  --mesh-gradient: #000000;
 
   --radius-sm: 8px;
   --radius-md: 14px;
@@ -47,11 +45,11 @@
 }
 
 [data-theme="dark"] {
-  --bg-page: #04121b;
-  --bg-card: rgba(255, 255, 255, 0.14);
-  --bg-card-subtle: rgba(255, 255, 255, 0.08);
-  --text-main: #ffffff;
-  --text-muted: rgba(255, 255, 255, 0.70);
-  --border-subtle: rgba(255, 255, 255, 0.18);
-  --border-strong: rgba(255, 255, 255, 0.30);
+  --bg-page: #000000;
+  --bg-card: #111113;
+  --bg-card-subtle: #18181b;
+  --text-main: #f1f1ee;
+  --text-muted: #9c9c98;
+  --border-subtle: #242426;
+  --border-strong: #343438;
 }

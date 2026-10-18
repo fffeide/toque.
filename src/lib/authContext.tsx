@@ -10,6 +10,7 @@ import { api } from '../api';
 interface AuthContextType {
   user: User | null;
   business: BusinessProfile | null;
+  isAuthenticated: boolean;
   isLoading: boolean;
   login: (credentials: { email: string; password?: string; isGoogle?: boolean }) => Promise<void>;
   register: (data: { businessName: string; ownerName: string; email: string; password?: string }) => Promise<void>;
@@ -71,6 +72,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       value={{
         user,
         business,
+        isAuthenticated: Boolean(user),
         isLoading,
         login,
         register,

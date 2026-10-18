@@ -1,6 +1,6 @@
 /**
  * Toque — Smart Receipt & Post-Purchase Hub: Definición de Tipos
- * Estructuras de datos para Carteles, Ventas, Comprobantes, Club de Fidelidad, Smart Hub, Wallet y Partners.
+ * Estructuras de datos 100% reales con soporte RLS, Equipo, WalletWallet y Super Admin.
  */
 
 export type CartelRole = 'resena' | 'caja';
@@ -12,7 +12,6 @@ export type ClaimStatus = 'unclaimed' | 'claimed';
 
 export type HubBlockKey = 'receipt' | 'review' | 'club' | 'socials' | 'products' | 'details';
 
-// Los 7 bloques del modelo Smart Receipt & Post-Purchase Hub
 export type SmartHubSectionKey =
   | 'loyalty'
   | 'reviews'
@@ -102,6 +101,7 @@ export interface HubConfig {
   blocks: HubBlockConfig[];
   accentColor: string;
   logoUrl?: string;
+  googleReviewUrl?: string;
   socials: HubSocials;
   products: HubProduct[];
   details: HubDetails;
@@ -120,10 +120,13 @@ export interface Cartel {
   mode: HubMode;
   tileColor?: TileColor;
   claimStatus?: ClaimStatus;
+  scansCount?: number;
+  reviewClicksCount?: number;
+  activeReceiptId?: string | null;
+  activeReceiptExpiresAt?: string | null;
   createdAt: string;
   activatedAt?: string;
   lastScannedAt?: string;
-  batchId?: string;
 }
 
 export interface SaleItem {
@@ -138,8 +141,11 @@ export type SaleStatus = 'pending' | 'paid' | 'cancelled' | 'expired';
 
 export interface Sale {
   id: string;
+  businessId: string;
   cartelId: string;
+  cartelCode?: string;
   cartelName?: string;
+  receiptId?: string;
   amount: number;
   currency: 'ARS';
   items: SaleItem[];
@@ -148,6 +154,7 @@ export interface Sale {
   createdAt: string;
   paidAt?: string;
   cashierName?: string;
+  cashierEmail?: string;
 }
 
 export type ReceiptStatus = 'ready' | 'claimed' | 'expired' | 'cancelled';
@@ -155,6 +162,7 @@ export type ReceiptStatus = 'ready' | 'claimed' | 'expired' | 'cancelled';
 export interface Receipt {
   id: string;
   saleId: string;
+  businessId: string;
   cartelCode: string;
   status: ReceiptStatus;
   expiresAt: string;
@@ -165,7 +173,6 @@ export interface Receipt {
   method: PaymentMethod;
   createdAt: string;
   claimedAt?: string;
-  isExample?: boolean;
 }
 
 export type ClubRuleType = 'per_amount' | 'per_visit';
@@ -178,6 +185,10 @@ export interface ClubReward {
 
 export interface ClubConfig {
   name: string;
+  clubName?: string;
+  welcomeBenefitText?: string;
+  pointsPerVisit?: number;
+  enabled?: boolean;
   rule: {
     type: ClubRuleType;
     value: number;
@@ -188,11 +199,16 @@ export interface ClubConfig {
 
 export interface ClubMember {
   id: string;
+  businessId?: string;
   name?: string;
   contact: string;
   points: number;
   stamps?: number;
+  passId?: string;
   passUrl?: string;
+  walletPassUrl?: string;
+  appleWalletUrl?: string;
+  googleWalletUrl?: string;
   joinedAt: string;
   consent: true;
 }
@@ -202,10 +218,11 @@ export interface BusinessProfile {
   name: string;
   ownerName: string;
   email: string;
+  ownerUid?: string;
   reviewUrl?: string;
   createdAt: string;
-  isAssociatedWithManufacturer?: boolean;
-  manufacturerName?: string;
+  scansCount?: number;
+  reviewClicksCount?: number;
 }
 
 export interface PublicHub {
@@ -215,6 +232,7 @@ export interface PublicHub {
     logoUrl?: string;
   };
   cartel: {
+    id: string;
     code: string;
     name: string;
     role: CartelRole;
@@ -234,12 +252,30 @@ export interface PublicHub {
   smartHubConfig?: SmartHubConfig;
 }
 
+export type UserRole = 'owner' | 'manager' | 'cashier' | 'superadmin';
+
 export interface User {
   id: string;
   email: string;
   name: string;
   businessId: string;
-  role: 'owner' | 'cashier' | 'admin';
+  role: UserRole;
+  assignedCartelId?: string;
+  assignedCartelCode?: string;
+  isSuperAdmin?: boolean;
+}
+
+export interface TeamMember {
+  id: string;
+  businessId: string;
+  name: string;
+  email: string;
+  role: 'owner' | 'manager' | 'cashier';
+  assignedCartelId?: string;
+  assignedCartelCode?: string;
+  status: 'active' | 'revoked';
+  addedAt: string;
+  addedByEmail?: string;
 }
 
 export interface MercadoPagoStatus {
@@ -254,22 +290,36 @@ export interface DashboardSummary {
   todaySalesCount: number;
   weeklySalesAmount: number;
   weeklySalesCount: number;
+  totalReceiptsCount: number;
   claimedReceiptsCount: number;
   newClubMembersCount: number;
+  walletPassesCount: number;
+  scansCount: number;
   reviewButtonClicks: number;
-  isExample: boolean;
+  teamMembersCount: number;
 }
 
-export interface CartelBatch {
-  id: string;
-  count: number;
-  createdAt: string;
-  carteles: Array<{
-    code: string;
-    pin: string;
-    status: CartelStatus;
-    shortUrl: string;
-    tileColor?: TileColor;
-    claimStatus?: ClaimStatus;
-  }>;
+export interface SuperAdminSummary {
+  totalBusinesses: number;
+  totalCarteles: number;
+  activeCarteles: number;
+  totalSalesCount: number;
+  totalSalesAmount: number;
+  totalReceiptsEmitted: number;
+  claimedReceiptsCount: number;
+  totalClubMembers: number;
+  walletPassesIssued: number;
+  totalScansCount: number;
+  totalReviewClicks: number;
+  businesses: Array<
+    BusinessProfile & {
+      cartelesCount: number;
+      salesCount: number;
+      salesAmount: number;
+      membersCount: number;
+      teamCount: number;
+    }
+  >;
+  carteles: Cartel[];
+  recentSales: Sale[];
 }

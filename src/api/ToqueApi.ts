@@ -1,6 +1,5 @@
 /**
- * Toque — Módulo Recibo: Contrato de API (ToqueApi)
- * Interfaz que implementan tanto mockApi como httpApi.
+ * Toque — Contrato de API en Tiempo Real con RLS (ToqueApi)
  */
 
 import {
@@ -14,16 +13,18 @@ import {
   ClubMember,
   MercadoPagoStatus,
   DashboardSummary,
-  CartelBatch,
   BusinessProfile,
   CartelRole,
   HubMode,
   PaymentMethod,
   SaleItem,
+  TeamMember,
+  WalletPassResponse,
+  SuperAdminSummary,
 } from './types';
 
 export interface ToqueApi {
-  // Autenticación
+  // Autenticación y Sesión RLS
   register(data: {
     businessName: string;
     ownerName: string;
@@ -41,7 +42,7 @@ export interface ToqueApi {
 
   getCurrentUser(): Promise<User | null>;
 
-  // Activación del Cartel
+  // Activación y Gestión de Carteles
   getActivationState(code: string): Promise<{
     found: boolean;
     status?: Cartel['status'];
@@ -49,18 +50,29 @@ export interface ToqueApi {
     cartel?: Partial<Cartel>;
   }>;
 
+  getCartelByCode(code: string): Promise<Cartel | null>;
+
   activateCartel(data: {
     code: string;
-    pin: string;
-    businessName: string;
-    reviewUrl: string;
-    cartelName: string;
+    pin?: string;
+    businessName?: string;
+    reviewUrl?: string;
+    googleReviewUrl?: string;
+    cartelName?: string;
+    name?: string;
     role: CartelRole;
-    mode: HubMode;
+    mode?: HubMode;
   }): Promise<{ success: boolean; cartel: Cartel }>;
 
-  // Carteles
   listCarteles(): Promise<Cartel[]>;
+
+  createCartelForBusiness(data: {
+    name: string;
+    code?: string;
+    role: CartelRole;
+    mode?: HubMode;
+    reviewUrl?: string;
+  }): Promise<Cartel>;
 
   updateCartel(
     id: string,
@@ -72,19 +84,45 @@ export interface ToqueApi {
 
   updateHubConfig(patch: Partial<HubConfig>): Promise<HubConfig>;
 
-  // Hub Público del Cliente
+  // Hub Público del Cliente y Recibos en Tiempo Real
   getPublicHub(code: string): Promise<PublicHub>;
 
+  subscribeToCartelHub(
+    code: string,
+    onUpdate: (hub: PublicHub) => void
+  ): () => void;
+
+  getReceiptById(receiptId: string): Promise<Receipt | null>;
+
+  subscribeToReceipt(
+    receiptId: string,
+    onUpdate: (receipt: Receipt | null) => void
+  ): () => void;
+
   claimReceipt(id: string): Promise<{ success: boolean; receipt: Receipt }>;
+
+  recordHubEvent(code: string, eventType: 'scan' | 'review_click'): Promise<void>;
 
   joinClub(data: {
     cartelCode: string;
     contact: string;
     name?: string;
     consent: boolean;
-  }): Promise<{ member: ClubMember; pointsAwarded: number }>;
+  }): Promise<{ member: ClubMember; pointsAwarded: number; walletPass?: WalletPassResponse }>;
 
-  // Caja y Cobros
+  getWalletStatus(): Promise<{ configured: boolean; provider: string }>;
+
+  createWalletPass(data: {
+    cartelCode?: string;
+    memberId?: string;
+    customerName?: string;
+    customerContact?: string;
+    contact?: string;
+    stamps?: number;
+    points?: number;
+  }): Promise<WalletPassResponse>;
+
+  // Caja y Cobros en Tiempo Real
   createSale(data: {
     cartelId: string;
     amount: number;
@@ -107,6 +145,8 @@ export interface ToqueApi {
     cartelId?: string;
   }): Promise<Sale[]>;
 
+  subscribeToBusinessSales(onUpdate: (sales: Sale[]) => void): () => void;
+
   // Club de Fidelidad
   getClubConfig(): Promise<ClubConfig>;
 
@@ -114,7 +154,26 @@ export interface ToqueApi {
 
   listClubMembers(): Promise<ClubMember[]>;
 
+  exportClubMembersCsv(): Promise<string>;
+
   deleteClubMember(id: string): Promise<void>;
+
+  // Equipo y Colaboradores (RLS)
+  listTeamMembers(): Promise<TeamMember[]>;
+
+  addTeamMember(data: {
+    name: string;
+    email: string;
+    role: 'owner' | 'manager' | 'cashier';
+    assignedCartelId?: string;
+  }): Promise<TeamMember>;
+
+  updateTeamMember(
+    id: string,
+    patch: Partial<Pick<TeamMember, 'name' | 'role' | 'assignedCartelId' | 'status'>>
+  ): Promise<TeamMember>;
+
+  removeTeamMember(id: string): Promise<void>;
 
   // Mercado Pago
   getMercadoPagoStatus(): Promise<MercadoPagoStatus>;
@@ -123,19 +182,14 @@ export interface ToqueApi {
 
   disconnectMercadoPago(): Promise<{ connected: boolean }>;
 
-  // Resumen del Panel
+  // Resumen del Panel (Datos 100% Reales)
   getDashboardSummary(): Promise<DashboardSummary>;
-
-  // Lotes para Fabricante
-  createCartelBatch(data: { count: number }): Promise<CartelBatch>;
-
-  listCartelBatch(): Promise<CartelBatch[]>;
 
   // Perfil del Negocio
   getBusinessProfile(): Promise<BusinessProfile>;
 
   updateBusinessProfile(patch: Partial<BusinessProfile>): Promise<BusinessProfile>;
 
-  // Solicitud de cartel al fabricante (si el negocio está asociado a un taller)
-  requestCartelFromManufacturer(data: { quantity: number; role: CartelRole; notes?: string }): Promise<{ success: boolean; requestId: string }>;
+  // Super Admin Global (Datos 100% Reales de toda la plataforma)
+  getSuperAdminSummary(): Promise<SuperAdminSummary>;
 }

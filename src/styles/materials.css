@@ -1,247 +1,67 @@
 /**
- * Toque — Sistema de Materiales Liquid Glass (Aurora Weather Aesthetic)
- * Estética fiel de vidrio líquido sobre fondo de tormenta atmosférico.
+ * Toque — Matte Dark Flat System (Zero Blur / Zero Gradients · Home / Palette)
  */
 
 :root {
-  --u: min(100vw / 1357, 100dvh / 871);
-  --ink: #ffffff;
-  --glass: rgba(255, 255, 255, 0.22);
-  --glass-line: rgba(255, 255, 255, 0.22);
-  --glass-rail: linear-gradient(180deg,
-    rgba(34, 48, 70, 0.72) 0%,
-    rgba(26, 38, 56, 0.80) 50%,
-    rgba(20, 29, 44, 0.86) 100%);
-  --glass-sidebar: linear-gradient(180deg,
-    rgba(18, 20, 26, 0.95) 0%,
-    rgba(13, 15, 20, 0.97) 50%,
-    rgba(9, 10, 14, 0.98) 100%);
-  --e-out: cubic-bezier(0.16, 1, 0.3, 1);
-  --e-soft: cubic-bezier(0.22, 0.61, 0.36, 1);
-  --e-pen: cubic-bezier(0.37, 0.01, 0.2, 1);
+  --ink: #0c0c0c;
+  --paper: #f1f1ee;
 }
 
-@supports not (height: 100dvh) {
-  :root {
-    --u: min(100vw / 1357, 100vh / 871);
-  }
-}
-
-/* Nivel 1: Fondo de Escenario Atmosférico Líquido (Fondo más claro Liquid Glass) */
-.aurora-stage {
-  background-color: #2b3547;
-  background-image:
-    radial-gradient(ellipse 95% 65% at 50% -10%, rgba(95, 140, 220, 0.42) 0%, transparent 75%),
-    radial-gradient(ellipse 80% 55% at 85% 45%, rgba(70, 170, 215, 0.32) 0%, transparent 65%),
-    radial-gradient(ellipse 75% 60% at 15% 75%, rgba(90, 130, 210, 0.38) 0%, transparent 65%),
-    linear-gradient(180deg, #2b3547 0%, #202938 100%);
-  background-attachment: fixed;
-  color: var(--ink);
+.aurora-stage,
+.aurora-stage.aurora-bg-navy,
+.aurora-stage.aurora-bg-obsidian,
+.aurora-stage.aurora-bg-teal {
+  background-color: #000000;
+  background-image: none;
+  color: #f1f1ee;
   position: relative;
   min-height: 100vh;
-  transition: background 0.4s ease;
-}
-
-.aurora-stage.aurora-bg-navy {
-  background-color: #2b3547;
-  background-image:
-    radial-gradient(ellipse 95% 65% at 50% -10%, rgba(95, 140, 220, 0.42) 0%, transparent 75%),
-    radial-gradient(ellipse 80% 55% at 85% 45%, rgba(70, 170, 215, 0.32) 0%, transparent 65%),
-    radial-gradient(ellipse 75% 60% at 15% 75%, rgba(90, 130, 210, 0.38) 0%, transparent 65%),
-    linear-gradient(180deg, #2b3547 0%, #202938 100%);
-  background-attachment: fixed;
-}
-
-.aurora-stage.aurora-bg-obsidian {
-  background-color: #2a2e38;
-  background-image:
-    radial-gradient(ellipse 85% 50% at 50% -10%, rgba(90, 98, 122, 0.42) 0%, transparent 75%),
-    radial-gradient(ellipse 65% 45% at 80% 50%, rgba(70, 78, 100, 0.32) 0%, transparent 65%),
-    linear-gradient(180deg, #2a2e38 0%, #1c1f26 100%);
-  background-attachment: fixed;
-}
-
-.aurora-stage.aurora-bg-teal {
-  background-color: #1e333a;
-  background-image:
-    radial-gradient(ellipse 85% 55% at 50% -10%, rgba(30, 170, 160, 0.38) 0%, transparent 75%),
-    radial-gradient(ellipse 65% 45% at 85% 60%, rgba(20, 125, 105, 0.32) 0%, transparent 65%),
-    linear-gradient(180deg, #1e333a 0%, #142227 100%);
-  background-attachment: fixed;
 }
 
 .aurora-stage::after {
-  content: '';
-  position: fixed;
-  inset: 0;
-  pointer-events: none;
-  background:
-    linear-gradient(105deg, rgba(4, 16, 24, 0.28) 0%, rgba(4, 16, 24, 0.16) 40%, rgba(4, 16, 24, 0.05) 78%, transparent 100%),
-    linear-gradient(180deg, rgba(4, 16, 24, 0.10) 0%, transparent 22%),
-    linear-gradient(0deg, rgba(4, 16, 24, 0.05), rgba(4, 16, 24, 0.05));
-  z-index: 1;
+  display: none;
 }
 
-/* Nivel 2: Barra Lateral Liquid Glass */
 .aurora-sidebar-glass {
-  background: var(--glass-sidebar);
-  backdrop-filter: blur(18px) saturate(115%);
-  -webkit-backdrop-filter: blur(18px) saturate(115%);
-  border: 1px solid var(--glass-line);
-  border-radius: 26px;
-  box-shadow: 0 16px 40px -10px rgba(4, 16, 24, 0.45);
+  background: #0c0c0c;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  border: 1px solid #242426;
+  box-shadow: none;
 }
 
-/* Nivel 3: Tarjetas Liquid Glass (Rail Cards) */
 .aurora-card-glass {
   position: relative;
   overflow: hidden;
-  background: var(--glass-rail);
-  backdrop-filter: blur(26px) saturate(118%);
-  -webkit-backdrop-filter: blur(26px) saturate(118%);
-  border: 1px solid var(--glass-line);
-  border-radius: 24px;
-  box-shadow: 0 12px 32px -8px rgba(4, 16, 24, 0.35);
-  color: var(--ink);
-  transition: transform 0.25s var(--e-out), border-color 0.25s ease, box-shadow 0.25s ease;
+  background: #111113;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  border: 1px solid #242426;
+  border-radius: 16px;
+  box-shadow: none;
 }
 
 .aurora-card-glass:hover {
-  border-color: rgba(255, 255, 255, 0.35);
-  box-shadow: 0 16px 44px -8px rgba(4, 16, 24, 0.45);
+  border-color: #343438;
 }
 
-/* Especular Sheen Coda */
-.aurora-sheen::after {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  bottom: 0;
-  width: 38%;
-  background: linear-gradient(100deg, transparent 0%, rgba(255, 255, 255, 0.17) 50%, transparent 100%);
-  transform: skewX(-18deg);
-  pointer-events: none;
-  animation: sheen 1.15s var(--e-soft) 2.55s 1 both;
+.aurora-card-glass::before,
+.aurora-card-glass::after {
+  display: none;
 }
 
-@keyframes sheen {
-  from {
-    transform: translate3d(-150%, 0, 0) skewX(-18deg);
-  }
-  to {
-    transform: translate3d(260%, 0, 0) skewX(-18deg);
-  }
-}
-
-/* Nivel 4: Botones y Chips de Vidrio */
-.aurora-tool-btn {
-  background: rgba(255, 255, 255, 0.15);
-  backdrop-filter: blur(16px) saturate(115%);
-  -webkit-backdrop-filter: blur(16px) saturate(115%);
-  border: 1px solid var(--glass-line);
+.aurora-pill-glass {
+  background: #111113;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  border: 1px solid #242426;
   border-radius: 9999px;
-  color: var(--ink);
-  transition: background 0.2s ease, transform 0.2s var(--e-out);
+  box-shadow: none;
 }
 
-.aurora-tool-btn:hover {
-  background: rgba(255, 255, 255, 0.24);
-  transform: translateY(-1px);
-}
-
-.aurora-chip-glass {
-  background: rgba(255, 255, 255, 0.175);
-  backdrop-filter: blur(16px) saturate(115%);
-  -webkit-backdrop-filter: blur(16px) saturate(115%);
-  border: 1px solid var(--glass-line);
-  border-radius: 18px;
-  color: var(--ink);
-}
-
-/* Nivel 5: Ventanas Emergentes, Pop-ups, Modales y Hojas Arrastrables (Reemplazo del antiguo 2B) */
-/* Fondo oscuro de alto contraste y opacidad 98%, desenfoque profundo y borde nítido para evitar mezclas con el fondo */
-.aurora-modal-surface,
-.aurora-sheet-surface {
-  background: rgba(10, 20, 36, 0.98);
-  backdrop-filter: blur(28px) saturate(140%);
-  -webkit-backdrop-filter: blur(28px) saturate(140%);
-  border: 1px solid rgba(255, 255, 255, 0.22);
-  box-shadow: 0 25px 60px -15px rgba(0, 0, 0, 0.85);
-  color: #ffffff;
-}
-
-.aurora-modal-scrim {
-  background: rgba(0, 0, 0, 0.72);
-  backdrop-filter: blur(6px);
-  -webkit-backdrop-filter: blur(6px);
-}
-
-/* Pip activo luminoso */
-.aurora-pip {
-  position: absolute;
-  width: 5px;
-  height: 29px;
-  border-radius: 3px;
-  background: #ffffff;
-  box-shadow: 0 0 10px rgba(255, 255, 255, 0.55);
-}
-
-/* Retrocompatibilidad con selectores de panel existentes */
-.material-page-bg {
-  background-color: #08121e;
-  background-image:
-    radial-gradient(ellipse 80% 50% at 50% -10%, rgba(30, 64, 120, 0.45) 0%, transparent 70%),
-    radial-gradient(ellipse 60% 40% at 85% 55%, rgba(14, 116, 144, 0.22) 0%, transparent 60%),
-    linear-gradient(180deg, #08121e 0%, #040911 100%);
-  background-attachment: fixed;
-  color: #ffffff;
-}
-
-.material-card {
-  background: var(--glass-rail);
-  backdrop-filter: blur(26px) saturate(118%);
-  -webkit-backdrop-filter: blur(26px) saturate(118%);
-  border: 1px solid var(--glass-line);
-  border-radius: 24px;
-  color: #ffffff;
-}
-
-.material-glass-bar {
-  background: rgba(4, 16, 24, 0.45);
-  backdrop-filter: blur(24px) saturate(140%);
-  -webkit-backdrop-filter: blur(24px) saturate(140%);
-  border-bottom: 1px solid var(--glass-line);
-  color: #ffffff;
-}
-
-.material-glass-dock {
-  background: var(--glass-rail);
-  backdrop-filter: blur(24px) saturate(140%);
-  -webkit-backdrop-filter: blur(24px) saturate(140%);
-  border: 1px solid var(--glass-line);
-  color: #ffffff;
-}
-
-/* Animaciones del Gráfico SVG */
-@keyframes drawLine {
-  to {
-    stroke-dashoffset: 0;
-  }
-}
-
-.wline {
-  stroke-dasharray: 1;
-  stroke-dashoffset: 1;
-  animation: drawLine 1.60s var(--e-pen) 1.50s forwards;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .wline {
-    stroke-dashoffset: 0;
-    animation: none;
-  }
-  .aurora-sheen::after {
-    display: none;
-  }
+.aurora-hairline {
+  height: 1px;
+  width: 100%;
+  background: #242426;
+  border: 0;
 }

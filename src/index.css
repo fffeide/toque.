@@ -4,47 +4,26 @@
 @import "./styles/hero-landing.css";
 
 :root {
-  /* 5 Colores Canónicos de Toque */
-  --color-papel: #F7F4EE;
-  --color-tinta: #0B1030;
-  --color-ultramar: #3A3FE0;
-  --color-estrella: #FFC21A;
-  --color-coral: #B8332A;
+  --bg-main: #000000;
+  --bg-sidebar: #0c0c0c;
+  --bg-card: #111113;
+  --border-card: #242426;
+  --border-hover: #343438;
+  --accent-primary: #bec8ff;
+  --accent-green: #2fb36a;
+  --paper: #f1f1ee;
+  --ink: #0c0c0c;
+  --text-primary: #f1f1ee;
+  --text-secondary: #9c9c98;
 
-  /* Tonos Suaves Derivados */
-  --color-texto-secundario: #5E6072;
-  --color-lineas: #E3DDD2;
-  --color-fondo-ultramar-suave: #ECEDFC;
-  --color-fondo-estrella-suave: #FFF1C7;
-  --color-fondo-coral-suave: #FCE9E6;
-
-  /* Tipografías */
-  --font-display: 'Sora', sans-serif;
-  --font-body: 'Inter', sans-serif;
-  --font-code: 'JetBrains Mono', monospace;
-}
-
-@theme {
-  --color-papel: #F7F4EE;
-  --color-tinta: #0B1030;
-  --color-ultramar: #3A3FE0;
-  --color-estrella: #FFC21A;
-  --color-coral: #B8332A;
-
-  --color-texto-secundario: #5E6072;
-  --color-lineas: #E3DDD2;
-  --color-fondo-ultramar-suave: #ECEDFC;
-  --color-fondo-estrella-suave: #FFF1C7;
-  --color-fondo-coral-suave: #FCE9E6;
-
-  --font-display: 'Sora', sans-serif;
-  --font-body: 'Inter', sans-serif;
+  --font-display: 'Inter', system-ui, -apple-system, sans-serif;
+  --font-body: 'Inter', system-ui, -apple-system, sans-serif;
   --font-code: 'JetBrains Mono', monospace;
 }
 
 body {
-  background-color: var(--color-papel);
-  color: var(--color-tinta);
+  background-color: #000000;
+  color: #f1f1ee;
   font-family: var(--font-body);
   margin: 0;
   padding: 0;
@@ -52,25 +31,21 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* Títulos con espaciado -0.02em en Sora */
 h1, h2, h3, .font-display {
   font-family: var(--font-display);
-  letter-spacing: -0.02em;
+  letter-spacing: -0.025em;
 }
 
-/* Códigos de cartel exclusivamente en JetBrains Mono */
 .font-code, .cartel-code {
   font-family: var(--font-code);
   font-variant-numeric: tabular-nums;
 }
 
-/* Foco visible para accesibilidad */
 *:focus-visible {
-  outline: 2px solid var(--color-ultramar);
+  outline: 2px solid #bec8ff;
   outline-offset: 2px;
 }
 
-/* Movimiento respetando prefers-reduced-motion */
 @media (prefers-reduced-motion: reduce) {
   *, ::before, ::after {
     animation-duration: 0.01ms !important;
@@ -80,38 +55,40 @@ h1, h2, h3, .font-display {
   }
 }
 
-/* Tarjetas casi sólidas sin efecto vidrio */
+/* Matte Dark Flat Card con colores de Home (/) */
 .toque-card {
-  background-color: #FFFFFF;
-  border: 1px solid var(--color-lineas);
+  background-color: #111113;
+  border: 1px solid #242426;
   border-radius: 1rem;
-  box-shadow: 0 1px 3px 0 rgba(11, 16, 48, 0.05);
+  box-shadow: none;
+  backdrop-filter: none;
 }
 
-/* Botón táctil para caja (mínimo 48px de alto y respuesta limpia) */
+.toque-card:hover {
+  border-color: #343438;
+}
+
 .btn-touch {
-  min-height: 48px;
-  min-width: 48px;
+  min-height: 44px;
+  min-width: 44px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  transition: transform 0.12s ease, opacity 0.12s ease;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
   user-select: none;
 }
 
-.btn-touch:active {
-  transform: scale(0.97);
-}
-
-/* Scrollbar sutil */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
 }
 ::-webkit-scrollbar-track {
-  background: var(--color-papel);
+  background: #000000;
 }
 ::-webkit-scrollbar-thumb {
-  background: var(--color-lineas);
+  background: #28282a;
   border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #3a3a3d;
 }

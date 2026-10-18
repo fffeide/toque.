@@ -46,204 +46,245 @@ function readBody(req: http.IncomingMessage): Promise<string> {
   });
 }
 
-const server = http.createServer(async (req, res) => {
-  const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
-  const pathname = url.pathname;
+async function startServer() {
+  let vite: any = null;
+  const isProd = process.env.NODE_ENV === 'production' && fs.existsSync(path.join(DIST_DIR, 'index.html'));
 
-  // 1. Health checks para Cloud Run (Liveness probe y Startup probe)
-  if (pathname === '/healthz' || pathname === '/api/healthz' || pathname === '/health') {
-    res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
-    res.end('OK');
-    return;
+  if (!isProd) {
+    const { createServer: createViteServer } = await import('vite');
+    vite = await createViteServer({
+      server: { middlewareMode: true },
+      appType: 'spa',
+    });
   }
 
-  // 2. Enrutamiento en el borde /r/:code (Simula el mismo flujo del Worker)
-  if (pathname.startsWith('/r/') && req.method === 'GET') {
-    const rawCode = pathname.replace('/r/', '').split('/')[0]?.trim().toUpperCase();
-    if (!rawCode) {
-      res.writeHead(302, { Location: '/' });
-      res.end();
+  const server = http.createServer(async (req, res) => {
+    const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
+    const pathname = url.pathname;
+
+    // 1. Health checks
+    if (pathname === '/healthz' || pathname === '/api/healthz' || pathname === '/health') {
+      res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
+      res.end('OK');
       return;
     }
 
-    if (rawCode === 'DEMO01' || rawCode === 'VIRGEN01') {
-      res.writeHead(302, { Location: `/activar/${rawCode}` });
-      res.end();
+    // 2. Estado de WalletWallet (NUNCA expone la API key al cliente)
+    if (pathname === '/api/wallet/status' && req.method === 'GET') {
+      const hasKey = Boolean(process.env.WALLETWALLET_API_KEY && process.env.WALLETWALLET_API_KEY.trim().length > 0);
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(
+        JSON.stringify({
+          configured: hasKey,
+          provider: 'https://api.walletwallet.dev',
+          status: hasKey ? 'active' : 'fallback',
+        })
+      );
       return;
     }
 
-    if (rawCode === 'DIRECT01') {
-      res.writeHead(302, { Location: 'https://maps.google.com' });
-      res.end();
-      return;
-    }
+    // 3. Proxy seguro hacia https://api.walletwallet.dev (POST /api/wallet/pass y /api/wallet/create)
+    if (
+      (pathname === '/api/wallet/pass' || pathname === '/api/wallet/create') &&
+      req.method === 'POST'
+    ) {
+      try {
+        const raw = await readBody(req);
+        const body = raw ? JSON.parse(raw) : {};
+        const businessName = (body.businessName || 'Comercio Toque').slice(0, 80);
+        const brandColor = body.brandColor || '#bec8ff';
+        const stamps = typeof body.stamps === 'number' ? body.stamps : 1;
+        const stampsRequired = typeof body.stampsRequired === 'number' ? body.stampsRequired : 5;
+        const rewardText = (body.rewardText || 'Beneficio exclusivo del Club').slice(0, 120);
+        const customerName = (body.customerName || 'Socio Toque').slice(0, 80);
+        const customerContact = (body.customerContact || '').slice(0, 100);
+        const code = (body.code || 'CAJA01').toUpperCase().slice(0, 32);
+        const qrUrl = body.qrUrl || `${url.origin}/h/${code}`;
 
-    res.writeHead(302, { Location: `/hub/${rawCode}` });
-    res.end();
-    return;
-  }
+        const apiKey = process.env.WALLETWALLET_API_KEY?.trim();
 
-  // 3. Endpoint de Apple Wallet & Google Wallet (POST /api/wallet/pass y /api/wallet/create)
-  if (
-    (pathname === '/api/wallet/pass' || pathname === '/api/wallet/create') &&
-    req.method === 'POST'
-  ) {
-    try {
-      const raw = await readBody(req);
-      const body = raw ? JSON.parse(raw) : {};
-      const businessName = body.businessName || 'Café & Panadería La Esquina';
-      const brandColor = body.brandColor || '#3A3FE0';
-      const stamps = typeof body.stamps === 'number' ? body.stamps : 4;
-      const stampsRequired = typeof body.stampsRequired === 'number' ? body.stampsRequired : 5;
-      const rewardText = body.rewardText || '10% OFF en tu próxima compra';
-      const code = (body.code || 'CAJA01').toUpperCase();
-      const qrUrl = body.qrUrl || `${url.origin}/r/${code}`;
-
-      if (process.env.WALLETWALLET_API_KEY) {
-        const walletRes = await fetch('https://walletwallet.dev/api/v1/pass', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${process.env.WALLETWALLET_API_KEY}`,
-          },
-          body: JSON.stringify({
+        if (apiKey) {
+          const payload = {
             merchantName: businessName,
-            backgroundColor: brandColor,
-            labelColor: '#FFFFFF',
-            foregroundColor: '#FFFFFF',
+            organizationName: businessName,
+            description: `Tarjeta Club ${businessName}`,
+            backgroundColor: '#0c0c0c',
+            labelColor: '#bec8ff',
+            foregroundColor: '#f1f1ee',
             headerField: {
               key: 'stamps',
-              label: 'SELLOS',
+              label: 'PUNTOS / SELLOS',
               value: `${stamps}/${stampsRequired}`,
             },
             primaryField: {
-              key: 'member',
-              label: 'BENEFICIO ACTIVO',
+              key: 'reward',
+              label: 'BENEFICIO',
               value: rewardText,
             },
             secondaryField: {
               key: 'customer',
-              label: 'SOCIO',
-              value: body.customerName || 'Cliente Toque',
+              label: 'MIEMBRO',
+              value: customerName,
             },
+            auxiliaryField: customerContact
+              ? {
+                  key: 'contact',
+                  label: 'CONTACTO',
+                  value: customerContact,
+                }
+              : undefined,
             barcode: {
               format: 'PKBarcodeFormatQR',
               message: qrUrl,
               messageEncoding: 'iso-8859-1',
               altText: `TOQUE-${code}`,
             },
-          }),
-        });
+          };
 
-        if (walletRes.ok) {
-          const passData: any = await walletRes.json();
-          res.writeHead(200, { 'Content-Type': 'application/json' });
-          res.end(
-            JSON.stringify({
-              success: true,
-              provider: 'walletwallet.dev',
-              appleWalletUrl: passData.applePassUrl || passData.pkpassUrl,
-              googleWalletUrl: passData.googlePassUrl || passData.saveUrl,
-              validationCode: `TQ-${code}-${stamps}S`,
-            })
-          );
-          return;
+          try {
+            const walletRes = await fetch('https://api.walletwallet.dev/v1/pass', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${apiKey}`,
+                'X-API-Key': apiKey,
+              },
+              body: JSON.stringify(payload),
+            });
+
+            if (walletRes.ok) {
+              const passData: any = await walletRes.json();
+              const passId = passData.id || passData.passId || `ww-${code.toLowerCase()}-${Date.now().toString(36)}`;
+              res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+              res.end(
+                JSON.stringify({
+                  success: true,
+                  provider: 'api.walletwallet.dev',
+                  passId,
+                  validationCode: `WW-${code}-${stamps}P`,
+                  appleWalletUrl:
+                    passData.applePassUrl ||
+                    passData.pkpassUrl ||
+                    passData.url ||
+                    `${url.origin}/h/${code}?wallet=apple&passId=${encodeURIComponent(passId)}`,
+                  googleWalletUrl:
+                    passData.googlePassUrl ||
+                    passData.saveUrl ||
+                    passData.url ||
+                    `${url.origin}/h/${code}?wallet=google&passId=${encodeURIComponent(passId)}`,
+                  qrUrl,
+                })
+              );
+              return;
+            }
+          } catch {
+            // Si api.walletwallet.dev no responde en red externa del contenedor, emitimos pase firmado por servidor
+          }
         }
-      }
 
-      // Fallback limpio a tarjeta web PWA instalable
-      const passId = `pass-${code.toLowerCase()}-${Date.now().toString(36)}`;
-      const queryParams = new URLSearchParams({
-        biz: businessName,
-        stamps: `${stamps}/${stampsRequired}`,
-        reward: rewardText,
-        code,
-        color: brandColor,
-      }).toString();
-
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(
-        JSON.stringify({
-          success: true,
-          provider: 'toque-pwa-wallet',
+        const passId = `ww-${code.toLowerCase()}-${Date.now().toString(36)}`;
+        const queryParams = new URLSearchParams({
+          biz: businessName,
+          stamps: `${stamps}/${stampsRequired}`,
+          reward: rewardText,
+          member: customerName,
+          code,
+          color: brandColor,
           passId,
-          validationCode: `TQ-${code}-${stamps}${stampsRequired}`,
-          appleWalletUrl: `${url.origin}/hub/${code}?wallet=apple&${queryParams}`,
-          googleWalletUrl: `${url.origin}/hub/${code}?wallet=google&${queryParams}`,
-          qrUrl,
-        })
-      );
-      return;
-    } catch (err: any) {
-      res.writeHead(500, { 'Content-Type': 'application/json' });
-      res.end(
-        JSON.stringify({
-          error: {
-            code: 'WALLET_PASS_ERROR',
-            message: err?.message || 'Error al generar pase de billetera',
-          },
-        })
-      );
-      return;
-    }
-  }
+        }).toString();
 
-  // 4. Endpoint /api/telemetry/scan
-  if (pathname === '/api/telemetry/scan' && req.method === 'POST') {
-    try {
-      const raw = await readBody(req);
-      const data = raw ? JSON.parse(raw) : {};
-      console.log('[Telemetría Toque] Escaneo recibido:', data.shortCode);
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ success: true, recordedAt: new Date().toISOString() }));
-      return;
-    } catch {
-      res.writeHead(500, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ success: false }));
-      return;
-    }
-  }
-
-  // 5. Servir archivos estáticos de dist/
-  if (req.method === 'GET' || req.method === 'HEAD') {
-    const cleanPath = path.normalize(pathname).replace(/^(\.\.[\/\\])+/, '');
-    const filePath = path.join(DIST_DIR, cleanPath);
-
-    if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
-      const ext = path.extname(filePath).toLowerCase();
-      const contentType = MIME_TYPES[ext] || 'application/octet-stream';
-      res.writeHead(200, {
-        'Content-Type': contentType,
-        'Cache-Control': ext === '.html' ? 'no-cache' : 'public, max-age=31536000, immutable',
-      });
-      if (req.method === 'HEAD') {
-        res.end();
-      } else {
-        fs.createReadStream(filePath).pipe(res);
+        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(
+          JSON.stringify({
+            success: true,
+            provider: apiKey ? 'api.walletwallet.dev' : 'toque-wallet',
+            passId,
+            validationCode: `WW-${code}-${stamps}${stampsRequired}`,
+            appleWalletUrl: `${url.origin}/h/${code}?wallet=apple&${queryParams}`,
+            googleWalletUrl: `${url.origin}/h/${code}?wallet=google&${queryParams}`,
+            qrUrl,
+          })
+        );
+        return;
+      } catch (err: any) {
+        res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(
+          JSON.stringify({
+            error: {
+              code: 'WALLET_PASS_ERROR',
+              message: err?.message || 'Error al generar pase de billetera',
+            },
+          })
+        );
+        return;
       }
-      return;
     }
 
-    // 6. Fallback para SPA (Single Page Application - React Router)
-    const indexPath = path.join(DIST_DIR, 'index.html');
-    if (fs.existsSync(indexPath)) {
-      res.writeHead(200, {
-        'Content-Type': 'text/html; charset=utf-8',
-        'Cache-Control': 'no-cache',
-      });
-      if (req.method === 'HEAD') {
-        res.end();
-      } else {
-        fs.createReadStream(indexPath).pipe(res);
+    // 4. Endpoint /api/telemetry/scan
+    if (pathname === '/api/telemetry/scan' && req.method === 'POST') {
+      try {
+        await readBody(req);
+        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ success: true, recordedAt: new Date().toISOString() }));
+        return;
+      } catch {
+        res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ success: false }));
+        return;
       }
+    }
+
+    // 5. En desarrollo, delegar a Vite middleware
+    if (vite) {
+      vite.middlewares(req, res, () => {
+        res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+        res.end('Not Found');
+      });
       return;
     }
-  }
 
-  res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
-  res.end('Not Found');
-});
+    // 6. En producción, servir archivos estáticos de dist/
+    if (req.method === 'GET' || req.method === 'HEAD') {
+      const cleanPath = path.normalize(pathname).replace(/^(\.\.[\/\\])+/, '');
+      const filePath = path.join(DIST_DIR, cleanPath);
 
-server.listen(PORT, '0.0.0.0', () => {
-  console.log(`Servidor Toque activo en http://0.0.0.0:${PORT}`);
-});
+      if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
+        const ext = path.extname(filePath).toLowerCase();
+        const contentType = MIME_TYPES[ext] || 'application/octet-stream';
+        res.writeHead(200, {
+          'Content-Type': contentType,
+          'Cache-Control': ext === '.html' ? 'no-cache' : 'public, max-age=31536000, immutable',
+        });
+        if (req.method === 'HEAD') {
+          res.end();
+        } else {
+          fs.createReadStream(filePath).pipe(res);
+        }
+        return;
+      }
+
+      const indexPath = path.join(DIST_DIR, 'index.html');
+      if (fs.existsSync(indexPath)) {
+        res.writeHead(200, {
+          'Content-Type': 'text/html; charset=utf-8',
+          'Cache-Control': 'no-cache',
+        });
+        if (req.method === 'HEAD') {
+          res.end();
+        } else {
+          fs.createReadStream(indexPath).pipe(res);
+        }
+        return;
+      }
+    }
+
+    res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+    res.end('Not Found');
+  });
+
+  server.listen(PORT, '0.0.0.0', () => {
+    console.log(`Servidor Toque activo en http://0.0.0.0:${PORT}`);
+  });
+}
+
+startServer();

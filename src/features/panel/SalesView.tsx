@@ -1,198 +1,185 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { api, Sale, Cartel, PaymentMethod } from '../../api';
+import { api, Sale, PaymentMethod } from '../../api';
 import { Card } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
 import { Skeleton } from '../../components/ui/Skeleton';
 import { EmptyState } from '../../components/ui/EmptyState';
-import { formatCurrency, formatDate } from '../../lib/formatters';
-import {
-  Receipt,
-  Plus,
-  Filter,
-  CreditCard,
-  QrCode,
-  Calendar,
-} from 'lucide-react';
+import { formatCurrency, formatDateTime, formatPaymentMethod } from '../../lib/formatters';
+import { Receipt, CreditCard, ExternalLink, CheckCircle2, Clock, XCircle } from 'lucide-react';
 
 export const SalesView: React.FC = () => {
   const [sales, setSales] = useState<Sale[]>([]);
-  const [carteles, setCarteles] = useState<Cartel[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-
-  // Filtros
-  const [selectedMethod, setSelectedMethod] = useState<string>('all');
-  const [selectedCartel, setSelectedCartel] = useState<string>('all');
-
-  const loadSales = async () => {
-    setIsLoading(true);
-    try {
-      const [salesData, cartelesData] = await Promise.all([
-        api.listSales({
-          method: selectedMethod === 'all' ? undefined : (selectedMethod as PaymentMethod),
-          cartelId: selectedCartel === 'all' ? undefined : selectedCartel,
-        }),
-        api.listCarteles(),
-      ]);
-      setSales(salesData);
-      setCarteles(cartelesData);
-    } catch {
-      // Ignorar
-    } finally {
-      setIsLoading(false);
-    }
-  };
+  const [filterMethod, setFilterMethod] = useState<PaymentMethod | 'all'>('all');
 
   useEffect(() => {
-    loadSales();
-  }, [selectedMethod, selectedCartel]);
+    const unsub = api.subscribeToBusinessSales((liveSales) => {
+      setSales(liveSales);
+      setIsLoading(false);
+    });
+    return () => unsub();
+  }, []);
+
+  const filteredSales =
+    filterMethod === 'all' ? sales : sales.filter((s) => s.method === filterMethod);
+
+  const paidSales = filteredSales.filter((s) => s.status === 'paid');
+  const totalAmount = paidSales.reduce((acc, curr) => acc + curr.amount, 0);
+
+  if (isLoading) {
+    return (
+      <div className="space-y-4">
+        <Skeleton className="h-10 w-48 bg-[#111113]" />
+        <Skeleton className="h-72 w-full bg-[#111113]" />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
-      {/* Encabezado */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="font-display font-bold text-2xl sm:text-3xl text-white">
-            Ventas
+          <span className="block text-[11px] uppercase tracking-wider text-[#a1a1aa] font-semibold mb-1">
+            AUDITORÍA DE MOSTRADOR EN TIEMPO REAL
+          </span>
+          <h1 className="text-2xl font-bold text-[#f1f1ee] tracking-tight">
+            Ventas y Recibos Digitales
           </h1>
-          <p className="text-xs text-white/70 mt-0.5">
-            Registro de cobros emitidos en mostrador y mesas.
+          <p className="text-sm text-[#a1a1aa] mt-0.5">
+            Historial sincronizado en vivo con la Terminal de Caja y los comprobantes emitidos.
           </p>
         </div>
 
-        <Link to="/caja">
-          <Button variant="estrella" size="sm" icon={<Plus className="w-3.5 h-3.5 text-[#0B1030]" />}>
-            Nuevo cobro
-          </Button>
-        </Link>
-      </div>
-
-      {/* Barra de Filtros Liquid Glass */}
-      <div className="p-3.5 rounded-2xl bg-white/[0.08] backdrop-blur-xl border border-white/15 flex flex-wrap items-center gap-3">
-        <div className="flex items-center gap-1.5 text-xs text-white/70 px-2 font-medium">
-          <Filter className="w-3.5 h-3.5" />
-          <span>Filtrar por:</span>
-        </div>
-
-        {/* Medio de Pago */}
-        <select
-          value={selectedMethod}
-          onChange={(e) => setSelectedMethod(e.target.value)}
-          className="bg-white/10 border border-white/20 rounded-xl px-3 py-1.5 text-xs font-semibold text-white focus:outline-none focus:bg-white/15"
-        >
-          <option value="all" className="bg-[#141824] text-white">Todos los medios</option>
-          <option value="mp_qr" className="bg-[#141824] text-white">Mercado Pago QR</option>
-          <option value="cash" className="bg-[#141824] text-white">Efectivo</option>
-          <option value="card_manual" className="bg-[#141824] text-white">Posnet / Tarjeta</option>
-        </select>
-
-        {/* Caja */}
-        <select
-          value={selectedCartel}
-          onChange={(e) => setSelectedCartel(e.target.value)}
-          className="bg-white/10 border border-white/20 rounded-xl px-3 py-1.5 text-xs font-semibold text-white focus:outline-none focus:bg-white/15"
-        >
-          <option value="all" className="bg-[#141824] text-white">Todas las cajas</option>
-          {carteles.map(c => (
-            <option key={c.id} value={c.id} className="bg-[#141824] text-white">
-              {c.name} ({c.code})
-            </option>
-          ))}
-        </select>
-      </div>
-
-      {/* Tabla de Ventas en Liquid Glass */}
-      {isLoading ? (
-        <div className="space-y-3">
-          {[1, 2, 3, 4].map(i => (
-            <Skeleton key={i} className="h-16 rounded-2xl bg-white/10" />
-          ))}
-        </div>
-      ) : sales.length === 0 ? (
-        <Card padding="lg">
-          <div className="text-center py-12 space-y-4 text-white">
-            <div className="w-14 h-14 rounded-3xl bg-white/10 flex items-center justify-center mx-auto text-[#FFC21A] border border-white/15">
-              <Receipt className="w-7 h-7" />
-            </div>
-            <div className="space-y-1">
-              <h3 className="font-display font-bold text-lg text-white">No hay ventas registradas</h3>
-              <p className="text-xs text-white/60 max-w-sm mx-auto leading-relaxed">
-                Cuando el cajero registre un cobro en la pantalla de Caja, aparecerá detallado en este listado.
-              </p>
-            </div>
-            <Link to="/caja">
-              <Button variant="estrella" size="sm" icon={<CreditCard className="w-4 h-4 text-[#0B1030]" />}>
-                Abrir Caja
-              </Button>
-            </Link>
+        <div className="flex items-center gap-3">
+          <div className="bg-[#111113] px-4 py-2.5 rounded-xl border border-[#242426]">
+            <span className="text-[11px] uppercase tracking-wider text-[#a1a1aa] block font-semibold">
+              Total cobrado ({paidSales.length})
+            </span>
+            <span className="text-lg font-bold font-mono text-[#34d399]">
+              {formatCurrency(totalAmount)}
+            </span>
           </div>
+          <Link to="/caja">
+            <Button variant="primary" size="md">
+              <CreditCard className="w-4 h-4 mr-1.5" />
+              Ir a Caja
+            </Button>
+          </Link>
+        </div>
+      </div>
+
+      {/* Filtros por medio de pago */}
+      <div className="flex gap-2 overflow-x-auto pb-1">
+        {(['all', 'mp_qr', 'cash', 'card_manual'] as const).map((method) => (
+          <button
+            key={method}
+            type="button"
+            onClick={() => setFilterMethod(method)}
+            className={`px-3.5 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition-colors cursor-pointer ${
+              filterMethod === method
+                ? 'bg-[#bec8ff] text-[#0c0c0c]'
+                : 'bg-[#111113] border border-[#242426] text-[#a1a1aa] hover:text-[#f1f1ee]'
+            }`}
+          >
+            {method === 'all' ? 'Todos los medios' : formatPaymentMethod(method)}
+          </button>
+        ))}
+      </div>
+
+      {filteredSales.length === 0 ? (
+        <Card>
+          <EmptyState
+            icon="🧾"
+            title="Sin ventas registradas para este filtro"
+            description="Emití un cobro desde la pantalla de Caja para ver el comprobante digital aparecer al instante."
+            actionLabel="Abrir Terminal de Caja"
+            onAction={() => {
+              window.location.href = '/caja';
+            }}
+          />
         </Card>
       ) : (
         <Card padding="none" className="overflow-hidden">
           <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse text-xs">
+            <table className="w-full text-left border-collapse">
               <thead>
-                <tr className="border-b border-white/15 bg-white/5 text-white/70 font-semibold">
-                  <th className="py-3 px-4">Fecha y hora</th>
-                  <th className="py-3 px-4">Caja / Cartel</th>
-                  <th className="py-3 px-4">Concepto / Ítems</th>
-                  <th className="py-3 px-4">Medio de pago</th>
-                  <th className="py-3 px-4 text-right">Importe</th>
-                  <th className="py-3 px-4 text-center">Estado</th>
+                <tr className="border-b border-[#242426] bg-[#141416] text-[11px] font-semibold text-[#a1a1aa] uppercase tracking-wider">
+                  <th className="py-3.5 px-4">Fecha y Hora</th>
+                  <th className="py-3.5 px-4">Detalle / Nota</th>
+                  <th className="py-3.5 px-4">Cartel</th>
+                  <th className="py-3.5 px-4">Medio de Pago</th>
+                  <th className="py-3.5 px-4">Estado</th>
+                  <th className="py-3.5 px-4 text-right">Monto</th>
+                  <th className="py-3.5 px-4 text-right">Recibo Digital</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-white/10">
-                {sales.map((sale) => {
-                  const methodLabel = sale.method === 'mp_qr' ? 'Mercado Pago QR' : sale.method === 'cash' ? 'Efectivo' : 'Posnet';
-                  const itemsCount = sale.items.reduce((acc, it) => acc + it.quantity, 0);
-
-                  return (
-                    <tr key={sale.id} className="hover:bg-white/[0.05] transition text-white">
-                      <td className="py-3.5 px-4 font-mono text-white/60">
-                        {formatDate(sale.createdAt)}
-                      </td>
-                      <td className="py-3.5 px-4 font-semibold text-white">
-                        <span className="cartel-code bg-white/10 px-2.5 py-1 rounded-lg border border-white/20">
-                          {sale.cartelName || 'Caja'}
+              <tbody className="divide-y divide-[#242426] text-sm">
+                {filteredSales.map((sale) => (
+                  <tr key={sale.id} className="hover:bg-[#18181b]/60 transition-colors">
+                    <td className="py-3.5 px-4 whitespace-nowrap text-[#a1a1aa] text-xs">
+                      {formatDateTime(sale.createdAt)}
+                    </td>
+                    <td className="py-3.5 px-4 text-[#f1f1ee] font-medium">
+                      <div>
+                        {sale.note ||
+                          (sale.items && sale.items.length > 0
+                            ? sale.items.map((it) => `${it.quantity}x ${it.name}`).join(', ')
+                            : 'Cobro de mostrador')}
+                      </div>
+                      {sale.cashierName && (
+                        <span className="text-[11px] text-[#a1a1aa]">
+                          Emitido por: {sale.cashierName}
                         </span>
-                      </td>
-                      <td className="py-3.5 px-4 text-white">
-                        <div className="font-medium text-white">
-                          {sale.items[0]?.name || 'Consumo'}
-                          {sale.items.length > 1 && (
-                            <span className="text-white/60"> (+{sale.items.length - 1} más)</span>
-                          )}
-                        </div>
-                        <span className="text-[10px] text-white/50">
-                          {itemsCount} ítem(s) en total
+                      )}
+                    </td>
+                    <td className="py-3.5 px-4 whitespace-nowrap">
+                      <span className="font-mono text-xs text-[#bec8ff] font-bold">
+                        {sale.cartelCode || 'CAJA01'}
+                      </span>
+                    </td>
+                    <td className="py-3.5 px-4 whitespace-nowrap text-xs text-[#f1f1ee]">
+                      {formatPaymentMethod(sale.method)}
+                    </td>
+                    <td className="py-3.5 px-4 whitespace-nowrap">
+                      {sale.status === 'paid' ? (
+                        <span className="inline-flex items-center gap-1 text-xs font-bold text-[#34d399]">
+                          <CheckCircle2 className="w-3.5 h-3.5" />
+                          Cobrado
                         </span>
-                      </td>
-                      <td className="py-3.5 px-4 text-white/80 font-medium">
-                        {methodLabel}
-                      </td>
-                      <td className="py-3.5 px-4 text-right font-display font-bold text-sm text-white tabular-nums">
-                        {formatCurrency(sale.amount)}
-                      </td>
-                      <td className="py-3.5 px-4 text-center">
-                        {sale.status === 'paid' && (
-                          <span className="inline-block px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-[#19C37D]/20 text-[#19C37D] border border-[#19C37D]/30">
-                            Cobrada
-                          </span>
-                        )}
-                        {sale.status === 'pending' && (
-                          <span className="inline-block px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-[#FFC21A]/20 text-[#FFC21A] border border-[#FFC21A]/30">
-                            Pendiente
-                          </span>
-                        )}
-                        {sale.status === 'cancelled' && (
-                          <span className="inline-block px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-[#FF6B6B]/20 text-[#FF6B6B] border border-[#FF6B6B]/30">
-                            Anulada
-                          </span>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
+                      ) : sale.status === 'pending' ? (
+                        <span className="inline-flex items-center gap-1 text-xs font-bold text-amber-300">
+                          <Clock className="w-3.5 h-3.5" />
+                          Pendiente
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 text-xs font-bold text-red-400">
+                          <XCircle className="w-3.5 h-3.5" />
+                          Cancelado
+                        </span>
+                      )}
+                    </td>
+                    <td className="py-3.5 px-4 whitespace-nowrap text-right font-mono font-bold text-[#f1f1ee]">
+                      {formatCurrency(sale.amount)}
+                    </td>
+                    <td className="py-3.5 px-4 whitespace-nowrap text-right">
+                      {sale.receiptId ? (
+                        <Link
+                          to={`/r/${sale.receiptId}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 text-xs font-bold text-[#bec8ff] hover:text-[#d6daf6]"
+                        >
+                          <Receipt className="w-3.5 h-3.5" />
+                          <span>Ver recibo</span>
+                          <ExternalLink className="w-3 h-3" />
+                        </Link>
+                      ) : (
+                        <span className="text-xs text-[#a1a1aa]">—</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>

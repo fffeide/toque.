@@ -13,7 +13,7 @@ export const PublicHeader: React.FC<PublicHeaderProps> = ({
   showToqueMark = true,
 }) => {
   return (
-    <header className="w-full bg-[#F7F4EE] border-b border-[#E3DDD2] py-3.5 px-4 sm:px-6 sticky top-0 z-30">
+    <header className="w-full bg-[#0c0c0c] border-b border-[#242426] py-3.5 px-4 sm:px-6 sticky top-0 z-30">
       <div className="max-w-2xl mx-auto flex items-center justify-between">
         {businessName ? (
           <div className="flex items-center gap-3 min-w-0">
@@ -21,35 +21,38 @@ export const PublicHeader: React.FC<PublicHeaderProps> = ({
               <img
                 src={logoUrl}
                 alt={businessName}
-                className="w-9 h-9 rounded-xl object-cover border border-[#E3DDD2]"
+                className="w-9 h-9 rounded-xl object-cover border border-[#242426]"
               />
             ) : (
-              <div className="w-9 h-9 rounded-xl bg-[#3A3FE0] text-white flex items-center justify-center font-display font-bold text-base shrink-0">
+              <div className="w-9 h-9 rounded-xl bg-[#bec8ff] text-[#0c0c0c] flex items-center justify-center font-bold text-base shrink-0">
                 {businessName.charAt(0).toUpperCase()}
               </div>
             )}
             <div className="truncate">
-              <span className="font-display font-bold text-sm text-[#0B1030] block truncate">
+              <span className="font-bold text-sm text-[#f1f1ee] block truncate tracking-tight">
                 {businessName}
               </span>
             </div>
           </div>
         ) : (
-          <Link to="/" className="flex items-center gap-2 group">
-            <div className="w-8 h-8 rounded-xl bg-[#3A3FE0] text-white flex items-center justify-center font-display font-bold text-base">
-              T
+          <Link to="/" className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-full bg-[#f1f1ee] border border-[#242426] flex items-center justify-center">
+              <img src="/assets/logo.svg" alt="" className="w-5 h-5 object-contain" />
             </div>
-            <span className="font-display font-bold text-base text-[#0B1030]">
-              Toque
+            <span className="font-bold text-base text-[#f1f1ee] tracking-tight">
+              toque™
             </span>
           </Link>
         )}
 
         {showToqueMark && (
-          <div className="text-[11px] font-medium text-[#5E6072] flex items-center gap-1.5">
+          <Link
+            to="/"
+            className="text-[11px] font-medium text-[#a1a1aa] hover:text-[#f1f1ee] flex items-center gap-1.5 transition-colors"
+          >
             <span>Con</span>
-            <span className="font-display font-bold text-[#0B1030]">Toque™</span>
-          </div>
+            <span className="font-bold text-[#f1f1ee]">toque™</span>
+          </Link>
         )}
       </div>
     </header>
