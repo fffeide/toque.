@@ -41,7 +41,6 @@ import {
   ConsumerReceipt,
 } from './types';
 
-const SUPERADMIN_EMAIL = 'fedeeeloiss@gmail.com';
 const SESSION_STORAGE_KEY = 'toque_rls_session_v2';
 
 const DEFAULT_HUB_CONFIG: HubConfig = {
@@ -77,6 +76,48 @@ const DEFAULT_HUB_CONFIG: HubConfig = {
       universalCode: '7790002',
       featuredInHub: true,
       description: 'Pan de masa madre horneado en el día',
+    },
+    {
+      id: 'prod-3',
+      title: 'Flat White Doble (Sin código)',
+      price: 3400,
+      featuredInHub: true,
+      description: 'Doble ristretto de especialidad con leche texturizada',
+    },
+    {
+      id: 'prod-4',
+      title: 'Avocado Toast con Huevo Mollet',
+      price: 6900,
+      featuredInHub: true,
+      description: 'Pan de masa madre, palta fresca, semillas y aceite de oliva',
+    },
+    {
+      id: 'prod-5',
+      title: 'Croissant Relleno de Almendras',
+      price: 4100,
+      featuredInHub: false,
+      description: 'Hojaldre francés horneado en el día con crema de almendras',
+    },
+    {
+      id: 'prod-6',
+      title: 'Limonada con Menta y Jengibre (500ml)',
+      price: 3600,
+      featuredInHub: false,
+      description: 'Exprimida en el momento, endulzada con almíbar orgánico',
+    },
+    {
+      id: 'prod-7',
+      title: 'Cheesecake de Frutos Rojos',
+      price: 5900,
+      featuredInHub: false,
+      description: 'Porción individual con reducción casera de frutos de estación',
+    },
+    {
+      id: 'prod-8',
+      title: 'Menú Ejecutivo Mediodía + Bebida',
+      price: 11500,
+      featuredInHub: false,
+      description: 'Plato principal del día + bebida sin alcohol + café',
     },
   ],
   details: {
@@ -191,29 +232,26 @@ class FirestoreToqueApi implements ToqueApi {
         typeof window !== 'undefined' ? window.localStorage.getItem(SESSION_STORAGE_KEY) : null;
       if (raw) {
         const parsed = JSON.parse(raw);
-        if (!parsed.uuid) parsed.uuid = generateUUID();
-        this.currentUser = parsed;
+        if (
+          parsed &&
+          typeof parsed === 'object' &&
+          parsed.id &&
+          parsed.id !== 'user-owner-default' &&
+          parsed.email
+        ) {
+          if (!parsed.uuid) parsed.uuid = generateUUID();
+          this.currentUser = parsed;
+        } else {
+          this.currentUser = null;
+          if (typeof window !== 'undefined') {
+            window.localStorage.removeItem(SESSION_STORAGE_KEY);
+          }
+        }
       } else {
-        this.currentUser = {
-          id: 'user-owner-default',
-          uuid: '11111111-2222-4333-8444-555555555555',
-          email: 'comercio@toque.ar',
-          name: 'Martín Gómez',
-          businessId: 'biz-toque-1',
-          role: 'owner',
-          isSuperAdmin: false,
-        };
+        this.currentUser = null;
       }
     } catch {
-      this.currentUser = {
-        id: 'user-owner-default',
-        uuid: '11111111-2222-4333-8444-555555555555',
-        email: 'comercio@toque.ar',
-        name: 'Martín Gómez',
-        businessId: 'biz-toque-1',
-        role: 'owner',
-        isSuperAdmin: false,
-      };
+      this.currentUser = null;
     }
   }
 
@@ -366,7 +404,10 @@ class FirestoreToqueApi implements ToqueApi {
   }
 
   private getActiveBusinessId(): string {
-    return this.currentUser?.businessId || 'biz-toque-1';
+    if (!this.currentUser?.businessId) {
+      throw new Error('Debés iniciar sesión para acceder a los datos de tu comercio.');
+    }
+    return this.currentUser.businessId;
   }
 
   // --- AUTENTICACIÓN Y RESOLUCIÓN DE ROL RLS ---
@@ -391,17 +432,16 @@ class FirestoreToqueApi implements ToqueApi {
     const randomSuffix = Math.floor(10 + Math.random() * 89);
     const cartelCode = `CAJA${randomSuffix}`;
 
-    const isSuper = cleanEmail === SUPERADMIN_EMAIL;
     const user: User = {
       id: auth.currentUser?.uid || `user-${Date.now().toString(36)}`,
       uuid: userUuid,
       email: cleanEmail,
       name: cleanOwnerName,
       businessId: bizId,
-      role: isSuper ? 'superadmin' : 'owner',
+      role: 'owner',
       assignedCartelId: cartelId,
       assignedCartelCode: cartelCode,
-      isSuperAdmin: isSuper,
+      isSuperAdmin: false,
     };
 
     await setDoc(
@@ -473,14 +513,50 @@ class FirestoreToqueApi implements ToqueApi {
       })
     );
 
+    const cleanPassword = sanitizeString(data.password, 100) || '123456';
+    try {
+      if (typeof window !== 'undefined') {
+        const rawMap = window.localStorage.getItem('toque_registered_passwords_v1');
+        const map = rawMap ? JSON.parse(rawMap) : {};
+        map[cleanEmail] = cleanPassword;
+        map[bizId] = cleanPassword;
+        window.localStorage.setItem('toque_registered_passwords_v1', JSON.stringify(map));
+      }
+    } catch {
+      // ignore
+    }
+
     this.saveSession(user);
     return { user, token: `rls-token-${user.uuid}` };
+  }
+
+  private verifyStoredPassword(email: string, bizId: string, inputPassword?: string): boolean {
+    const cleanInput = (inputPassword || '').trim();
+    if (!cleanInput) return false;
+    try {
+      if (typeof window !== 'undefined') {
+        const rawMap = window.localStorage.getItem('toque_registered_passwords_v1');
+        const map = rawMap ? JSON.parse(rawMap) : {};
+        const storedForEmail = map[email.toLowerCase()];
+        const storedForBiz = map[bizId];
+        if (storedForEmail) {
+          return cleanInput === storedForEmail;
+        }
+        if (storedForBiz) {
+          return cleanInput === storedForBiz;
+        }
+      }
+    } catch {
+      // ignore
+    }
+    return false;
   }
 
   async login(credentials: {
     email: string;
     password?: string;
     isGoogle?: boolean;
+    requirePasswordVerification?: boolean;
   }): Promise<{ user: User; token: string }> {
     await this.ensureBaseDataInitialized();
 
@@ -488,76 +564,41 @@ class FirestoreToqueApi implements ToqueApi {
     let displayName = '';
     let uid = '';
 
-    if (credentials.isGoogle) {
+    if (credentials.requirePasswordVerification) {
+      const activeBizId = this.currentUser?.businessId || '';
+      const isValidPwd = this.verifyStoredPassword(cleanEmail, activeBizId, credentials.password);
+      if (!isValidPwd) {
+        throw new Error('Contraseña incorrecta. Ingresá la contraseña con la que te registraste.');
+      }
+    } else if (credentials.password && !credentials.isGoogle) {
       try {
-        const result = await signInWithPopup(auth, googleProvider);
-        if (result.user?.email) {
-          cleanEmail = result.user.email.toLowerCase();
-          displayName = result.user.displayName || cleanEmail.split('@')[0];
-          uid = result.user.uid;
+        if (typeof window !== 'undefined') {
+          const rawMap = window.localStorage.getItem('toque_registered_passwords_v1');
+          const map = rawMap ? JSON.parse(rawMap) : {};
+          if (!map[cleanEmail]) {
+            map[cleanEmail] = credentials.password.trim();
+            window.localStorage.setItem('toque_registered_passwords_v1', JSON.stringify(map));
+          }
         }
       } catch {
-        if (!cleanEmail) cleanEmail = 'comercio@toque.ar';
+        // ignore
+      }
+    }
+
+    if (credentials.isGoogle) {
+      const result = await signInWithPopup(auth, googleProvider);
+      if (result.user?.email) {
+        cleanEmail = result.user.email.toLowerCase();
+        displayName = result.user.displayName || cleanEmail.split('@')[0];
+        uid = result.user.uid;
       }
     }
 
     if (!cleanEmail) {
-      cleanEmail = 'comercio@toque.ar';
+      throw new Error('Debés ingresar un correo electrónico válido para iniciar sesión.');
     }
 
-    const isSuper =
-      cleanEmail === SUPERADMIN_EMAIL ||
-      cleanEmail === 'admin@toque.ar' ||
-      cleanEmail.startsWith('superadmin@');
-
-    if (isSuper) {
-      const user: User = {
-        id: uid || 'user-superadmin-global',
-        uuid: generateUUID(),
-        email: cleanEmail,
-        name: displayName || 'Super Admin',
-        businessId: 'biz-toque-1',
-        role: 'superadmin',
-        isSuperAdmin: true,
-      };
-      this.saveSession(user);
-      return { user, token: `session-${user.uuid}` };
-    }
-
-    // 1. Roles rápidos de demostración si ingresa con email de encargado o cajero
-    if (cleanEmail.startsWith('encargado@')) {
-      const user: User = {
-        id: uid || 'user-manager-demo',
-        uuid: generateUUID(),
-        email: cleanEmail,
-        name: displayName || 'Laura (Encargada)',
-        businessId: 'biz-toque-1',
-        role: 'manager',
-        assignedCartelId: 'cartel-caja-1',
-        assignedCartelCode: 'CAJA01',
-        isSuperAdmin: false,
-      };
-      this.saveSession(user);
-      return { user, token: `session-${user.uuid}` };
-    }
-
-    if (cleanEmail.startsWith('cajero@') || cleanEmail.startsWith('caja@')) {
-      const user: User = {
-        id: uid || 'user-cashier-demo',
-        uuid: generateUUID(),
-        email: cleanEmail,
-        name: displayName || 'Lucas (Cajero)',
-        businessId: 'biz-toque-1',
-        role: 'cashier',
-        assignedCartelId: 'cartel-caja-1',
-        assignedCartelCode: 'CAJA01',
-        isSuperAdmin: false,
-      };
-      this.saveSession(user);
-      return { user, token: `session-${user.uuid}` };
-    }
-
-    // 2. Buscar en la colección team si es colaborador o dueño registrado
+    // 1. Buscar en la colección team si es colaborador o dueño registrado
     const teamQuery = query(collection(db, 'team'), where('email', '==', cleanEmail));
     const teamSnap = await getDocs(teamQuery);
     const activeTeamDoc = teamSnap.docs
@@ -580,7 +621,7 @@ class FirestoreToqueApi implements ToqueApi {
       return { user, token: `session-${user.uuid}` };
     }
 
-    // 3. Buscar si es dueño de un comercio existente en businesses
+    // 2. Buscar si es dueño de un comercio existente en businesses
     const bizQuery = query(collection(db, 'businesses'), where('email', '==', cleanEmail));
     const bizSnap = await getDocs(bizQuery);
     if (!bizSnap.empty) {
@@ -598,18 +639,7 @@ class FirestoreToqueApi implements ToqueApi {
       return { user, token: `session-${user.uuid}` };
     }
 
-    // 4. Si es un dueño que ingresa directamente
-    const user: User = {
-      id: uid || `user-${Date.now().toString(36)}`,
-      uuid: generateUUID(),
-      email: cleanEmail,
-      name: displayName || 'Martín Gómez',
-      businessId: 'biz-toque-1',
-      role: 'owner',
-      isSuperAdmin: false,
-    };
-    this.saveSession(user);
-    return { user, token: `session-${user.uuid}` };
+    throw new Error('No existe una sesión o cuenta válida para este usuario.');
   }
 
   async logout(): Promise<void> {
@@ -622,27 +652,12 @@ class FirestoreToqueApi implements ToqueApi {
   }
 
   async getCurrentUser(): Promise<User | null> {
-    await this.ensureBaseDataInitialized();
-    if (!this.currentUser) return null;
+    if (!this.currentUser || !this.currentUser.id || !this.currentUser.email) {
+      return null;
+    }
 
     try {
       const cleanEmail = this.currentUser.email.toLowerCase();
-      const isSuper =
-        cleanEmail === SUPERADMIN_EMAIL ||
-        cleanEmail === 'admin@toque.ar' ||
-        cleanEmail.startsWith('superadmin@');
-
-      if (isSuper) {
-        this.currentUser.isSuperAdmin = true;
-        this.currentUser.role = 'superadmin';
-        this.saveSession(this.currentUser);
-        return this.currentUser;
-      }
-
-      if (cleanEmail.startsWith('encargado@') || cleanEmail.startsWith('caja@') || cleanEmail.startsWith('cajero@')) {
-        return this.currentUser;
-      }
-
       const teamQuery = query(collection(db, 'team'), where('email', '==', cleanEmail));
       const snap = await getDocs(teamQuery);
       const activeMember = snap.docs
@@ -661,12 +676,30 @@ class FirestoreToqueApi implements ToqueApi {
           isSuperAdmin: false,
         };
         this.saveSession(updatedUser);
+        return updatedUser;
       }
-    } catch {
-      // conservar sesión local
-    }
 
-    return this.currentUser;
+      const bizQuery = query(collection(db, 'businesses'), where('email', '==', cleanEmail));
+      const bizSnap = await getDocs(bizQuery);
+      if (!bizSnap.empty) {
+        const bizData = bizSnap.docs[0].data() as BusinessProfile;
+        const updatedUser: User = {
+          ...this.currentUser,
+          uuid: this.currentUser.uuid || bizData.uuid || generateUUID(),
+          name: bizData.ownerName || this.currentUser.name,
+          businessId: bizData.id,
+          role: 'owner',
+          isSuperAdmin: false,
+        };
+        this.saveSession(updatedUser);
+        return updatedUser;
+      }
+
+      this.saveSession(null);
+      return null;
+    } catch {
+      return this.currentUser;
+    }
   }
 
   // --- ACTIVACIÓN Y GESTIÓN DE CARTELES ---
@@ -905,9 +938,20 @@ class FirestoreToqueApi implements ToqueApi {
       const isPlanPaid = Boolean(data.planPaid || data.hubConfig?.planPaid);
       const isNetworkEnabled = Boolean(data.networkEnabled || data.hubConfig?.networkEnabled);
       if (data.hubConfig) {
+        const storedProducts: HubProduct[] = Array.isArray(data.hubConfig.products)
+          ? data.hubConfig.products
+          : [];
+        const mergedProducts =
+          storedProducts.length <= 2 &&
+          bizId === 'biz-toque-1' &&
+          (!storedProducts[0] || storedProducts[0].id === 'prod-1')
+            ? DEFAULT_HUB_CONFIG.products
+            : storedProducts;
+
         return {
           ...DEFAULT_HUB_CONFIG,
           ...data.hubConfig,
+          products: mergedProducts,
           blocks: this.normalizeBlocksOrder(data.hubConfig.blocks),
           socials: {
             ...DEFAULT_HUB_CONFIG.socials,
@@ -2264,6 +2308,30 @@ class FirestoreToqueApi implements ToqueApi {
       (s: Sale) => new Date(s.createdAt).getTime() >= sevenDaysAgo
     );
 
+    const currentEmail = (this.currentUser?.email || '').toLowerCase();
+    const currentName = (this.currentUser?.name || '').toLowerCase();
+    const isMySale = (s: Sale) => {
+      const matchEmail = Boolean(
+        currentEmail && s.cashierEmail && s.cashierEmail.toLowerCase() === currentEmail
+      );
+      const matchName = Boolean(
+        currentName && s.cashierName && s.cashierName.toLowerCase() === currentName
+      );
+      return matchEmail || matchName;
+    };
+
+    const myTodaySalesCount = todaySales.filter(isMySale).length;
+    const myWeeklySalesCount = weeklySales.filter(isMySale).length;
+
+    const mySaleIds = new Set(paidSales.filter(isMySale).map((s) => s.id));
+    const todayClaimedReceiptsCount = receipts.filter(
+      (r: Receipt) =>
+        r.status === 'claimed' && new Date(r.createdAt).toDateString() === todayStr
+    ).length;
+    const myClaimedReceiptsCount = receipts.filter(
+      (r: Receipt) => r.status === 'claimed' && mySaleIds.has(r.saleId)
+    ).length;
+
     const todaySalesAmount = isCashier
       ? 0
       : todaySales.reduce((acc: number, s: Sale) => acc + s.amount, 0);
@@ -2286,13 +2354,17 @@ class FirestoreToqueApi implements ToqueApi {
     const activeCartelesCount = nonTrashCarteles.filter((c: Cartel) => c.status === 'active').length;
     const recentSales = [...sales]
       .sort((a: Sale, b: Sale) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
-      .slice(0, 15);
+      .slice(0, 200);
 
     return {
       todaySalesAmount,
       todaySalesCount: todaySales.length,
       weeklySalesAmount,
       weeklySalesCount: weeklySales.length,
+      myTodaySalesCount,
+      myWeeklySalesCount,
+      todayClaimedReceiptsCount,
+      myClaimedReceiptsCount,
       totalReceiptsCount: receipts.length,
       claimedReceiptsCount,
       newClubMembersCount: isCashier ? 0 : members.length,

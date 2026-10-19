@@ -40,6 +40,7 @@ export interface ToqueApi {
     email: string;
     password?: string;
     isGoogle?: boolean;
+    requirePasswordVerification?: boolean;
   }): Promise<{ user: User; token: string }>;
 
   logout(): Promise<void>;

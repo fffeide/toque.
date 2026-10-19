@@ -972,6 +972,21 @@ export const LandingView: React.FC = () => {
                 <li>
                   <Link to="/panel/cuenta">Cuenta y suscripción</Link>
                 </li>
+                <li>
+                  <Link to="/terminos">Términos y condiciones</Link>
+                </li>
+                <li>
+                  <Link to="/privacidad">Política de privacidad</Link>
+                </li>
+                <li>
+                  <Link to="/cookies">Cookies y Clarity</Link>
+                </li>
+                <li>
+                  <Link to="/reembolso">Política de reembolso</Link>
+                </li>
+                <li>
+                  <Link to="/arrepentimiento">Botón de arrepentimiento</Link>
+                </li>
               </ul>
             </nav>
           </div>

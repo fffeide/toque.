@@ -7,15 +7,20 @@ import React, { createContext, useContext, useState, useEffect } from 'react';
 import { User, BusinessProfile } from '../api/types';
 import { api } from '../api';
 
-const SESSION_STORAGE_KEY = 'toque_firestore_session_v1';
+const SESSION_STORAGE_KEY = 'toque_rls_session_v2';
 
 function readCachedUser(): User | null {
   try {
     if (typeof window !== 'undefined') {
       const raw = window.localStorage.getItem(SESSION_STORAGE_KEY);
       if (raw) {
-        return JSON.parse(raw) as User;
+        const parsed = JSON.parse(raw) as User;
+        if (parsed && parsed.id && parsed.id !== 'user-owner-default' && parsed.email) {
+          return parsed;
+        }
+        window.localStorage.removeItem(SESSION_STORAGE_KEY);
       }
+      window.localStorage.removeItem('toque_firestore_session_v1');
     }
   } catch {
     // ignore
@@ -28,7 +33,12 @@ interface AuthContextType {
   business: BusinessProfile | null;
   isAuthenticated: boolean;
   isLoading: boolean;
-  login: (credentials: { email: string; password?: string; isGoogle?: boolean }) => Promise<void>;
+  login: (credentials: {
+    email: string;
+    password?: string;
+    isGoogle?: boolean;
+    requirePasswordVerification?: boolean;
+  }) => Promise<void>;
   register: (data: { businessName: string; ownerName: string; email: string; password?: string }) => Promise<void>;
   logout: () => Promise<void>;
   refreshProfile: () => Promise<void>;
@@ -65,7 +75,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     refreshProfile();
   }, []);
 
-  const login = async (credentials: { email: string; password?: string; isGoogle?: boolean }) => {
+  const login = async (credentials: {
+    email: string;
+    password?: string;
+    isGoogle?: boolean;
+    requirePasswordVerification?: boolean;
+  }) => {
     const res = await api.login(credentials);
     setUser(res.user);
     api

@@ -136,7 +136,9 @@ export const CartelesManagementView: React.FC = () => {
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-[#f1f1ee] tracking-tight">Mis Carteles</h1>
+          <h1 className="text-2xl font-bold text-[#f1f1ee] tracking-tight">
+            {isCashier ? 'Carteles' : 'Mis Carteles'}
+          </h1>
           <p className="text-xs text-[#a1a1aa] mt-0.5">
             {isCashier
               ? 'Carteles habilitados en el mostrador del comercio.'

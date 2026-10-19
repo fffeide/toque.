@@ -115,8 +115,8 @@ export const PanelLayout: React.FC = () => {
 
   return (
     <div className="theme-panel min-h-screen flex flex-col md:flex-row bg-[#000000] text-[#f1f1ee]">
-      {/* Sidebar Desktop */}
-      <aside className="hidden md:flex md:w-64 md:flex-col border-r border-[#242426] bg-[#111113] shrink-0">
+      {/* Sidebar Desktop — siempre mantiene su fondo negro en modo claro y oscuro */}
+      <aside className="panel-chrome-dark hidden md:flex md:w-64 md:flex-col border-r border-[#242426] bg-[#111113] text-[#f1f1ee] shrink-0">
         {/* Brand Header */}
         <div className="h-16 px-6 flex items-center justify-between border-b border-[#242426]">
           <Link to="/" className="flex items-center gap-2.5">
@@ -155,6 +155,10 @@ export const PanelLayout: React.FC = () => {
         <nav className="flex-1 p-3 space-y-1">
           {visibleNavItems.map((item) => {
             const Icon = item.icon;
+            const displayLabel =
+              currentRole === 'cashier' && item.to === '/panel/carteles'
+                ? 'Carteles'
+                : item.label;
             return (
               <NavLink
                 key={item.to}
@@ -168,7 +172,7 @@ export const PanelLayout: React.FC = () => {
                 }
               >
                 <Icon className="w-4 h-4 shrink-0" />
-                <span>{item.label}</span>
+                <span>{displayLabel}</span>
               </NavLink>
             );
           })}
@@ -218,8 +222,8 @@ export const PanelLayout: React.FC = () => {
 
       {/* Main Content Area */}
       <div className="flex-1 flex flex-col min-w-0">
-        {/* Top Bar (Mobile + Desktop Quick Links) */}
-        <header className="h-16 px-4 sm:px-8 border-b border-[#242426] bg-[#111113] flex items-center justify-between sticky top-0 z-20">
+        {/* Top Bar (Nombre del comercio + Rol) — se mantiene en negro también en modo claro */}
+        <header className="panel-chrome-dark h-16 px-4 sm:px-8 border-b border-[#242426] bg-[#111113] text-[#f1f1ee] flex items-center justify-between sticky top-0 z-20">
           <div className="flex items-center gap-3">
             <button
               type="button"
@@ -257,7 +261,7 @@ export const PanelLayout: React.FC = () => {
               {isDark ? (
                 <Sun className="w-4 h-4 text-[#bec8ff]" />
               ) : (
-                <Moon className="w-4 h-4 text-[#0c0c0c]" />
+                <Moon className="w-4 h-4 text-[#bec8ff]" />
               )}
             </button>
 
@@ -278,7 +282,7 @@ export const PanelLayout: React.FC = () => {
               className="fixed inset-0 bg-black/70"
               onClick={() => setMobileOpen(false)}
             />
-            <div className="relative w-72 max-w-[85vw] bg-[#111113] border-r border-[#242426] h-full flex flex-col z-10">
+            <div className="panel-chrome-dark relative w-72 max-w-[85vw] bg-[#111113] text-[#f1f1ee] border-r border-[#242426] h-full flex flex-col z-10">
               <div className="h-16 px-5 flex items-center justify-between border-b border-[#242426]">
                 <div className="flex items-center gap-2">
                   <div className="w-7 h-7 rounded-lg bg-[#bec8ff] flex items-center justify-center text-[#0c0c0c] font-bold text-xs">
@@ -296,7 +300,7 @@ export const PanelLayout: React.FC = () => {
                     {isDark ? (
                       <Sun className="w-4 h-4 text-[#bec8ff]" />
                     ) : (
-                      <Moon className="w-4 h-4 text-[#0c0c0c]" />
+                      <Moon className="w-4 h-4 text-[#bec8ff]" />
                     )}
                   </button>
                   <button
@@ -324,6 +328,10 @@ export const PanelLayout: React.FC = () => {
               <nav className="flex-1 p-3 space-y-1">
                 {visibleNavItems.map((item) => {
                   const Icon = item.icon;
+                  const displayLabel =
+                    currentRole === 'cashier' && item.to === '/panel/carteles'
+                      ? 'Carteles'
+                      : item.label;
                   return (
                     <NavLink
                       key={item.to}
@@ -338,7 +346,7 @@ export const PanelLayout: React.FC = () => {
                       }
                     >
                       <Icon className="w-4 h-4" />
-                      <span>{item.label}</span>
+                      <span>{displayLabel}</span>
                     </NavLink>
                   );
                 })}

@@ -10,6 +10,8 @@
  * 4. Red de Beneficios y Formatos de Activación estilo Pasito (GET/POST /api/network/activations)
  */
 
+const SECURITY_LOCKDOWN = true;
+
 export interface D1Database {
   prepare: (query: string) => {
     bind: (...values: any[]) => {
@@ -53,6 +55,20 @@ export default {
   async fetch(request: Request, env: Env, ctx?: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
     const { pathname } = url;
+
+    if (
+      SECURITY_LOCKDOWN &&
+      ((pathname === '/api/consumer/sync' &&
+        (request.method === 'GET' || request.method === 'POST')) ||
+        (pathname === '/api/network/activations' && request.method === 'POST') ||
+        ((pathname === '/api/wallet/pass' || pathname === '/api/wallet/create') &&
+          request.method === 'POST'))
+    ) {
+      return new Response(
+        JSON.stringify({ error: 'Temporalmente deshabilitado por mantenimiento de seguridad' }),
+        { status: 503, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
 
     // 1. Healthcheck en el borde
     if (pathname === '/healthz' || pathname === '/api/healthz') {
@@ -158,6 +174,12 @@ export default {
 
     // 3. Sincronización Híbrida de Bóveda del Consumidor ("Mi Toque") en D1: /api/consumer/sync
     if (pathname === '/api/consumer/sync' && request.method === 'POST') {
+      if (SECURITY_LOCKDOWN) {
+        return new Response(
+          JSON.stringify({ error: 'Temporalmente deshabilitado por mantenimiento de seguridad' }),
+          { status: 503, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
       try {
         const body = (await request.json()) as {
           user?: {
@@ -282,6 +304,12 @@ export default {
     }
 
     if (pathname === '/api/consumer/sync' && request.method === 'GET') {
+      if (SECURITY_LOCKDOWN) {
+        return new Response(
+          JSON.stringify({ error: 'Temporalmente deshabilitado por mantenimiento de seguridad' }),
+          { status: 503, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
       const contact = (url.searchParams.get('contact') || '').trim().toLowerCase();
       if (!contact) {
         return new Response(JSON.stringify({ found: false }), {
@@ -345,6 +373,12 @@ export default {
 
     // 4. Endpoint de Activaciones en Red Toque (D1): /api/network/activations
     if (pathname === '/api/network/activations' && request.method === 'POST') {
+      if (SECURITY_LOCKDOWN) {
+        return new Response(
+          JSON.stringify({ error: 'Temporalmente deshabilitado por mantenimiento de seguridad' }),
+          { status: 503, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
       try {
         const body = (await request.json()) as {
           id?: string;
@@ -403,6 +437,12 @@ export default {
       (pathname === '/api/wallet/pass' || pathname === '/api/wallet/create') &&
       request.method === 'POST'
     ) {
+      if (SECURITY_LOCKDOWN) {
+        return new Response(
+          JSON.stringify({ error: 'Temporalmente deshabilitado por mantenimiento de seguridad' }),
+          { status: 503, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
       try {
         const body = (await request.json()) as {
           businessName?: string;

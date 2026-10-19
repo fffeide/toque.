@@ -363,6 +363,10 @@ export interface DashboardSummary {
   todaySalesCount: number;
   weeklySalesAmount: number;
   weeklySalesCount: number;
+  myTodaySalesCount: number;
+  myWeeklySalesCount: number;
+  todayClaimedReceiptsCount: number;
+  myClaimedReceiptsCount: number;
   totalReceiptsCount: number;
   claimedReceiptsCount: number;
   newClubMembersCount: number;

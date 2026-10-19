@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { Link } from 'react-router-dom';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 import {
   api,
   Cartel,
@@ -37,6 +37,11 @@ import {
   X,
   ShoppingBag,
   Lock,
+  Search,
+  Coffee,
+  Eye,
+  EyeOff,
+  KeyRound,
 } from 'lucide-react';
 
 const QUICK_AMOUNTS = [1500, 2500, 3800, 5000, 8500, 12000];
@@ -53,10 +58,18 @@ const DEFAULT_FALLBACK_CARTEL: Cartel = {
   createdAt: new Date().toISOString(),
 };
 
+function getRoleRank(role?: string): number {
+  if (role === 'superadmin') return 4;
+  if (role === 'owner') return 3;
+  if (role === 'manager') return 2;
+  return 1; // cashier
+}
+
 export const CashierView: React.FC = () => {
   const { user, business, login } = useAuth();
   const { isDark, toggleTheme } = useTheme();
   const { showToast } = useToast();
+  const navigate = useNavigate();
 
   // Inicialización inmediata sin bloqueo para que la caja abra al instante
   const [carteles, setCarteles] = useState<Cartel[]>([DEFAULT_FALLBACK_CARTEL]);
@@ -65,7 +78,7 @@ export const CashierView: React.FC = () => {
   );
   const [amountStr, setAmountStr] = useState<string>('0');
   const [method, setMethod] = useState<PaymentMethod>('mercadopago');
-  const [recentSales, setRecentSales] = useState<Sale[]>([]);
+  const [allSales, setAllSales] = useState<Sale[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Catálogo de productos y lector de código universal
@@ -73,16 +86,24 @@ export const CashierView: React.FC = () => {
   const [barcodeInput, setBarcodeInput] = useState('');
   const [scannedItems, setScannedItems] = useState<SaleItem[]>([]);
 
+  // Modal de Catálogo Completo (para cafeterías, restaurantes y productos sin código universal)
+  const [showCatalogModal, setShowCatalogModal] = useState(false);
+  const [catalogSearch, setCatalogSearch] = useState('');
+
   // Comprobante activo emitido (límite de seguridad de 2 minutos o hasta abrirse / nuevo cobro)
   const [activeSale, setActiveSale] = useState<Sale | null>(null);
   const [emittedReceipt, setEmittedReceipt] = useState<Receipt | null>(null);
   const [secondsLeft, setSecondsLeft] = useState<number>(0);
 
-  // Modal de cambiar / crear cuenta para cajeros
+  // Modal de cambiar / crear cuenta para cajeros + validación de contraseña para cargo superior
   const [showCashierAccountModal, setShowCashierAccountModal] = useState(false);
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
   const [newCashierName, setNewCashierName] = useState('');
   const [isCreatingCashier, setIsCreatingCashier] = useState(false);
+  const [pendingElevationMember, setPendingElevationMember] = useState<TeamMember | null>(null);
+  const [elevationPassword, setElevationPassword] = useState('');
+  const [showElevationPassword, setShowElevationPassword] = useState(false);
+  const [isVerifyingPassword, setIsVerifyingPassword] = useState(false);
 
   const selectedCartel =
     carteles.find((c) => c.id === selectedCartelId) || carteles[0] || DEFAULT_FALLBACK_CARTEL;
@@ -116,7 +137,7 @@ export const CashierView: React.FC = () => {
     api
       .listSales()
       .then((salesList) => {
-        setRecentSales(salesList.slice(0, 8));
+        setAllSales(salesList);
       })
       .catch(() => {});
 
@@ -139,13 +160,93 @@ export const CashierView: React.FC = () => {
     loadInitialData();
 
     const unsubSales = api.subscribeToBusinessSales((liveSales) => {
-      setRecentSales(liveSales.slice(0, 8));
+      setAllSales(liveSales);
     });
 
     return () => {
       unsubSales();
     };
   }, [loadInitialData]);
+
+  // Calcular los 5 productos más vendidos para mostrar en el Lector de productos
+  const top5Products = useMemo(() => {
+    const soldCounts: Record<string, number> = {};
+    for (const s of allSales) {
+      if (s.status !== 'paid' || !Array.isArray(s.items)) continue;
+      for (const item of s.items) {
+        const keyById = item.id;
+        const keyByName = (item.name || '').toLowerCase();
+        if (keyById) {
+          soldCounts[keyById] = (soldCounts[keyById] || 0) + (item.quantity || 1);
+        }
+        if (keyByName) {
+          soldCounts[keyByName] = (soldCounts[keyByName] || 0) + (item.quantity || 1);
+        }
+      }
+    }
+
+    return [...catalogProducts]
+      .sort((a, b) => {
+        const scoreA =
+          (soldCounts[a.id] || 0) + (soldCounts[a.title.toLowerCase()] || 0);
+        const scoreB =
+          (soldCounts[b.id] || 0) + (soldCounts[b.title.toLowerCase()] || 0);
+        return scoreB - scoreA;
+      })
+      .slice(0, 5);
+  }, [catalogProducts, allSales]);
+
+  // Filtrar catálogo completo para el modal gastronómico
+  const filteredCatalogProducts = useMemo(() => {
+    const q = catalogSearch.trim().toLowerCase();
+    if (!q) return catalogProducts;
+    return catalogProducts.filter(
+      (p) =>
+        p.title.toLowerCase().includes(q) ||
+        (p.description && p.description.toLowerCase().includes(q)) ||
+        (p.universalCode && p.universalCode.toLowerCase().includes(q))
+    );
+  }, [catalogProducts, catalogSearch]);
+
+  // SOLO los 3 últimos cobros hechos por la cuenta que esté puesta actualmente
+  const myLast3Sales = useMemo(() => {
+    if (!user) return allSales.slice(0, 3);
+    const activeEmail = (user.email || '').toLowerCase();
+    const activeName = (user.name || '').toLowerCase();
+
+    return allSales
+      .filter((s) => {
+        const matchEmail = Boolean(
+          activeEmail && s.cashierEmail && s.cashierEmail.toLowerCase() === activeEmail
+        );
+        const matchName = Boolean(
+          activeName && s.cashierName && s.cashierName.toLowerCase() === activeName
+        );
+        return matchEmail || matchName;
+      })
+      .slice(0, 3);
+  }, [allSales, user]);
+
+  // Integrantes disponibles para cambio de cuenta (asegurando incluir al Dueño del comercio)
+  const selectableAccounts = useMemo(() => {
+    const list = [...teamMembers];
+    const ownerEmail = (business?.email || 'comercio@toque.ar').toLowerCase();
+    const hasOwner = list.some(
+      (m) => m.role === 'owner' || m.email.toLowerCase() === ownerEmail
+    );
+    if (!hasOwner) {
+      list.unshift({
+        id: 'team-owner-main',
+        businessId: business?.id || 'biz-toque-1',
+        name: business?.ownerName || 'Martín Gómez',
+        email: ownerEmail,
+        role: 'owner',
+        status: 'active',
+        addedAt: business?.createdAt || new Date().toISOString(),
+      });
+    }
+    return list;
+  }, [teamMembers, business]);
 
   // Suscripción en tiempo real al comprobante activo: si el cliente lo abre ('claimed'), se bloquea/cierra
   useEffect(() => {
@@ -321,7 +422,7 @@ export const CashierView: React.FC = () => {
         return;
       }
 
-      if (showCashierAccountModal) return;
+      if (showCashierAccountModal || showCatalogModal) return;
 
       if (/^[0-9]$/.test(e.key)) {
         e.preventDefault();
@@ -350,15 +451,70 @@ export const CashierView: React.FC = () => {
     amount,
     isSubmitting,
     showCashierAccountModal,
+    showCatalogModal,
   ]);
 
-  const handleSwitchCashier = async (member: TeamMember) => {
+  const handleSelectAccount = async (member: TeamMember) => {
+    const currentRank = getRoleRank(user?.isSuperAdmin ? 'superadmin' : user?.role);
+    const targetRank = getRoleRank(member.role);
+
+    // Si elige una cuenta de un cargo superior, requerir contraseña de registro
+    if (targetRank > currentRank) {
+      setPendingElevationMember(member);
+      setElevationPassword('');
+      setShowElevationPassword(false);
+      return;
+    }
+
     try {
       await login({ email: member.email });
       showToast(`Sesión cambiada a ${member.name}`, 'success');
       setShowCashierAccountModal(false);
+      setPendingElevationMember(null);
     } catch {
       showToast('No se pudo cambiar de cuenta', 'error');
+    }
+  };
+
+  const handleConfirmElevationPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!pendingElevationMember) return;
+    if (!elevationPassword.trim()) {
+      showToast('Ingresá la contraseña de registro para continuar', 'error');
+      return;
+    }
+
+    setIsVerifyingPassword(true);
+    try {
+      await login({
+        email: pendingElevationMember.email,
+        password: elevationPassword.trim(),
+        requirePasswordVerification: true,
+      });
+      const roleText =
+        pendingElevationMember.role === 'owner'
+          ? 'Dueño'
+          : pendingElevationMember.role === 'manager'
+          ? 'Encargado'
+          : 'Cajero';
+      showToast(
+        `Sesión cambiada a ${pendingElevationMember.name} (${roleText}). Ya podés acceder al panel.`,
+        'success'
+      );
+      const switchedRole = pendingElevationMember.role;
+      setPendingElevationMember(null);
+      setElevationPassword('');
+      setShowCashierAccountModal(false);
+      if (switchedRole === 'owner' || switchedRole === 'manager') {
+        navigate('/panel/resumen');
+      }
+    } catch (err: any) {
+      showToast(
+        err?.message || 'Contraseña incorrecta. Ingresá la contraseña con la que te registraste.',
+        'error'
+      );
+    } finally {
+      setIsVerifyingPassword(false);
     }
   };
 
@@ -379,6 +535,7 @@ export const CashierView: React.FC = () => {
       await login({ email: created.email });
       setNewCashierName('');
       setShowCashierAccountModal(false);
+      setPendingElevationMember(null);
       showToast(`Cuenta de cajero creada: ${created.name}`, 'success');
     } catch (err: any) {
       showToast(err.message || 'No se pudo crear la cuenta de cajero', 'error');
@@ -388,12 +545,19 @@ export const CashierView: React.FC = () => {
   };
 
   const methodBadgeLabel = (m: PaymentMethod) =>
-    m === 'mercadopago' ? 'QR' : m === 'cash' ? 'Efectivo' : 'Tarjeta';
+    m === 'mercadopago' || m === 'mp_qr' ? 'QR' : m === 'cash' ? 'Efectivo' : 'Tarjeta';
+
+  const currentRoleLabel =
+    user?.role === 'owner'
+      ? 'Dueño'
+      : user?.role === 'manager'
+      ? 'Encargado'
+      : 'Cajero';
 
   return (
     <div className="theme-panel min-h-screen bg-[#000000] text-[#f1f1ee] flex flex-col">
-      {/* Header de Caja */}
-      <header className="h-16 px-4 sm:px-8 border-b border-[#242426] bg-[#111113] flex items-center justify-between">
+      {/* Header de Caja (mantiene el mismo negro en modo claro y oscuro) */}
+      <header className="panel-chrome-dark h-16 px-4 sm:px-8 border-b border-[#242426] bg-[#111113] text-[#f1f1ee] flex items-center justify-between">
         <div className="flex items-center gap-3">
           <Link
             to="/panel/resumen"
@@ -414,13 +578,13 @@ export const CashierView: React.FC = () => {
               </h1>
               <span className="text-[11px] text-[#34d399] font-medium flex items-center gap-1 mt-0.5">
                 <span className="w-1.5 h-1.5 rounded-full bg-[#2fb36a]" />
-                {user?.name || 'Cajero'}
+                {user?.name || 'Cajero'} ({currentRoleLabel})
               </span>
             </div>
           </div>
         </div>
 
-        {/* Selector de Cartel + Modo Oscuro/Claro (solo icono) + Cambiar/Crear cuenta de cajero */}
+        {/* Selector de Cartel + Modo Oscuro/Claro (solo icono) + Cambiar/Crear cuenta */}
         <div className="flex items-center gap-2.5">
           <div className="flex items-center gap-2 bg-[#18181b] border border-[#28282a] rounded-xl px-3 py-1.5">
             <QrCode className="w-4 h-4 text-[#bec8ff] shrink-0" />
@@ -449,16 +613,20 @@ export const CashierView: React.FC = () => {
             {isDark ? (
               <Sun className="w-4 h-4 text-[#bec8ff]" />
             ) : (
-              <Moon className="w-4 h-4 text-[#0c0c0c]" />
+              <Moon className="w-4 h-4 text-[#bec8ff]" />
             )}
           </button>
 
-          {/* Icono de cambiar/crear cuenta para los cajeros (reemplaza cerrar sesión) */}
+          {/* Icono de cambiar/crear cuenta (con protección por contraseña para cargos superiores) */}
           <button
             type="button"
-            onClick={() => setShowCashierAccountModal(true)}
-            title="Cambiar o crear cuenta de cajero"
-            aria-label="Cambiar o crear cuenta de cajero"
+            onClick={() => {
+              setPendingElevationMember(null);
+              setElevationPassword('');
+              setShowCashierAccountModal(true);
+            }}
+            title="Cambiar o crear cuenta"
+            aria-label="Cambiar o crear cuenta"
             className="w-9 h-9 rounded-xl bg-[#18181b] border border-[#28282a] hover:border-[#bec8ff] text-[#bec8ff] flex items-center justify-center transition-colors cursor-pointer"
           >
             <UserPlus className="w-4 h-4" />
@@ -470,14 +638,14 @@ export const CashierView: React.FC = () => {
       <main className="flex-1 max-w-6xl w-full mx-auto p-4 sm:p-6 grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
         {/* Columna Izquierda: Teclado de Cobro (7 cols) */}
         <div className="lg:col-span-7 space-y-4">
-          <Card className="p-5 sm:p-6 space-y-5">
+          <Card className="stat-card p-5 sm:p-6 space-y-5">
             {/* Visor de Importe */}
-            <div className="p-5 rounded-2xl bg-[#161619] border border-[#28282a] flex flex-col items-end justify-center">
+            <div className="p-5 rounded-2xl bg-[#161619] border border-[#28282a] flex flex-col items-end justify-center stat-badge">
               <div className="w-full flex items-center justify-between mb-1">
-                <span className="text-[11px] font-semibold text-[#a1a1aa]">
+                <span className="text-[11px] font-semibold text-[#a1a1aa] stat-detail">
                   Cartel vinculado: <strong className="text-[#f1f1ee]">{selectedCartel?.code}</strong>
                 </span>
-                <span className="text-[11px] font-mono text-[#34d399]">
+                <span className="text-[11px] font-mono text-[#34d399] stat-detail">
                   Teclado numérico activo
                 </span>
               </div>
@@ -489,9 +657,9 @@ export const CashierView: React.FC = () => {
               </div>
             </div>
 
-            {/* Productos escaneados en la venta actual */}
+            {/* Productos escaneados o elegidos en la venta actual */}
             {scannedItems.length > 0 && (
-              <div className="p-3.5 rounded-xl bg-[#161619] border border-[#28282a] space-y-2">
+              <div className="p-3.5 rounded-xl bg-[#161619] border border-[#28282a] space-y-2 stat-badge">
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-bold text-[#f1f1ee] flex items-center gap-1.5">
                     <ShoppingBag className="w-3.5 h-3.5 text-[#bec8ff]" />
@@ -547,7 +715,7 @@ export const CashierView: React.FC = () => {
                   key={val}
                   type="button"
                   onClick={() => handleQuickAmount(val)}
-                  className="py-2 px-2 rounded-xl bg-[#161619] hover:bg-[#222226] border border-[#28282a] text-xs font-mono font-semibold text-[#f1f1ee] transition-colors cursor-pointer"
+                  className="py-2 px-2 rounded-xl bg-[#161619] hover:bg-[#222226] border border-[#28282a] text-xs font-mono font-semibold text-[#f1f1ee] transition-colors cursor-pointer stat-badge"
                 >
                   ${val.toLocaleString('es-AR')}
                 </button>
@@ -561,7 +729,7 @@ export const CashierView: React.FC = () => {
                   key={digit}
                   type="button"
                   onClick={() => handleDigit(digit)}
-                  className="h-14 rounded-xl bg-[#161619] hover:bg-[#222226] active:bg-[#28282c] border border-[#28282a] text-xl font-bold font-mono text-[#f1f1ee] transition-colors cursor-pointer"
+                  className="h-14 rounded-xl bg-[#161619] hover:bg-[#222226] active:bg-[#28282c] border border-[#28282a] text-xl font-bold font-mono text-[#f1f1ee] transition-colors cursor-pointer stat-badge"
                 >
                   {digit}
                 </button>
@@ -569,14 +737,14 @@ export const CashierView: React.FC = () => {
               <button
                 type="button"
                 onClick={handleClear}
-                className="h-14 rounded-xl bg-[#161619] hover:bg-[#222226] border border-[#28282a] text-xs font-bold text-[#a1a1aa] hover:text-[#f1f1ee] transition-colors cursor-pointer"
+                className="h-14 rounded-xl bg-[#161619] hover:bg-[#222226] border border-[#28282a] text-xs font-bold text-[#a1a1aa] hover:text-[#f1f1ee] transition-colors cursor-pointer stat-badge"
               >
                 Borrar
               </button>
               <button
                 type="button"
                 onClick={() => handleDigit('0')}
-                className="h-14 rounded-xl bg-[#161619] hover:bg-[#222226] border border-[#28282a] text-xl font-bold font-mono text-[#f1f1ee] transition-colors cursor-pointer"
+                className="h-14 rounded-xl bg-[#161619] hover:bg-[#222226] border border-[#28282a] text-xl font-bold font-mono text-[#f1f1ee] transition-colors cursor-pointer stat-badge"
               >
                 0
               </button>
@@ -584,7 +752,7 @@ export const CashierView: React.FC = () => {
                 type="button"
                 onClick={handleBackspace}
                 aria-label="Borrar último dígito"
-                className="h-14 rounded-xl bg-[#161619] hover:bg-[#222226] border border-[#28282a] flex items-center justify-center text-[#a1a1aa] hover:text-[#f1f1ee] transition-colors cursor-pointer"
+                className="h-14 rounded-xl bg-[#161619] hover:bg-[#222226] border border-[#28282a] flex items-center justify-center text-[#a1a1aa] hover:text-[#f1f1ee] transition-colors cursor-pointer stat-badge"
               >
                 <Delete className="w-5 h-5" />
               </button>
@@ -592,14 +760,14 @@ export const CashierView: React.FC = () => {
 
             {/* Selección de método de pago: solo "Efectivo" - "Tarjeta" - "QR" */}
             <div>
-              <span className="block text-xs font-semibold text-[#a1a1aa] mb-2">
+              <span className="block text-xs font-semibold text-[#a1a1aa] mb-2 stat-detail">
                 Método de pago
               </span>
               <div className="grid grid-cols-3 gap-2.5">
                 <button
                   type="button"
                   onClick={() => setMethod('cash')}
-                  className={`p-3 rounded-xl border text-left transition-all cursor-pointer flex flex-col justify-between gap-2 ${
+                  className={`p-3 rounded-xl border text-left transition-all cursor-pointer flex flex-col justify-between gap-2 stat-badge ${
                     method === 'cash'
                       ? 'bg-[#2fb36a]/15 border-[#2fb36a] text-[#f1f1ee]'
                       : 'bg-[#161619] border-[#28282a] text-[#a1a1aa] hover:text-[#f1f1ee]'
@@ -616,7 +784,7 @@ export const CashierView: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => setMethod('card')}
-                  className={`p-3 rounded-xl border text-left transition-all cursor-pointer flex flex-col justify-between gap-2 ${
+                  className={`p-3 rounded-xl border text-left transition-all cursor-pointer flex flex-col justify-between gap-2 stat-badge ${
                     method === 'card'
                       ? 'bg-[#bec8ff]/15 border-[#bec8ff] text-[#f1f1ee]'
                       : 'bg-[#161619] border-[#28282a] text-[#a1a1aa] hover:text-[#f1f1ee]'
@@ -633,7 +801,7 @@ export const CashierView: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => setMethod('mercadopago')}
-                  className={`p-3 rounded-xl border text-left transition-all cursor-pointer flex flex-col justify-between gap-2 ${
+                  className={`p-3 rounded-xl border text-left transition-all cursor-pointer flex flex-col justify-between gap-2 stat-badge ${
                     method === 'mercadopago'
                       ? 'bg-[#bec8ff]/15 border-[#bec8ff] text-[#f1f1ee]'
                       : 'bg-[#161619] border-[#28282a] text-[#a1a1aa] hover:text-[#f1f1ee]'
@@ -664,7 +832,7 @@ export const CashierView: React.FC = () => {
 
           {/* Comprobante recién emitido (Límite de 2 minutos hasta abrirse o siguiente pago) */}
           {emittedReceipt && activeSale && (
-            <Card className="p-5 border-[#2fb36a] space-y-4">
+            <Card className="stat-card p-5 border-[#2fb36a] space-y-4">
               <div className="flex items-center justify-between gap-3">
                 <div className="flex items-center gap-3">
                   <div className="w-10 h-10 rounded-xl bg-[#2fb36a]/15 text-[#34d399] flex items-center justify-center shrink-0">
@@ -683,7 +851,7 @@ export const CashierView: React.FC = () => {
                         {formatCurrency(emittedReceipt.total)} ({methodBadgeLabel(emittedReceipt.method)})
                       </span>
                     </div>
-                    <p className="text-xs text-[#a1a1aa]">
+                    <p className="text-xs text-[#a1a1aa] stat-detail">
                       {emittedReceipt.status === 'claimed'
                         ? 'Abierto por el cliente · Cerrado para nuevos escaneos'
                         : emittedReceipt.status === 'ready' && secondsLeft > 0
@@ -713,23 +881,33 @@ export const CashierView: React.FC = () => {
 
         {/* Columna Derecha: Lector para productos (arriba) + Ultimos cobros (abajo) (5 cols) */}
         <div className="lg:col-span-5 space-y-6">
-          {/* 1. Lector para productos (Arriba de Ultimos cobros) */}
-          <Card className="p-5 space-y-4">
+          {/* 1. Lector para productos: muestra SOLO los 5 productos más vendidos + botón Catálogo */}
+          <Card className="stat-card p-5 space-y-4">
             <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Barcode className="w-4 h-4 text-[#2fb36a]" />
-                <h2 className="font-bold text-sm text-[#f1f1ee]">Lector de productos</h2>
+              <div>
+                <div className="flex items-center gap-2">
+                  <Barcode className="w-4 h-4 text-[#2fb36a]" />
+                  <h2 className="font-bold text-sm text-[#f1f1ee]">Lector de productos</h2>
+                </div>
+                <p className="text-[11px] text-[#a1a1aa] mt-0.5 stat-detail">
+                  Top 5 más vendidos · Tocá Catálogo para ver todo el menú
+                </p>
               </div>
-              <Link
-                to="/panel/productos"
-                className="text-[11px] font-semibold text-[#bec8ff] hover:underline"
+              <button
+                type="button"
+                onClick={() => {
+                  setCatalogSearch('');
+                  setShowCatalogModal(true);
+                }}
+                className="px-3 py-1.5 rounded-xl bg-[#18181b] hover:bg-[#222226] border border-[#28282a] text-xs font-bold text-[#bec8ff] flex items-center gap-1.5 cursor-pointer transition-colors stat-badge"
               >
-                Catálogo ({catalogProducts.length})
-              </Link>
+                <Coffee className="w-3.5 h-3.5" />
+                <span>Catálogo ({catalogProducts.length})</span>
+              </button>
             </div>
 
             <form onSubmit={handleScanSubmit} className="flex gap-2">
-              <div className="flex-1 flex items-center gap-2 bg-[#161619] border border-[#28282a] rounded-xl px-3 py-2 focus-within:border-[#bec8ff]">
+              <div className="flex-1 flex items-center gap-2 bg-[#161619] border border-[#28282a] rounded-xl px-3 py-2 focus-within:border-[#bec8ff] stat-badge">
                 <Barcode className="w-4 h-4 text-[#a1a1aa] shrink-0" />
                 <input
                   type="text"
@@ -744,16 +922,19 @@ export const CashierView: React.FC = () => {
               </Button>
             </form>
 
-            {catalogProducts.length > 0 && (
-              <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
-                {catalogProducts.map((prod) => (
+            {top5Products.length > 0 && (
+              <div className="space-y-1.5">
+                {top5Products.map((prod, idx) => (
                   <button
                     key={prod.id}
                     type="button"
                     onClick={() => addProductToSale(prod)}
-                    className="w-full p-2.5 rounded-xl bg-[#161619] hover:bg-[#222226] border border-[#242426] flex items-center justify-between gap-2 text-left transition-colors cursor-pointer"
+                    className="w-full p-2.5 rounded-xl bg-[#161619] hover:bg-[#222226] border border-[#242426] flex items-center justify-between gap-2 text-left transition-colors cursor-pointer stat-badge"
                   >
                     <div className="flex items-center gap-2.5 min-w-0">
+                      <span className="w-5 h-5 rounded-md bg-[#111113] border border-[#28282a] text-[10px] font-mono font-bold text-[#a1a1aa] flex items-center justify-center shrink-0">
+                        #{idx + 1}
+                      </span>
                       {prod.imageUrl ? (
                         <img
                           src={prod.imageUrl}
@@ -769,14 +950,12 @@ export const CashierView: React.FC = () => {
                         <p className="text-xs font-semibold text-[#f1f1ee] truncate">
                           {prod.title}
                         </p>
-                        {prod.universalCode && (
-                          <p className="text-[10px] font-mono text-[#a1a1aa]">
-                            Cód: {prod.universalCode}
-                          </p>
-                        )}
+                        <p className="text-[10px] font-mono text-[#a1a1aa] stat-detail">
+                          {prod.universalCode ? `Cód: ${prod.universalCode}` : 'Menú sin código'}
+                        </p>
                       </div>
                     </div>
-                    <span className="text-xs font-mono font-bold text-[#bec8ff] shrink-0">
+                    <span className="text-xs font-mono font-bold text-[#bec8ff] shrink-0 stat-detail">
                       {prod.price !== undefined ? formatCurrency(prod.price) : '$0'}
                     </span>
                   </button>
@@ -785,33 +964,41 @@ export const CashierView: React.FC = () => {
             )}
           </Card>
 
-          {/* 2. Ultimos cobros */}
-          <Card padding="none" className="overflow-hidden">
+          {/* 2. Ultimos cobros: SOLO los 3 últimos cobros hechos por la cuenta activa */}
+          <Card padding="none" className="stat-card overflow-hidden">
             <div className="p-5 border-b border-[#242426] flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Clock className="w-4 h-4 text-[#bec8ff]" />
-                <h2 className="font-bold text-sm text-[#f1f1ee]">Ultimos cobros</h2>
+              <div>
+                <div className="flex items-center gap-2">
+                  <Clock className="w-4 h-4 text-[#bec8ff]" />
+                  <h2 className="font-bold text-sm text-[#f1f1ee]">Ultimos cobros</h2>
+                </div>
+                <p className="text-[11px] text-[#a1a1aa] mt-0.5 stat-detail">
+                  Últimos 3 cobros realizados por {user?.name || 'esta cuenta'}
+                </p>
               </div>
               <button
                 type="button"
                 onClick={loadInitialData}
                 className="text-xs text-[#a1a1aa] hover:text-[#f1f1ee] flex items-center gap-1 cursor-pointer"
+                title="Actualizar cobros"
               >
                 <RefreshCw className="w-3.5 h-3.5" />
               </button>
             </div>
 
-            {recentSales.length === 0 ? (
+            {myLast3Sales.length === 0 ? (
               <div className="p-8 text-center space-y-2">
                 <Smartphone className="w-8 h-8 text-[#a1a1aa] mx-auto" />
-                <p className="text-xs font-semibold text-[#f1f1ee]">Sin cobros recientes</p>
-                <p className="text-[11px] text-[#a1a1aa]">
-                  Ingresá un importe en el teclado para emitir tu primer comprobante.
+                <p className="text-xs font-semibold text-[#f1f1ee]">
+                  Sin cobros recientes en esta cuenta
+                </p>
+                <p className="text-[11px] text-[#a1a1aa] stat-detail">
+                  Aquí verás únicamente los últimos 3 cobros emitidos por {user?.name || 'tu usuario'}.
                 </p>
               </div>
             ) : (
               <div className="divide-y divide-[#242426]">
-                {recentSales.map((s) => (
+                {myLast3Sales.map((s) => (
                   <div
                     key={s.id}
                     className="p-4 flex items-center justify-between gap-3 hover:bg-[#161619] transition-colors"
@@ -821,11 +1008,11 @@ export const CashierView: React.FC = () => {
                         <span className="font-mono font-bold text-sm text-[#f1f1ee]">
                           {formatCurrency(s.amount)}
                         </span>
-                        <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-[#18181b] border border-[#28282a] text-[#bec8ff]">
+                        <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-[#18181b] border border-[#28282a] text-[#bec8ff] stat-badge">
                           {methodBadgeLabel(s.method)}
                         </span>
                       </div>
-                      <p className="text-[11px] text-[#a1a1aa] mt-0.5">
+                      <p className="text-[11px] text-[#a1a1aa] mt-0.5 stat-detail">
                         {formatDate(s.createdAt)} · {s.cartelCode || 'CAJA01'}
                       </p>
                     </div>
@@ -835,7 +1022,7 @@ export const CashierView: React.FC = () => {
                         to={`/r/${s.receiptId}`}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="text-xs font-semibold text-[#bec8ff] hover:underline shrink-0 flex items-center gap-1"
+                        className="text-xs font-semibold text-[#bec8ff] hover:underline shrink-0 flex items-center gap-1 stat-detail"
                       >
                         <span>Comprobante</span>
                         <ExternalLink className="w-3 h-3" />
@@ -849,7 +1036,203 @@ export const CashierView: React.FC = () => {
         </div>
       </main>
 
-      {/* Modal: Cambiar o crear cuenta de cajero */}
+      {/* Modal: Catálogo Completo (enfocado en cafeterías, restaurantes y productos sin código universal) */}
+      {showCatalogModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80">
+          <div className="w-full max-w-2xl rounded-2xl bg-[#111113] border border-[#242426] flex flex-col max-h-[88vh] overflow-hidden shadow-2xl">
+            {/* Header del Catálogo */}
+            <div className="p-5 border-b border-[#242426] flex items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-[#bec8ff]/15 text-[#bec8ff] flex items-center justify-center shrink-0">
+                  <Coffee className="w-5 h-5" />
+                </div>
+                <div>
+                  <h2 className="font-bold text-base text-[#f1f1ee]">
+                    Catálogo y Menú Completo
+                  </h2>
+                  <p className="text-xs text-[#a1a1aa]">
+                    Deslizá o buscá platos, cafés y productos con o sin código universal.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                {user?.role !== 'cashier' && (
+                  <Link
+                    to="/panel/productos"
+                    className="text-xs font-semibold text-[#bec8ff] hover:underline px-2.5 py-1.5 rounded-lg bg-[#18181b] border border-[#28282a]"
+                  >
+                    Administrar productos
+                  </Link>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setShowCatalogModal(false)}
+                  className="p-2 rounded-lg text-[#a1a1aa] hover:text-[#f1f1ee] cursor-pointer"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+
+            {/* Buscador del Catálogo */}
+            <div className="p-4 border-b border-[#242426] bg-[#141417]">
+              <div className="flex items-center gap-2.5 bg-[#18181b] border border-[#28282a] rounded-xl px-3.5 py-2.5 focus-within:border-[#bec8ff]">
+                <Search className="w-4 h-4 text-[#a1a1aa] shrink-0" />
+                <input
+                  type="text"
+                  autoFocus
+                  placeholder="Buscar café, plato, bebida o código universal..."
+                  value={catalogSearch}
+                  onChange={(e) => setCatalogSearch(e.target.value)}
+                  className="w-full bg-transparent text-sm text-[#f1f1ee] placeholder-[#71717a] focus:outline-none"
+                />
+                {catalogSearch && (
+                  <button
+                    type="button"
+                    onClick={() => setCatalogSearch('')}
+                    className="text-xs text-[#a1a1aa] hover:text-[#f1f1ee] cursor-pointer"
+                  >
+                    Limpiar
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Lista deslizable de todo el menú */}
+            <div className="flex-1 overflow-y-auto p-4 space-y-2.5">
+              {filteredCatalogProducts.length === 0 ? (
+                <div className="py-12 text-center space-y-2">
+                  <ShoppingBag className="w-8 h-8 text-[#a1a1aa] mx-auto" />
+                  <p className="text-sm font-semibold text-[#f1f1ee]">
+                    No encontramos productos con "{catalogSearch}"
+                  </p>
+                  <p className="text-xs text-[#a1a1aa]">
+                    Probá con otro nombre o agregá nuevos productos desde la sección Productos.
+                  </p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  {filteredCatalogProducts.map((prod) => {
+                    const selectedItem = scannedItems.find((i) => i.id === prod.id);
+                    const qty = selectedItem?.quantity || 0;
+                    return (
+                      <div
+                        key={prod.id}
+                        className={`p-3 rounded-xl border flex items-center justify-between gap-3 transition-colors ${
+                          qty > 0
+                            ? 'bg-[#2fb36a]/10 border-[#2fb36a]'
+                            : 'bg-[#161619] border-[#28282a] hover:border-[#3a3a3e]'
+                        }`}
+                      >
+                        <div
+                          onClick={() => addProductToSale(prod)}
+                          className="flex items-center gap-3 min-w-0 flex-1 cursor-pointer"
+                        >
+                          {prod.imageUrl ? (
+                            <img
+                              src={prod.imageUrl}
+                              alt={prod.title}
+                              className="w-11 h-11 rounded-xl object-cover border border-[#28282a] shrink-0"
+                            />
+                          ) : (
+                            <div className="w-11 h-11 rounded-xl bg-[#111113] border border-[#28282a] flex items-center justify-center text-[#bec8ff] shrink-0">
+                              <Coffee className="w-5 h-5" />
+                            </div>
+                          )}
+                          <div className="min-w-0">
+                            <p className="text-xs font-bold text-[#f1f1ee] truncate">
+                              {prod.title}
+                            </p>
+                            {prod.description && (
+                              <p className="text-[11px] text-[#a1a1aa] truncate">
+                                {prod.description}
+                              </p>
+                            )}
+                            <div className="flex items-center gap-2 mt-1">
+                              <span className="text-xs font-mono font-extrabold text-[#34d399]">
+                                {prod.price !== undefined ? formatCurrency(prod.price) : '$0'}
+                              </span>
+                              <span className="text-[10px] font-mono text-[#a1a1aa]">
+                                {prod.universalCode ? `Cód: ${prod.universalCode}` : 'Sin código'}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+
+                        {qty > 0 ? (
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            <button
+                              type="button"
+                              onClick={() => handleChangeItemQty(prod.id, -1)}
+                              className="w-7 h-7 rounded-lg bg-[#111113] border border-[#28282a] flex items-center justify-center text-[#f1f1ee] hover:border-[#bec8ff] cursor-pointer"
+                            >
+                              <Minus className="w-3.5 h-3.5" />
+                            </button>
+                            <span className="w-5 text-center font-mono text-xs font-bold text-[#f1f1ee]">
+                              {qty}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => addProductToSale(prod)}
+                              className="w-7 h-7 rounded-lg bg-[#2fb36a] text-[#0c0c0c] flex items-center justify-center font-bold cursor-pointer"
+                            >
+                              <Plus className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => addProductToSale(prod)}
+                            className="px-3 py-1.5 rounded-xl bg-[#18181b] hover:bg-[#bec8ff] text-[#f1f1ee] hover:text-[#0c0c0c] border border-[#28282a] text-xs font-bold transition-colors shrink-0 cursor-pointer"
+                          >
+                            + Sumar
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* Barra Inferior Fija con el Importe Debajo */}
+            <div className="p-4 border-t border-[#242426] bg-[#161619] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-center justify-between sm:justify-start gap-4">
+                <div>
+                  <span className="text-[11px] font-semibold text-[#a1a1aa] block">
+                    Importe acumulado ({scannedItems.reduce((a, b) => a + b.quantity, 0)} ítems)
+                  </span>
+                  <span className="text-2xl font-extrabold font-mono text-[#f1f1ee] tabular-nums">
+                    {formatCurrency(amount)}
+                  </span>
+                </div>
+                {scannedItems.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={handleClear}
+                    className="text-xs font-semibold text-[#a1a1aa] hover:text-red-400 underline cursor-pointer"
+                  >
+                    Vaciar pedido
+                  </button>
+                )}
+              </div>
+
+              <Button
+                type="button"
+                variant="ultramar"
+                size="md"
+                onClick={() => setShowCatalogModal(false)}
+                icon={<CheckCircle2 className="w-4 h-4" />}
+              >
+                Listo · Volver al cobro ({formatCurrency(amount)})
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Cambiar o crear cuenta (requiere contraseña al elegir un cargo superior) */}
       {showCashierAccountModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80">
           <div className="w-full max-w-md rounded-2xl bg-[#111113] border border-[#242426] p-6 space-y-5 shadow-2xl">
@@ -860,86 +1243,173 @@ export const CashierView: React.FC = () => {
                 </div>
                 <div>
                   <h2 className="font-bold text-base text-[#f1f1ee]">
-                    Cambiar o crear cajero
+                    Cambiar o crear cuenta
                   </h2>
                   <p className="text-xs text-[#a1a1aa]">
-                    Seleccioná tu nombre o sumá un nuevo cajero.
+                    Seleccioná la cuenta activa o sumá un nuevo cajero.
                   </p>
                 </div>
               </div>
               <button
                 type="button"
-                onClick={() => setShowCashierAccountModal(false)}
+                onClick={() => {
+                  setShowCashierAccountModal(false);
+                  setPendingElevationMember(null);
+                }}
                 className="p-1.5 rounded-lg text-[#a1a1aa] hover:text-[#f1f1ee] cursor-pointer"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
-            {/* Lista de cajeros / integrantes para cambiar en 1 toque */}
-            {teamMembers.length > 0 && (
-              <div className="space-y-2 max-h-48 overflow-y-auto">
-                <p className="text-xs font-semibold text-[#a1a1aa]">Integrantes del equipo</p>
-                {teamMembers.map((m) => {
-                  const isCurrent =
-                    user?.email && m.email.toLowerCase() === user.email.toLowerCase();
-                  const roleLabel =
-                    m.role === 'owner'
-                      ? 'Dueño'
-                      : m.role === 'manager'
-                      ? 'Encargado'
-                      : 'Cajero';
-                  return (
-                    <button
-                      key={m.id}
-                      type="button"
-                      onClick={() => handleSwitchCashier(m)}
-                      className={`w-full p-3 rounded-xl border flex items-center justify-between text-left transition-colors cursor-pointer ${
-                        isCurrent
-                          ? 'bg-[#2fb36a]/15 border-[#2fb36a] text-[#f1f1ee]'
-                          : 'bg-[#161619] border-[#28282a] text-[#f1f1ee] hover:border-[#bec8ff]'
-                      }`}
-                    >
-                      <div>
-                        <p className="text-xs font-bold">{m.name}</p>
-                        <p className="text-[11px] text-[#a1a1aa]">{roleLabel}</p>
-                      </div>
-                      <span className="text-xs font-semibold text-[#bec8ff]">
-                        {isCurrent ? 'Activo' : 'Usar cuenta'}
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-            )}
+            {/* Si se seleccionó un cargo superior (Dueño / Encargado), pedir contraseña de registro */}
+            {pendingElevationMember ? (
+              <form
+                onSubmit={handleConfirmElevationPassword}
+                className="p-4 rounded-xl bg-[#161619] border border-[#bec8ff]/40 space-y-3.5"
+              >
+                <div className="flex items-start gap-2.5">
+                  <KeyRound className="w-4 h-4 text-[#bec8ff] shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-xs font-bold text-[#f1f1ee]">
+                      Verificación de seguridad requerida
+                    </p>
+                    <p className="text-[11px] text-[#a1a1aa] mt-0.5">
+                      Para cambiar a{' '}
+                      <strong className="text-[#f1f1ee]">{pendingElevationMember.name}</strong> (
+                      {pendingElevationMember.role === 'owner' ? 'Dueño' : 'Encargado'}), ingresá la
+                      contraseña con la que se registró la cuenta.
+                    </p>
+                  </div>
+                </div>
 
-            {/* Crear nuevo cajero pidiendo solo Nombre y apellido */}
-            <form
-              onSubmit={handleCreateAndSwitchCashier}
-              className="pt-4 border-t border-[#242426] space-y-3"
-            >
-              <label className="block text-xs font-semibold text-[#a1a1aa]">
-                Crear nuevo cajero (Nombre y apellido)
-              </label>
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  required
-                  placeholder="Ej: Sofía López"
-                  value={newCashierName}
-                  onChange={(e) => setNewCashierName(e.target.value)}
-                  className="flex-1 bg-[#161619] border border-[#28282a] rounded-xl px-3.5 py-2.5 text-xs text-[#f1f1ee] focus:outline-none focus:border-[#bec8ff]"
-                />
-                <Button
-                  type="submit"
-                  variant="ultramar"
-                  size="sm"
-                  loading={isCreatingCashier}
+                <div className="relative">
+                  <Lock className="w-4 h-4 text-[#a1a1aa] absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  <input
+                    type={showElevationPassword ? 'text' : 'password'}
+                    required
+                    autoFocus
+                    placeholder="Contraseña de registro..."
+                    value={elevationPassword}
+                    onChange={(e) => setElevationPassword(e.target.value)}
+                    className="w-full pl-10 pr-10 py-2.5 rounded-xl bg-[#111113] border border-[#28282a] text-xs text-[#f1f1ee] focus:outline-none focus:border-[#bec8ff]"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowElevationPassword((prev) => !prev)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-[#a1a1aa] hover:text-[#f1f1ee] cursor-pointer"
+                  >
+                    {showElevationPassword ? (
+                      <EyeOff className="w-4 h-4" />
+                    ) : (
+                      <Eye className="w-4 h-4" />
+                    )}
+                  </button>
+                </div>
+
+                <div className="flex items-center justify-end gap-2">
+                  <Button
+                    type="button"
+                    variant="secundario"
+                    size="sm"
+                    onClick={() => {
+                      setPendingElevationMember(null);
+                      setElevationPassword('');
+                    }}
+                  >
+                    Cancelar
+                  </Button>
+                  <Button
+                    type="submit"
+                    variant="ultramar"
+                    size="sm"
+                    loading={isVerifyingPassword}
+                  >
+                    Confirmar y entrar al panel
+                  </Button>
+                </div>
+              </form>
+            ) : (
+              <>
+                {/* Lista de cuentas del equipo */}
+                {selectableAccounts.length > 0 && (
+                  <div className="space-y-2 max-h-56 overflow-y-auto">
+                    <p className="text-xs font-semibold text-[#a1a1aa]">Cuentas del comercio</p>
+                    {selectableAccounts.map((m) => {
+                      const isCurrent =
+                        user?.email && m.email.toLowerCase() === user.email.toLowerCase();
+                      const roleLabel =
+                        m.role === 'owner'
+                          ? 'Dueño'
+                          : m.role === 'manager'
+                          ? 'Encargado'
+                          : 'Cajero';
+                      const requiresPassword =
+                        getRoleRank(m.role) >
+                        getRoleRank(user?.isSuperAdmin ? 'superadmin' : user?.role);
+
+                      return (
+                        <button
+                          key={m.id}
+                          type="button"
+                          onClick={() => handleSelectAccount(m)}
+                          className={`w-full p-3 rounded-xl border flex items-center justify-between text-left transition-colors cursor-pointer ${
+                            isCurrent
+                              ? 'bg-[#2fb36a]/15 border-[#2fb36a] text-[#f1f1ee]'
+                              : 'bg-[#161619] border-[#28282a] text-[#f1f1ee] hover:border-[#bec8ff]'
+                          }`}
+                        >
+                          <div>
+                            <p className="text-xs font-bold flex items-center gap-1.5">
+                              <span>{m.name}</span>
+                              {requiresPassword && (
+                                <Lock className="w-3 h-3 text-[#bec8ff]" />
+                              )}
+                            </p>
+                            <p className="text-[11px] text-[#a1a1aa]">{roleLabel}</p>
+                          </div>
+                          <span className="text-xs font-semibold text-[#bec8ff]">
+                            {isCurrent
+                              ? 'Activo'
+                              : requiresPassword
+                              ? 'Requiere clave'
+                              : 'Usar cuenta'}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {/* Crear nuevo cajero pidiendo solo Nombre y apellido */}
+                <form
+                  onSubmit={handleCreateAndSwitchCashier}
+                  className="pt-4 border-t border-[#242426] space-y-3"
                 >
-                  Crear y entrar
-                </Button>
-              </div>
-            </form>
+                  <label className="block text-xs font-semibold text-[#a1a1aa]">
+                    Crear nuevo cajero (Nombre y apellido)
+                  </label>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      required
+                      placeholder="Ej: Sofía López"
+                      value={newCashierName}
+                      onChange={(e) => setNewCashierName(e.target.value)}
+                      className="flex-1 bg-[#161619] border border-[#28282a] rounded-xl px-3.5 py-2.5 text-xs text-[#f1f1ee] focus:outline-none focus:border-[#bec8ff]"
+                    />
+                    <Button
+                      type="submit"
+                      variant="ultramar"
+                      size="sm"
+                      loading={isCreatingCashier}
+                    >
+                      Crear y entrar
+                    </Button>
+                  </div>
+                </form>
+              </>
+            )}
           </div>
         </div>
       )}

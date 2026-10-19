@@ -23,14 +23,14 @@
 }
 
 html.theme-light {
-  --bg-main: #f1f1ee;
-  --bg-sidebar: #ffffff;
-  --bg-card: #ffffff;
-  --bg-elevated: #f5f5f2;
-  --border-card: #e2e2dd;
-  --border-hover: #cfcfc8;
+  --bg-main: #f2ede2;
+  --bg-sidebar: #111113;
+  --bg-card: #faf7f0;
+  --bg-elevated: #ebe5d8;
+  --border-card: #111113;
+  --border-hover: #000000;
   --text-primary: #0c0c0c;
-  --text-secondary: #52525b;
+  --text-secondary: #1f1f22;
 }
 
 body {
@@ -44,70 +44,118 @@ body {
   transition: background-color 0.2s ease, color 0.2s ease;
 }
 
-/* Adaptación automática Modo Claro en Paneles (.theme-panel) */
-html.theme-light .theme-panel,
-html.theme-light .theme-panel .bg-\[\#000000\],
-html.theme-light .theme-panel .bg-\[\#0c0c0c\],
-html.theme-light .theme-panel .bg-\[\#0A0A0A\] {
-  background-color: #f1f1ee !important;
+/* ==========================================================================
+   MODO CLARO EN PANELES (.theme-panel)
+   - Barras de selección (aside) y barra superior (header con comercio + rol)
+     se mantienen en el MISMO NEGRO (#111113 / #18181b).
+   - El resto del panel usa un blanco beige muy claro (#f2ede2 / #faf7f0)
+     para no cansar la vista.
+   - Bordes de estadísticas y detalles en negro (#111113 / #0c0c0c).
+   ========================================================================== */
+
+html.theme-light .theme-panel {
+  background-color: #f2ede2 !important;
   color: #0c0c0c !important;
 }
 
-html.theme-light .theme-panel aside.bg-\[\#000000\],
-html.theme-light .theme-panel aside.bg-\[\#0c0c0c\],
-html.theme-light .theme-panel aside.bg-\[\#0A0A0A\],
-html.theme-light .theme-panel header.bg-\[\#000000\],
-html.theme-light .theme-panel header.bg-\[\#0c0c0c\],
-html.theme-light .theme-panel header.bg-\[\#0A0A0A\] {
-  background-color: #ffffff !important;
-  border-color: #e2e2dd !important;
+/* 1. Mantener las barras de selección y cabecera (comercio + rol) en el mismo negro */
+html.theme-light .theme-panel .panel-chrome-dark {
+  background-color: #111113 !important;
+  border-color: #242426 !important;
+  color: #f1f1ee !important;
 }
 
-html.theme-light .theme-panel .bg-\[\#111113\],
-html.theme-light .theme-panel .bg-\[\#141414\],
-html.theme-light .theme-panel .bg-\[\#141416\] {
-  background-color: #ffffff !important;
-  border-color: #e2e2dd !important;
+html.theme-light .theme-panel .panel-chrome-dark .bg-\[\#111113\] {
+  background-color: #111113 !important;
+  color: #f1f1ee !important;
+}
+
+html.theme-light .theme-panel .panel-chrome-dark .bg-\[\#18181b\] {
+  background-color: #18181b !important;
+  border-color: #28282a !important;
+  color: #f1f1ee !important;
+}
+
+html.theme-light .theme-panel .panel-chrome-dark .border-\[\#242426\],
+html.theme-light .theme-panel .panel-chrome-dark .border-\[\#28282a\] {
+  border-color: #28282a !important;
+}
+
+html.theme-light .theme-panel .panel-chrome-dark .text-\[\#f1f1ee\] {
+  color: #f1f1ee !important;
+}
+
+html.theme-light .theme-panel .panel-chrome-dark .text-\[\#a1a1aa\] {
+  color: #a1a1aa !important;
+}
+
+html.theme-light .theme-panel .panel-chrome-dark .text-\[\#bec8ff\] {
+  color: #bec8ff !important;
+}
+
+html.theme-light .theme-panel .panel-chrome-dark .text-\[\#34d399\] {
+  color: #34d399 !important;
+}
+
+/* 2. Resto del contenido del panel (main): blanco beige suave con bordes y detalles en negro */
+html.theme-light .theme-panel main .bg-\[\#111113\],
+html.theme-light .theme-panel main .bg-\[\#141414\],
+html.theme-light .theme-panel main .bg-\[\#141416\],
+html.theme-light .theme-panel main .stat-card {
+  background-color: #faf7f0 !important;
+  border-color: #111113 !important;
+  border-width: 1.5px !important;
   color: #0c0c0c !important;
 }
 
-html.theme-light .theme-panel .bg-\[\#18181b\],
-html.theme-light .theme-panel .bg-\[\#1A1A1A\] {
-  background-color: #f5f5f2 !important;
-  border-color: #e2e2dd !important;
+html.theme-light .theme-panel main .bg-\[\#161619\],
+html.theme-light .theme-panel main .bg-\[\#18181b\],
+html.theme-light .theme-panel main .bg-\[\#1A1A1A\],
+html.theme-light .theme-panel main .stat-badge {
+  background-color: #ebe5d8 !important;
+  border-color: #111113 !important;
   color: #0c0c0c !important;
 }
 
-html.theme-light .theme-panel .text-\[\#f1f1ee\],
-html.theme-light .theme-panel .text-white {
+html.theme-light .theme-panel main .text-\[\#f1f1ee\],
+html.theme-light .theme-panel main .text-white,
+html.theme-light .theme-panel main .stat-detail {
   color: #0c0c0c !important;
 }
 
-html.theme-light .theme-panel .text-\[\#a1a1aa\],
-html.theme-light .theme-panel .text-\[\#9c9c98\],
-html.theme-light .theme-panel .text-\[\#8E8E93\] {
-  color: #52525b !important;
+html.theme-light .theme-panel main .text-\[\#a1a1aa\],
+html.theme-light .theme-panel main .text-\[\#9c9c98\],
+html.theme-light .theme-panel main .text-\[\#8E8E93\],
+html.theme-light .theme-panel main .text-\[\#71717a\] {
+  color: #1f1f22 !important;
 }
 
-html.theme-light .theme-panel .border-\[\#242426\],
-html.theme-light .theme-panel .border-\[\#242424\],
-html.theme-light .theme-panel .border-\[\#28282a\],
-html.theme-light .theme-panel .border-\[\#2A2A2A\] {
-  border-color: #e2e2dd !important;
+html.theme-light .theme-panel main .border-\[\#242426\],
+html.theme-light .theme-panel main .border-\[\#242424\],
+html.theme-light .theme-panel main .border-\[\#28282a\],
+html.theme-light .theme-panel main .border-\[\#2A2A2A\] {
+  border-color: #111113 !important;
 }
 
-html.theme-light .theme-panel .divide-\[\#242426\] > :not([hidden]) ~ :not([hidden]),
-html.theme-light .theme-panel .divide-\[\#242424\] > :not([hidden]) ~ :not([hidden]) {
-  border-color: #e2e2dd !important;
+html.theme-light .theme-panel main .divide-\[\#242426\] > :not([hidden]) ~ :not([hidden]),
+html.theme-light .theme-panel main .divide-\[\#242424\] > :not([hidden]) ~ :not([hidden]) {
+  border-color: #111113 !important;
 }
 
-html.theme-light .theme-panel .text-\[\#bec8ff\] {
-  color: #3f4ed6 !important;
-}
-
-html.theme-light .theme-panel .bg-\[\#bec8ff\] .text-\[\#f1f1ee\],
-html.theme-light .theme-panel .bg-\[\#bec8ff\] {
+html.theme-light .theme-panel main .text-\[\#bec8ff\],
+html.theme-light .theme-panel main .text-\[\#34d399\] {
   color: #0c0c0c !important;
+}
+
+html.theme-light .theme-panel main .bg-\[\#bec8ff\] {
+  background-color: #111113 !important;
+  color: #faf7f0 !important;
+  border-color: #111113 !important;
+}
+
+html.theme-light .theme-panel main .bg-\[\#bec8ff\] span,
+html.theme-light .theme-panel main .bg-\[\#bec8ff\] svg {
+  color: #faf7f0 !important;
 }
 
 html.theme-light .theme-panel .bg-\[\#0c0c0c\].text-\[\#f1f1ee\] {

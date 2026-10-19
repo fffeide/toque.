@@ -584,7 +584,7 @@ export const PricingView: React.FC = () => {
       </div>
 
       {/* 7. FOOTER */}
-      <footer className="border-t border-[#242426] bg-[#0c0c0c] py-8 text-center text-xs text-[#a1a1aa] space-y-2">
+      <footer className="border-t border-[#242426] bg-[#0c0c0c] py-8 text-center text-xs text-[#a1a1aa] space-y-3">
         <div className="flex justify-center items-center gap-2">
           <div className="w-5 h-5 rounded-full bg-[#f1f1ee] flex items-center justify-center">
             <img src="/assets/logo.svg" alt="" className="w-3 h-3 object-contain" />
@@ -592,6 +592,23 @@ export const PricingView: React.FC = () => {
           <span className="font-bold text-[#f1f1ee]">toque™</span>
         </div>
         <p>© {new Date().getFullYear()} toque™ — Plataforma SaaS para comercios con carteles inteligentes.</p>
+        <div className="flex flex-wrap justify-center items-center gap-4 text-[11px] text-[#a1a1aa]">
+          <Link to="/terminos" className="hover:text-[#f1f1ee]">
+            Términos y Condiciones
+          </Link>
+          <Link to="/privacidad" className="hover:text-[#f1f1ee]">
+            Privacidad
+          </Link>
+          <Link to="/cookies" className="hover:text-[#f1f1ee]">
+            Cookies y Clarity
+          </Link>
+          <Link to="/reembolso" className="hover:text-[#f1f1ee]">
+            Reembolsos
+          </Link>
+          <Link to="/arrepentimiento" className="hover:text-[#f1f1ee]">
+            Botón de Arrepentimiento
+          </Link>
+        </div>
       </footer>
     </div>
   );
