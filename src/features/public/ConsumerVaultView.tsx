@@ -58,10 +58,10 @@ export const ConsumerVaultView: React.FC = () => {
   // Modal de vincular o recuperar cuenta
   const [showSyncModal, setShowSyncModal] = useState(false);
   const [syncMode, setSyncMode] = useState<'register' | 'recover'>('register');
-  const [regName, setRegName] = useState(vault.user.displayName || '');
-  const [regContact, setRegContact] = useState(vault.user.emailOrPhone || '');
+  const [regName, setRegName] = useState(vault.user?.displayName || '');
+  const [regContact, setRegContact] = useState(vault.user?.emailOrPhone || '');
   const [regAgeGroup, setRegAgeGroup] = useState<'teen' | 'adult' | 'all'>(
-    vault.user.ageGroup || 'all'
+    vault.user?.ageGroup || 'all'
   );
   const [consentSaveReceipts, setConsentSaveReceipts] = useState(true);
   const [consentMarketingNetwork, setConsentMarketingNetwork] = useState(true);
@@ -109,7 +109,7 @@ export const ConsumerVaultView: React.FC = () => {
     setEditingReceiptId(null);
     success('Comprobante actualizado', 'Se actualizaron tus gastos y ahorros del mes.');
 
-    if (nextState.user.emailOrPhone) {
+    if (nextState.user?.emailOrPhone && nextState.user) {
       api
         .syncConsumerVault({
           user: nextState.user,
@@ -142,7 +142,7 @@ export const ConsumerVaultView: React.FC = () => {
     setShowAddModal(false);
     success('Comprobante guardado', 'Se sumó un nuevo toque a tu cuenta.');
 
-    if (nextState.user.emailOrPhone) {
+    if (nextState.user?.emailOrPhone && nextState.user) {
       api
         .syncConsumerVault({
           user: nextState.user,
@@ -169,10 +169,12 @@ export const ConsumerVaultView: React.FC = () => {
         consentMarketingNetwork,
       });
 
-      await api.syncConsumerVault({
-        user: updatedLocal.user,
-        receipts: updatedLocal.receipts,
-      });
+      if (updatedLocal.user) {
+        await api.syncConsumerVault({
+          user: updatedLocal.user,
+          receipts: updatedLocal.receipts,
+        });
+      }
 
       setVault({ ...loadConsumerVault() });
       setShowSyncModal(false);
@@ -208,10 +210,7 @@ export const ConsumerVaultView: React.FC = () => {
         return;
       }
 
-      const nextState = overwriteVaultFromRecovery({
-        user: res.user,
-        receipts: res.receipts || [],
-      });
+      const nextState = overwriteVaultFromRecovery(res.user, res.receipts || []);
       setVault({ ...nextState });
       setShowSyncModal(false);
       success(
@@ -268,12 +267,12 @@ export const ConsumerVaultView: React.FC = () => {
           <button
             type="button"
             onClick={() => {
-              setSyncMode(vault.user.emailOrPhone ? 'recover' : 'register');
+              setSyncMode(vault.user?.emailOrPhone ? 'recover' : 'register');
               setShowSyncModal(true);
             }}
             className="px-3.5 py-2 rounded-xl bg-[#111113] border border-[#242426] hover:border-[#bec8ff] text-xs font-semibold text-[#f1f1ee] flex items-center gap-1.5 transition-colors cursor-pointer"
           >
-            {vault.user.emailOrPhone ? (
+            {vault.user?.emailOrPhone ? (
               <>
                 <CheckCircle2 className="w-3.5 h-3.5 text-[#2fb36a]" />
                 <span className="hidden sm:inline">{vault.user.displayName}</span>
@@ -291,7 +290,7 @@ export const ConsumerVaultView: React.FC = () => {
 
       <main className="max-w-4xl mx-auto px-4 sm:px-6 pt-6 space-y-6">
         {/* BANNER DE VINCULACIÓN EN 1 TOQUE (SI AÚN NO SE REGISTRÓ) */}
-        {!vault.user.emailOrPhone && (
+        {!vault.user?.emailOrPhone && (
           <div className="p-4 sm:p-5 rounded-2xl bg-[#111113] border border-[#bec8ff]/40 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div className="space-y-1">
               <div className="flex items-center gap-2 text-xs font-bold text-[#bec8ff]">
@@ -464,13 +463,16 @@ export const ConsumerVaultView: React.FC = () => {
               <span>Tips Inteligentes de Ahorro</span>
             </div>
             <div className="space-y-2.5">
-              {smartTips.map((tip, idx) => (
+              {smartTips.map((tip) => (
                 <div
-                  key={idx}
+                  key={tip.id}
                   className="p-3 rounded-xl bg-[#18181b] border border-[#28282a] text-xs text-[#f1f1ee] leading-relaxed flex items-start gap-2.5"
                 >
                   <Gift className="w-4 h-4 text-[#bec8ff] shrink-0 mt-0.5" />
-                  <span>{tip}</span>
+                  <div className="space-y-0.5">
+                    <span className="font-semibold text-[#f1f1ee] block">{tip.title}</span>
+                    <span className="text-[#a1a1aa]">{tip.detail}</span>
+                  </div>
                 </div>
               ))}
             </div>
@@ -492,7 +494,8 @@ export const ConsumerVaultView: React.FC = () => {
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               {stampsList.map(([tenantId, info]) => {
-                const pct = Math.min(100, Math.round((info.stamps / info.target) * 100));
+                const targetCount = info.target || info.targetStamps || 5;
+                const pct = Math.min(100, Math.round((info.stamps / targetCount) * 100));
                 return (
                   <div
                     key={tenantId}
@@ -503,14 +506,14 @@ export const ConsumerVaultView: React.FC = () => {
                         {info.merchantName}
                       </span>
                       <span className="text-xs font-mono font-bold text-[#bec8ff]">
-                        {info.stamps} / {info.target} sellos
+                        {info.stamps} / {targetCount} sellos
                       </span>
                     </div>
                     <div className="w-full h-2 rounded-full bg-[#111113] border border-[#242426] overflow-hidden">
                       <div className="h-full bg-[#bec8ff]" style={{ width: `${pct}%` }} />
                     </div>
                     <p className="text-[11px] text-[#a1a1aa]">
-                      Premio: <strong className="text-[#f1f1ee]">{info.rewardLabel}</strong>
+                      Premio: <strong className="text-[#f1f1ee]">{info.rewardLabel || info.rewardText}</strong>
                     </p>
                   </div>
                 );

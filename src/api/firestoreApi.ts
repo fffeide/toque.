@@ -19,6 +19,7 @@ import {
   User,
   Cartel,
   HubConfig,
+  HubProduct,
   PublicHub,
   Sale,
   Receipt,
@@ -392,6 +393,79 @@ class FirestoreToqueApi implements ToqueApi {
               addedAt: nowIso,
             })
           ),
+          setDoc(
+            doc(db, 'team', 'team-demo-owner'),
+            stripUndefined({
+              id: 'team-demo-owner',
+              uuid: '30000000-0000-4000-8000-000000000002',
+              businessId: 'biz-toque-1',
+              name: 'Dueño Demo',
+              email: 'demo@toque.ar',
+              role: 'owner',
+              assignedCartelId: 'cartel-caja-1',
+              assignedCartelCode: 'CAJA01',
+              status: 'active',
+              addedAt: nowIso,
+            })
+          ),
+          setDoc(
+            doc(db, 'team', 'team-demo-encargado'),
+            stripUndefined({
+              id: 'team-demo-encargado',
+              uuid: '30000000-0000-4000-8000-000000000003',
+              businessId: 'biz-toque-1',
+              name: 'Laura (Encargada)',
+              email: 'encargado@toque.ar',
+              role: 'manager',
+              assignedCartelId: 'cartel-caja-1',
+              assignedCartelCode: 'CAJA01',
+              status: 'active',
+              addedAt: nowIso,
+            })
+          ),
+          setDoc(
+            doc(db, 'team', 'team-demo-cajero'),
+            stripUndefined({
+              id: 'team-demo-cajero',
+              uuid: '30000000-0000-4000-8000-000000000004',
+              businessId: 'biz-toque-1',
+              name: 'Lucas (Cajero)',
+              email: 'caja@toque.ar',
+              role: 'cashier',
+              assignedCartelId: 'cartel-caja-1',
+              assignedCartelCode: 'CAJA01',
+              status: 'active',
+              addedAt: nowIso,
+            })
+          ),
+          setDoc(
+            doc(db, 'team', 'team-demo-admin'),
+            stripUndefined({
+              id: 'team-demo-admin',
+              uuid: '30000000-0000-4000-8000-000000000005',
+              businessId: 'biz-toque-1',
+              name: 'Super Admin',
+              email: 'admin@toque.ar',
+              role: 'superadmin',
+              status: 'active',
+              addedAt: nowIso,
+            })
+          ),
+          setDoc(
+            doc(db, 'team', 'team-owner-user'),
+            stripUndefined({
+              id: 'team-owner-user',
+              uuid: '30000000-0000-4000-8000-000000000006',
+              businessId: 'biz-toque-1',
+              name: 'Federico Eloiss',
+              email: 'fedeeeloiss@gmail.com',
+              role: 'owner',
+              assignedCartelId: 'cartel-caja-1',
+              assignedCartelCode: 'CAJA01',
+              status: 'active',
+              addedAt: nowIso,
+            })
+          ),
           ...NEIGHBOR_CROSS_BENEFITS_FALLBACK.map((neighborAct) =>
             setDoc(doc(db, 'network_activations', neighborAct.id), stripUndefined(neighborAct))
           ),
@@ -637,6 +711,15 @@ class FirestoreToqueApi implements ToqueApi {
       };
       this.saveSession(user);
       return { user, token: `session-${user.uuid}` };
+    }
+
+    // 3. Si ingresa con Google por primera vez, registrarlo automáticamente
+    if (credentials.isGoogle) {
+      return this.register({
+        businessName: displayName ? `Local de ${displayName}` : 'Mi Comercio Toque',
+        ownerName: displayName || 'Dueño',
+        email: cleanEmail,
+      });
     }
 
     throw new Error('No existe una sesión o cuenta válida para este usuario.');

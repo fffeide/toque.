@@ -33,7 +33,9 @@ export interface LocalStampProgress {
   merchantName: string;
   stamps: number;
   targetStamps: number;
+  target?: number;
   rewardText: string;
+  rewardLabel?: string;
   lastTouchAt: string;
 }
 
@@ -51,6 +53,14 @@ export interface ConsumerVaultKPIs {
   totalSavedArs: number;
   totalTouches: number;
   unlockableRewardsCount: number;
+  spentThisMonthArs: number;
+  savedWithToqueArs: number;
+  totalVisitsCount: number;
+  weeklyVisitsCount: number;
+  rewardsToUnlockCount: number;
+  weeklyChallengeProgress: number;
+  weeklyChallengeTarget: number;
+  weeklyChallengePercent: number;
 }
 
 export interface SmartTip {
@@ -206,7 +216,9 @@ export function loadConsumerVault(): ConsumerVaultState {
       merchantName: s.merchantName,
       stamps: s.stamps,
       targetStamps: s.targetStamps,
+      target: s.targetStamps,
       rewardText: s.rewardText,
+      rewardLabel: s.rewardText,
       lastTouchAt: s.lastVisitAt,
     };
   });
@@ -368,6 +380,7 @@ export function recordHubVisitLocally(params: {
   discountSavedArs?: number;
   category?: string;
   receiptNote?: string;
+  receiptId?: string;
 }): {
   vault: ConsumerVaultState;
   savedReceipt: ConsumerReceipt;
@@ -476,10 +489,12 @@ export function updateConsumerReceiptLocal(
 export function updateReceiptAmount(
   receiptId: string,
   amountArs: number,
+  discountSavedArs?: number,
   receiptNote?: string
 ): ConsumerVaultState {
   updateConsumerReceiptLocal(receiptId, {
     amountArs,
+    discountSavedArs,
     receiptNote,
   });
   return loadConsumerVault();
@@ -597,11 +612,28 @@ export function computeConsumerKPIs(
   const challengeRewards = totalTouches >= 3 ? 2 : 1;
   const unlockableRewardsCount = Math.max(1, stampRewards + challengeRewards);
 
+  const sevenDaysAgo = Date.now() - 7 * 86400000;
+  const recentReceipts = receipts.filter(
+    (r) => new Date(r.createdAt).getTime() >= sevenDaysAgo
+  ).length;
+  const weeklyVisitsCount = Math.max(1, recentReceipts);
+  const weeklyChallengeProgress = Math.min(3, weeklyVisitsCount);
+  const weeklyChallengeTarget = 3;
+  const weeklyChallengePercent = Math.min(100, Math.round((weeklyChallengeProgress / weeklyChallengeTarget) * 100));
+
   return {
     monthlySpentArs,
     totalSavedArs,
     totalTouches,
     unlockableRewardsCount,
+    spentThisMonthArs: monthlySpentArs,
+    savedWithToqueArs: totalSavedArs,
+    totalVisitsCount: totalTouches,
+    weeklyVisitsCount,
+    rewardsToUnlockCount: unlockableRewardsCount,
+    weeklyChallengeProgress,
+    weeklyChallengeTarget,
+    weeklyChallengePercent,
   };
 }
 

@@ -647,13 +647,21 @@ class MockApi {
       todaySalesCount: todaySales.length,
       weeklySalesAmount,
       weeklySalesCount: weeklySales.length,
+      myTodaySalesCount: todaySales.length,
+      myWeeklySalesCount: weeklySales.length,
+      todayClaimedReceiptsCount: claimedReceiptsCount,
+      myClaimedReceiptsCount: claimedReceiptsCount,
       totalReceiptsCount: this.receipts.length,
       claimedReceiptsCount,
       newClubMembersCount: this.clubMembers.length,
+      clubMembersCount: this.clubMembers.length,
       walletPassesCount: 0,
       scansCount: this.carteles.reduce((acc, c) => acc + (c.scansCount || 0), 0),
       reviewButtonClicks: this.reviewClicks,
       teamMembersCount: 1,
+      activeCartelesCount: this.carteles.filter((c) => c.status === 'active').length,
+      totalCartelesCount: this.carteles.length,
+      recentSales: this.sales.slice(0, 50),
     };
   }
 

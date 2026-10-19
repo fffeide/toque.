@@ -1,1 +1,1 @@
-export const SECURITY_LOCKDOWN = true;
+export const SECURITY_LOCKDOWN = false;
