@@ -1,2 +1,6 @@
-export { PanelLayout as AppLayout } from './PanelLayout';
-export { PanelLayout } from './PanelLayout';
+import React from 'react';
+import { PanelLayout } from './PanelLayout';
+
+export const AppLayout: React.FC = () => {
+  return <PanelLayout />;
+};

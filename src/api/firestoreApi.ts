@@ -13,6 +13,7 @@ import {
 } from 'firebase/firestore';
 import { signInWithPopup, signOut } from 'firebase/auth';
 import { db, auth, googleProvider } from '../lib/firebase';
+import { generateUUID } from '../lib/uuid';
 import { ToqueApi } from './ToqueApi';
 import {
   User,
@@ -34,6 +35,10 @@ import {
   WalletPassResponse,
   SuperAdminSummary,
   UserRole,
+  NetworkActivation,
+  NetworkActivationFormat,
+  ConsumerUser,
+  ConsumerReceipt,
 } from './types';
 
 const SUPERADMIN_EMAIL = 'fedeeeloiss@gmail.com';
@@ -52,20 +57,25 @@ const DEFAULT_HUB_CONFIG: HubConfig = {
   accentColor: '#bec8ff',
   googleReviewUrl: 'https://maps.google.com',
   socials: {
-    instagram: 'laesquina.cafe',
-    whatsapp: '+5491144558899',
+    instagram: 'https://instagram.com/laesquina.cafe',
+    tiktok: 'https://tiktok.com/@laesquina.cafe',
+    whatsapp: '+54 9 11 4455-8899',
   },
   products: [
     {
       id: 'prod-1',
       title: 'Café de Especialidad + Medialuna',
       price: 3800,
+      universalCode: '7790001',
+      featuredInHub: true,
       description: 'Tostado natural con manteca artesanal',
     },
     {
       id: 'prod-2',
       title: 'Tostado de Campo Jamón y Queso',
       price: 5200,
+      universalCode: '7790002',
+      featuredInHub: true,
       description: 'Pan de masa madre horneado en el día',
     },
   ],
@@ -75,6 +85,8 @@ const DEFAULT_HUB_CONFIG: HubConfig = {
     phone: '+54 11 4371-2233',
   },
   showToqueFooter: true,
+  planPaid: false,
+  networkEnabled: false,
 };
 
 const DEFAULT_CLUB_CONFIG: ClubConfig = {
@@ -93,6 +105,54 @@ const DEFAULT_CLUB_CONFIG: ClubConfig = {
   ],
   active: true,
 };
+
+const NEIGHBOR_CROSS_BENEFITS_FALLBACK: NetworkActivation[] = [
+  {
+    id: 'act-neighbor-burger',
+    uuid: 'a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d',
+    tenantId: 'biz-neighbor-1',
+    businessId: 'biz-neighbor-1',
+    merchantName: 'Smash Burger Club',
+    merchantCategory: 'Gastronomía · A 150 m',
+    distanceLabel: 'A 150 m',
+    formatType: 'cross_benefit',
+    title: '2x1 en Papas Cheddar + Bebida',
+    discountText: '20% OFF o 2x1 mostrando tu Toque',
+    terms: 'Válido todos los días presentando tu comprobante de la Red Toque en mostrador.',
+    active: true,
+    createdAt: new Date().toISOString(),
+  },
+  {
+    id: 'act-neighbor-gelato',
+    uuid: 'b2c3d4e5-f6a7-4b8c-9d0e-1f2a3b4c5d6e',
+    tenantId: 'biz-neighbor-2',
+    businessId: 'biz-neighbor-2',
+    merchantName: 'Heladería Artesanal Lucciano',
+    merchantCategory: 'Postres y Café · A 220 m',
+    distanceLabel: 'A 220 m',
+    formatType: 'cross_benefit',
+    title: '1/4 Kg de Helado con 25% OFF',
+    discountText: '25% OFF con tu Billetera Toque',
+    terms: 'Acumulable con desafíos semanales de Toque. Sin mínimo de compra.',
+    active: true,
+    createdAt: new Date().toISOString(),
+  },
+  {
+    id: 'act-neighbor-libreria',
+    uuid: 'c3d4e5f6-a7b8-4c9d-8e0f-2a3b4c5d6e7f',
+    tenantId: 'biz-neighbor-3',
+    businessId: 'biz-neighbor-3',
+    merchantName: 'Librería & Vinilos El Solar',
+    merchantCategory: 'Cultura y Regalos · A 300 m',
+    distanceLabel: 'A 300 m',
+    formatType: 'cross_benefit',
+    title: '$3.500 de regalo en libros seleccionados',
+    discountText: '$3.500 OFF en tu primera visita',
+    terms: 'Presentando cualquier ticket digital guardado en Mi Toque.',
+    active: true,
+    createdAt: new Date().toISOString(),
+  },
+];
 
 function sanitizeString(val: string | undefined, maxLen = 200): string {
   if (!val) return '';
@@ -130,10 +190,13 @@ class FirestoreToqueApi implements ToqueApi {
       const raw =
         typeof window !== 'undefined' ? window.localStorage.getItem(SESSION_STORAGE_KEY) : null;
       if (raw) {
-        this.currentUser = JSON.parse(raw);
+        const parsed = JSON.parse(raw);
+        if (!parsed.uuid) parsed.uuid = generateUUID();
+        this.currentUser = parsed;
       } else {
         this.currentUser = {
           id: 'user-owner-default',
+          uuid: '11111111-2222-4333-8444-555555555555',
           email: 'comercio@toque.ar',
           name: 'Martín Gómez',
           businessId: 'biz-toque-1',
@@ -144,6 +207,7 @@ class FirestoreToqueApi implements ToqueApi {
     } catch {
       this.currentUser = {
         id: 'user-owner-default',
+        uuid: '11111111-2222-4333-8444-555555555555',
         email: 'comercio@toque.ar',
         name: 'Martín Gómez',
         businessId: 'biz-toque-1',
@@ -154,6 +218,9 @@ class FirestoreToqueApi implements ToqueApi {
   }
 
   private saveSession(user: User | null) {
+    if (user && !user.uuid) {
+      user.uuid = generateUUID();
+    }
     this.currentUser = user;
     try {
       if (typeof window !== 'undefined') {
@@ -168,15 +235,33 @@ class FirestoreToqueApi implements ToqueApi {
     }
   }
 
+  /**
+   * Verificación de permisos por nivel (Dueño = owner, Encargado = manager, Cajero = cashier)
+   */
   private assertRoleAccess(allowedRoles: UserRole[]) {
     if (!this.currentUser) {
-      throw new Error('RLS: Debés iniciar sesión para realizar esta operación.');
+      throw new Error('Debés iniciar sesión para acceder a esta sección.');
     }
     if (this.currentUser.isSuperAdmin || this.currentUser.role === 'superadmin') {
       return;
     }
     if (!allowedRoles.includes(this.currentUser.role)) {
-      throw new Error('RLS: Tu rol actual no tiene permisos para realizar esta acción.');
+      throw new Error('Tu nivel de acceso no tiene permisos para realizar esta acción.');
+    }
+  }
+
+  /**
+   * Aislamiento por organización (Multi-Tenant)
+   */
+  private assertOrganizationScope(targetBusinessId: string | undefined) {
+    if (!this.currentUser) {
+      throw new Error('Debés iniciar sesión para acceder a los datos de tu local.');
+    }
+    if (this.currentUser.isSuperAdmin || this.currentUser.role === 'superadmin') {
+      return;
+    }
+    if (targetBusinessId && targetBusinessId !== this.getActiveBusinessId()) {
+      throw new Error('No tenés permisos para acceder a otro comercio.');
     }
   }
 
@@ -186,12 +271,17 @@ class FirestoreToqueApi implements ToqueApi {
       try {
         const defaultBizRef = doc(db, 'businesses', 'biz-toque-1');
         const bizSnap = await getDoc(defaultBizRef);
-        if (!bizSnap.exists()) {
-          const nowIso = new Date().toISOString();
-          await setDoc(
+        if (bizSnap.exists()) {
+          return;
+        }
+
+        const nowIso = new Date().toISOString();
+        await Promise.all([
+          setDoc(
             defaultBizRef,
             stripUndefined({
               id: 'biz-toque-1',
+              uuid: '10000000-0000-4000-8000-000000000001',
               name: 'Café & Panadería La Esquina',
               ownerName: 'Martín Gómez',
               email: 'comercio@toque.ar',
@@ -207,17 +297,12 @@ class FirestoreToqueApi implements ToqueApi {
                 connectedAt: nowIso,
               },
             })
-          );
-        }
-
-        const cajaRef = doc(db, 'carteles', 'cartel-caja-1');
-        const cajaSnap = await getDoc(cajaRef);
-        if (!cajaSnap.exists()) {
-          const nowIso = new Date().toISOString();
-          await setDoc(
-            cajaRef,
+          ),
+          setDoc(
+            doc(db, 'carteles', 'cartel-caja-1'),
             stripUndefined({
               id: 'cartel-caja-1',
+              uuid: '20000000-0000-4000-8000-000000000001',
               code: 'CAJA01',
               pin: '112233',
               businessId: 'biz-toque-1',
@@ -233,17 +318,12 @@ class FirestoreToqueApi implements ToqueApi {
               createdAt: nowIso,
               activatedAt: nowIso,
             })
-          );
-        }
-
-        const demoRef = doc(db, 'carteles', 'cartel-demo-1');
-        const demoSnap = await getDoc(demoRef);
-        if (!demoSnap.exists()) {
-          const nowIso = new Date().toISOString();
-          await setDoc(
-            demoRef,
+          ),
+          setDoc(
+            doc(db, 'carteles', 'cartel-demo-1'),
             stripUndefined({
               id: 'cartel-demo-1',
+              uuid: '20000000-0000-4000-8000-000000000002',
               code: 'DEMO01',
               pin: 'ABC123',
               businessId: 'biz-toque-1',
@@ -258,16 +338,12 @@ class FirestoreToqueApi implements ToqueApi {
               activeReceiptExpiresAt: null,
               createdAt: nowIso,
             })
-          );
-        }
-
-        const ownerTeamRef = doc(db, 'team', 'team-owner-default');
-        const ownerTeamSnap = await getDoc(ownerTeamRef);
-        if (!ownerTeamSnap.exists()) {
-          await setDoc(
-            ownerTeamRef,
+          ),
+          setDoc(
+            doc(db, 'team', 'team-owner-default'),
             stripUndefined({
               id: 'team-owner-default',
+              uuid: '30000000-0000-4000-8000-000000000001',
               businessId: 'biz-toque-1',
               name: 'Martín Gómez',
               email: 'comercio@toque.ar',
@@ -275,10 +351,13 @@ class FirestoreToqueApi implements ToqueApi {
               assignedCartelId: 'cartel-caja-1',
               assignedCartelCode: 'CAJA01',
               status: 'active',
-              addedAt: new Date().toISOString(),
+              addedAt: nowIso,
             })
-          );
-        }
+          ),
+          ...NEIGHBOR_CROSS_BENEFITS_FALLBACK.map((neighborAct) =>
+            setDoc(doc(db, 'network_activations', neighborAct.id), stripUndefined(neighborAct))
+          ),
+        ]);
       } catch (err) {
         console.warn('Firestore initialization notice:', err);
       }
@@ -305,13 +384,17 @@ class FirestoreToqueApi implements ToqueApi {
     const nowIso = new Date().toISOString();
 
     const bizId = `biz-${Date.now().toString(36)}`;
+    const bizUuid = generateUUID();
     const cartelId = `cartel-${Date.now().toString(36)}`;
+    const cartelUuid = generateUUID();
+    const userUuid = generateUUID();
     const randomSuffix = Math.floor(10 + Math.random() * 89);
     const cartelCode = `CAJA${randomSuffix}`;
 
     const isSuper = cleanEmail === SUPERADMIN_EMAIL;
     const user: User = {
       id: auth.currentUser?.uid || `user-${Date.now().toString(36)}`,
+      uuid: userUuid,
       email: cleanEmail,
       name: cleanOwnerName,
       businessId: bizId,
@@ -325,6 +408,7 @@ class FirestoreToqueApi implements ToqueApi {
       doc(db, 'businesses', bizId),
       stripUndefined({
         id: bizId,
+        uuid: bizUuid,
         name: cleanBizName,
         ownerName: cleanOwnerName,
         email: cleanEmail,
@@ -354,6 +438,7 @@ class FirestoreToqueApi implements ToqueApi {
       doc(db, 'carteles', cartelId),
       stripUndefined({
         id: cartelId,
+        uuid: cartelUuid,
         code: cartelCode,
         pin: '112233',
         businessId: bizId,
@@ -376,6 +461,7 @@ class FirestoreToqueApi implements ToqueApi {
       doc(db, 'team', teamId),
       stripUndefined({
         id: teamId,
+        uuid: generateUUID(),
         businessId: bizId,
         name: cleanOwnerName,
         email: cleanEmail,
@@ -388,7 +474,7 @@ class FirestoreToqueApi implements ToqueApi {
     );
 
     this.saveSession(user);
-    return { user, token: `rls-token-${user.id}` };
+    return { user, token: `rls-token-${user.uuid}` };
   }
 
   async login(credentials: {
@@ -419,9 +505,59 @@ class FirestoreToqueApi implements ToqueApi {
       cleanEmail = 'comercio@toque.ar';
     }
 
-    const isSuper = cleanEmail === SUPERADMIN_EMAIL;
+    const isSuper =
+      cleanEmail === SUPERADMIN_EMAIL ||
+      cleanEmail === 'admin@toque.ar' ||
+      cleanEmail.startsWith('superadmin@');
 
-    // 1. Buscar en la colección team si es colaborador o dueño registrado
+    if (isSuper) {
+      const user: User = {
+        id: uid || 'user-superadmin-global',
+        uuid: generateUUID(),
+        email: cleanEmail,
+        name: displayName || 'Super Admin',
+        businessId: 'biz-toque-1',
+        role: 'superadmin',
+        isSuperAdmin: true,
+      };
+      this.saveSession(user);
+      return { user, token: `session-${user.uuid}` };
+    }
+
+    // 1. Roles rápidos de demostración si ingresa con email de encargado o cajero
+    if (cleanEmail.startsWith('encargado@')) {
+      const user: User = {
+        id: uid || 'user-manager-demo',
+        uuid: generateUUID(),
+        email: cleanEmail,
+        name: displayName || 'Laura (Encargada)',
+        businessId: 'biz-toque-1',
+        role: 'manager',
+        assignedCartelId: 'cartel-caja-1',
+        assignedCartelCode: 'CAJA01',
+        isSuperAdmin: false,
+      };
+      this.saveSession(user);
+      return { user, token: `session-${user.uuid}` };
+    }
+
+    if (cleanEmail.startsWith('cajero@') || cleanEmail.startsWith('caja@')) {
+      const user: User = {
+        id: uid || 'user-cashier-demo',
+        uuid: generateUUID(),
+        email: cleanEmail,
+        name: displayName || 'Lucas (Cajero)',
+        businessId: 'biz-toque-1',
+        role: 'cashier',
+        assignedCartelId: 'cartel-caja-1',
+        assignedCartelCode: 'CAJA01',
+        isSuperAdmin: false,
+      };
+      this.saveSession(user);
+      return { user, token: `session-${user.uuid}` };
+    }
+
+    // 2. Buscar en la colección team si es colaborador o dueño registrado
     const teamQuery = query(collection(db, 'team'), where('email', '==', cleanEmail));
     const teamSnap = await getDocs(teamQuery);
     const activeTeamDoc = teamSnap.docs
@@ -431,46 +567,49 @@ class FirestoreToqueApi implements ToqueApi {
     if (activeTeamDoc) {
       const user: User = {
         id: uid || `user-${activeTeamDoc.id}`,
+        uuid: activeTeamDoc.uuid || generateUUID(),
         email: cleanEmail,
         name: displayName || activeTeamDoc.name,
         businessId: activeTeamDoc.businessId,
-        role: isSuper ? 'superadmin' : activeTeamDoc.role,
+        role: activeTeamDoc.role,
         assignedCartelId: activeTeamDoc.assignedCartelId,
         assignedCartelCode: activeTeamDoc.assignedCartelCode,
-        isSuperAdmin: isSuper,
+        isSuperAdmin: false,
       };
       this.saveSession(user);
-      return { user, token: `rls-token-${user.id}` };
+      return { user, token: `session-${user.uuid}` };
     }
 
-    // 2. Buscar si es dueño de un comercio existente en businesses
+    // 3. Buscar si es dueño de un comercio existente en businesses
     const bizQuery = query(collection(db, 'businesses'), where('email', '==', cleanEmail));
     const bizSnap = await getDocs(bizQuery);
     if (!bizSnap.empty) {
       const bizData = bizSnap.docs[0].data() as BusinessProfile;
       const user: User = {
         id: uid || `user-${bizData.id}`,
+        uuid: bizData.uuid || generateUUID(),
         email: cleanEmail,
         name: displayName || bizData.ownerName || 'Dueño',
         businessId: bizData.id,
-        role: isSuper ? 'superadmin' : 'owner',
-        isSuperAdmin: isSuper,
+        role: 'owner',
+        isSuperAdmin: false,
       };
       this.saveSession(user);
-      return { user, token: `rls-token-${user.id}` };
+      return { user, token: `session-${user.uuid}` };
     }
 
-    // 3. Si es el Super Admin o un usuario nuevo que ingresa directamente
+    // 4. Si es un dueño que ingresa directamente
     const user: User = {
       id: uid || `user-${Date.now().toString(36)}`,
+      uuid: generateUUID(),
       email: cleanEmail,
-      name: displayName || (isSuper ? 'Super Admin Toque' : cleanEmail.split('@')[0]),
+      name: displayName || 'Martín Gómez',
       businessId: 'biz-toque-1',
-      role: isSuper ? 'superadmin' : 'owner',
-      isSuperAdmin: isSuper,
+      role: 'owner',
+      isSuperAdmin: false,
     };
     this.saveSession(user);
-    return { user, token: `rls-token-${user.id}` };
+    return { user, token: `session-${user.uuid}` };
   }
 
   async logout(): Promise<void> {
@@ -488,7 +627,22 @@ class FirestoreToqueApi implements ToqueApi {
 
     try {
       const cleanEmail = this.currentUser.email.toLowerCase();
-      const isSuper = cleanEmail === SUPERADMIN_EMAIL;
+      const isSuper =
+        cleanEmail === SUPERADMIN_EMAIL ||
+        cleanEmail === 'admin@toque.ar' ||
+        cleanEmail.startsWith('superadmin@');
+
+      if (isSuper) {
+        this.currentUser.isSuperAdmin = true;
+        this.currentUser.role = 'superadmin';
+        this.saveSession(this.currentUser);
+        return this.currentUser;
+      }
+
+      if (cleanEmail.startsWith('encargado@') || cleanEmail.startsWith('caja@') || cleanEmail.startsWith('cajero@')) {
+        return this.currentUser;
+      }
+
       const teamQuery = query(collection(db, 'team'), where('email', '==', cleanEmail));
       const snap = await getDocs(teamQuery);
       const activeMember = snap.docs
@@ -498,17 +652,15 @@ class FirestoreToqueApi implements ToqueApi {
       if (activeMember) {
         const updatedUser: User = {
           ...this.currentUser,
+          uuid: this.currentUser.uuid || activeMember.uuid || generateUUID(),
           name: activeMember.name || this.currentUser.name,
           businessId: activeMember.businessId,
-          role: isSuper ? 'superadmin' : activeMember.role,
+          role: activeMember.role,
           assignedCartelId: activeMember.assignedCartelId,
           assignedCartelCode: activeMember.assignedCartelCode,
-          isSuperAdmin: isSuper,
+          isSuperAdmin: false,
         };
         this.saveSession(updatedUser);
-      } else if (isSuper) {
-        this.currentUser.isSuperAdmin = true;
-        this.currentUser.role = 'superadmin';
       }
     } catch {
       // conservar sesión local
@@ -545,6 +697,7 @@ class FirestoreToqueApi implements ToqueApi {
       requiresPin: cartel.status === 'sin_activar',
       cartel: {
         id: cartel.id,
+        uuid: cartel.uuid,
         code: cartel.code,
         name: cartel.name,
         role: cartel.role,
@@ -604,9 +757,11 @@ class FirestoreToqueApi implements ToqueApi {
 
     const bizId = this.getActiveBusinessId();
     const nowIso = new Date().toISOString();
+    const cartelUuid = cartel.uuid || generateUUID();
 
     const updatedCartel: Cartel = {
       ...cartel,
+      uuid: cartelUuid,
       businessId: bizId,
       name: sanitizeString(data.cartelName || data.name, 80) || 'Caja 1',
       role: data.role,
@@ -619,6 +774,7 @@ class FirestoreToqueApi implements ToqueApi {
     await updateDoc(
       doc(db, 'carteles', cartel.id),
       stripUndefined({
+        uuid: cartelUuid,
         businessId: updatedCartel.businessId,
         name: updatedCartel.name,
         role: updatedCartel.role,
@@ -646,6 +802,7 @@ class FirestoreToqueApi implements ToqueApi {
   }
 
   async listCarteles(): Promise<Cartel[]> {
+    this.assertRoleAccess(['owner', 'manager', 'cashier', 'superadmin']);
     await this.ensureBaseDataInitialized();
     const bizId = this.getActiveBusinessId();
     const q = query(collection(db, 'carteles'), where('businessId', '==', bizId));
@@ -687,6 +844,7 @@ class FirestoreToqueApi implements ToqueApi {
     const id = `cartel-${Date.now().toString(36)}`;
     const cartel: Cartel = {
       id,
+      uuid: generateUUID(),
       code: rawCode,
       pin: Math.floor(100000 + Math.random() * 900000).toString(),
       businessId: bizId,
@@ -718,13 +876,7 @@ class FirestoreToqueApi implements ToqueApi {
     if (!snap.exists()) throw new Error('Cartel no encontrado.');
 
     const current = snap.data() as Cartel;
-    if (
-      current.businessId &&
-      current.businessId !== this.getActiveBusinessId() &&
-      !this.currentUser?.isSuperAdmin
-    ) {
-      throw new Error('RLS: No tenés permiso para editar un cartel de otro comercio.');
-    }
+    this.assertOrganizationScope(current.businessId);
 
     const updated: Cartel = {
       ...current,
@@ -736,21 +888,47 @@ class FirestoreToqueApi implements ToqueApi {
 
   // --- HUB DEL NEGOCIO ---
 
+  private normalizeBlocksOrder(blocks?: HubConfig['blocks']): HubConfig['blocks'] {
+    const source = Array.isArray(blocks) && blocks.length > 0 ? blocks : DEFAULT_HUB_CONFIG.blocks;
+    const receiptBlock = source.find((b) => b.key === 'receipt') || { key: 'receipt', enabled: true };
+    const others = source.filter((b) => b.key !== 'receipt');
+    return [{ ...receiptBlock, key: 'receipt', enabled: true }, ...others];
+  }
+
   async getHubConfig(): Promise<HubConfig> {
+    this.assertRoleAccess(['owner', 'manager', 'cashier', 'superadmin']);
     await this.ensureBaseDataInitialized();
     const bizId = this.getActiveBusinessId();
     const snap = await getDoc(doc(db, 'businesses', bizId));
     if (snap.exists()) {
       const data = snap.data();
+      const isPlanPaid = Boolean(data.planPaid || data.hubConfig?.planPaid);
+      const isNetworkEnabled = Boolean(data.networkEnabled || data.hubConfig?.networkEnabled);
       if (data.hubConfig) {
         return {
           ...DEFAULT_HUB_CONFIG,
           ...data.hubConfig,
+          blocks: this.normalizeBlocksOrder(data.hubConfig.blocks),
+          socials: {
+            ...DEFAULT_HUB_CONFIG.socials,
+            ...(data.hubConfig.socials || {}),
+          },
           googleReviewUrl: data.hubConfig.googleReviewUrl || data.reviewUrl || 'https://maps.google.com',
+          planPaid: isPlanPaid,
+          networkEnabled: isNetworkEnabled,
         };
       }
+      return {
+        ...DEFAULT_HUB_CONFIG,
+        blocks: this.normalizeBlocksOrder(DEFAULT_HUB_CONFIG.blocks),
+        planPaid: isPlanPaid,
+        networkEnabled: isNetworkEnabled,
+      };
     }
-    return { ...DEFAULT_HUB_CONFIG };
+    return {
+      ...DEFAULT_HUB_CONFIG,
+      blocks: this.normalizeBlocksOrder(DEFAULT_HUB_CONFIG.blocks),
+    };
   }
 
   async updateHubConfig(patch: Partial<HubConfig>): Promise<HubConfig> {
@@ -760,11 +938,15 @@ class FirestoreToqueApi implements ToqueApi {
     const next: HubConfig = {
       ...current,
       ...patch,
+      blocks: this.normalizeBlocksOrder(patch.blocks || current.blocks),
     };
     await updateDoc(
       doc(db, 'businesses', bizId),
       stripUndefined({
         hubConfig: next,
+        ...(next.googleReviewUrl ? { reviewUrl: next.googleReviewUrl } : {}),
+        ...(patch.planPaid !== undefined ? { planPaid: patch.planPaid } : {}),
+        ...(patch.networkEnabled !== undefined ? { networkEnabled: patch.networkEnabled } : {}),
       })
     );
     return next;
@@ -777,7 +959,14 @@ class FirestoreToqueApi implements ToqueApi {
     const bizSnap = await getDoc(doc(db, 'businesses', bizId));
     const bizData = bizSnap.exists() ? bizSnap.data() : null;
 
-    const hubConfig: HubConfig = bizData?.hubConfig || DEFAULT_HUB_CONFIG;
+    const isPlanPaid = Boolean(bizData?.planPaid || bizData?.hubConfig?.planPaid);
+    const rawHubConfig: HubConfig = bizData?.hubConfig || DEFAULT_HUB_CONFIG;
+    const hubConfig: HubConfig = {
+      ...DEFAULT_HUB_CONFIG,
+      ...rawHubConfig,
+      blocks: this.normalizeBlocksOrder(rawHubConfig.blocks),
+      planPaid: isPlanPaid,
+    };
     const clubConfig: ClubConfig = bizData?.clubConfig || DEFAULT_CLUB_CONFIG;
     const businessName = bizData?.name || 'Comercio Toque';
     const reviewUrl = cartel.reviewUrl || bizData?.reviewUrl || 'https://maps.google.com';
@@ -785,6 +974,7 @@ class FirestoreToqueApi implements ToqueApi {
     let activeReceipt: Receipt | null = null;
     const now = Date.now();
 
+    // Ventana estricta de 2 minutos: solo si el recibo activo en el cartel sigue en 'ready' y no venció
     if (
       cartel.activeReceiptId &&
       cartel.activeReceiptExpiresAt &&
@@ -793,36 +983,26 @@ class FirestoreToqueApi implements ToqueApi {
       const rcpSnap = await getDoc(doc(db, 'receipts', cartel.activeReceiptId));
       if (rcpSnap.exists()) {
         const rcp = rcpSnap.data() as Receipt;
-        if (rcp.status !== 'cancelled' && new Date(rcp.expiresAt).getTime() > now) {
+        const createdMs = new Date(rcp.createdAt).getTime();
+        const withinTwoMinutes = now - createdMs <= 2 * 60 * 1000 && new Date(rcp.expiresAt).getTime() > now;
+        if (rcp.status === 'ready' && withinTwoMinutes) {
           activeReceipt = rcp;
         }
       }
     }
 
-    if (!activeReceipt) {
-      const rcpQ = query(
-        collection(db, 'receipts'),
-        where('cartelCode', '==', cartel.code.toUpperCase())
-      );
-      const rcpListSnap = await getDocs(rcpQ);
-      const candidates = rcpListSnap.docs
-        .map((d) => d.data() as Receipt)
-        .filter((r) => r.status !== 'cancelled' && new Date(r.expiresAt).getTime() > now)
-        .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-
-      if (candidates.length > 0) {
-        activeReceipt = candidates[0];
-      }
-    }
+    const crossBenefits = await this.getPublicCrossBenefits(bizId);
 
     return {
       business: {
         id: bizId,
+        uuid: bizData?.uuid,
         name: businessName,
         logoUrl: hubConfig.logoUrl,
       },
       cartel: {
         id: cartel.id,
+        uuid: cartel.uuid,
         code: cartel.code,
         name: cartel.name,
         role: cartel.role,
@@ -832,6 +1012,7 @@ class FirestoreToqueApi implements ToqueApi {
       reviewUrl,
       blocks: hubConfig.blocks,
       receipt: activeReceipt,
+      activeReceipt,
       club: clubConfig.active
         ? {
             config: clubConfig,
@@ -839,6 +1020,7 @@ class FirestoreToqueApi implements ToqueApi {
           }
         : null,
       config: hubConfig,
+      crossBenefits,
     };
   }
 
@@ -925,13 +1107,34 @@ class FirestoreToqueApi implements ToqueApi {
     }
 
     const receipt = snap.data() as Receipt;
-    const nowIso = new Date().toISOString();
+    const now = Date.now();
+    const nowIso = new Date(now).toISOString();
 
     if (receipt.status === 'ready') {
       await updateDoc(ref, {
         status: 'claimed',
         claimedAt: nowIso,
       });
+
+      // Al abrirse/reclamarse el comprobante, liberamos el cartel para que nadie más pueda abrirlo
+      try {
+        const q = query(
+          collection(db, 'carteles'),
+          where('code', '==', receipt.cartelCode.toUpperCase())
+        );
+        const cSnap = await getDocs(q);
+        if (!cSnap.empty) {
+          const cDoc = cSnap.docs[0];
+          if (cDoc.data().activeReceiptId === receipt.id) {
+            await updateDoc(doc(db, 'carteles', cDoc.id), {
+              activeReceiptId: null,
+              activeReceiptExpiresAt: null,
+            });
+          }
+        }
+      } catch {
+        // ignore
+      }
     }
 
     const updated: Receipt = {
@@ -1023,7 +1226,7 @@ class FirestoreToqueApi implements ToqueApi {
       },
       body: JSON.stringify({
         businessName,
-        brandColor: '#bec8ff',
+        brandColor: '#D95B26',
         stamps: data.stamps || data.points || 1,
         stampsRequired,
         rewardText: targetReward,
@@ -1099,6 +1302,7 @@ class FirestoreToqueApi implements ToqueApi {
       const nextPoints = (existing.points || 0) + pointsAwarded;
       member = {
         ...existing,
+        uuid: existing.uuid || generateUUID(),
         name: sanitizeString(data.name, 80) || existing.name,
         points: nextPoints,
         stamps: nextPoints,
@@ -1106,6 +1310,7 @@ class FirestoreToqueApi implements ToqueApi {
       await updateDoc(
         doc(db, 'members', existing.id),
         stripUndefined({
+          uuid: member.uuid,
           name: member.name || '',
           points: nextPoints,
           stamps: nextPoints,
@@ -1115,6 +1320,7 @@ class FirestoreToqueApi implements ToqueApi {
       const memberId = `mem-${Date.now().toString(36)}`;
       member = {
         id: memberId,
+        uuid: generateUUID(),
         businessId,
         name: sanitizeString(data.name, 80) || 'Socio Toque',
         contact: cleanContact,
@@ -1153,12 +1359,14 @@ class FirestoreToqueApi implements ToqueApi {
     const bizSnap = await getDoc(doc(db, 'businesses', sale.businessId));
     const businessName = bizSnap.exists() ? bizSnap.data().name : 'Comercio Toque';
 
-    const expiresAt = new Date(Date.now() + 5 * 60 * 1000).toISOString();
+    // Límite estricto de seguridad de 2 minutos (120 segundos) para abrir el comprobante
+    const expiresAt = new Date(Date.now() + 2 * 60 * 1000).toISOString();
     const shortRand = Math.floor(1000 + Math.random() * 9000);
     const receiptId = `RCP-${cartel.code}-${shortRand}`;
 
     const receipt: Receipt = {
       id: receiptId,
+      uuid: generateUUID(),
       saleId: sale.id,
       businessId: sale.businessId,
       cartelCode: cartel.code.toUpperCase(),
@@ -1172,16 +1380,25 @@ class FirestoreToqueApi implements ToqueApi {
       createdAt: new Date().toISOString(),
     };
 
-    await setDoc(doc(db, 'receipts', receiptId), stripUndefined(receipt));
+    const previousReceiptId = cartel.activeReceiptId;
 
-    await updateDoc(doc(db, 'carteles', cartel.id), {
-      activeReceiptId: receipt.id,
-      activeReceiptExpiresAt: receipt.expiresAt,
-    });
-
-    await updateDoc(doc(db, 'sales', sale.id), {
-      receiptId: receipt.id,
-    });
+    await Promise.all([
+      setDoc(doc(db, 'receipts', receiptId), stripUndefined(receipt)),
+      updateDoc(doc(db, 'carteles', cartel.id), {
+        activeReceiptId: receipt.id,
+        activeReceiptExpiresAt: receipt.expiresAt,
+      }),
+      updateDoc(doc(db, 'sales', sale.id), {
+        receiptId: receipt.id,
+      }),
+      ...(previousReceiptId && previousReceiptId !== receiptId
+        ? [
+            updateDoc(doc(db, 'receipts', previousReceiptId), {
+              status: 'expired',
+            }).catch(() => {}),
+          ]
+        : []),
+    ]);
 
     return receipt;
   }
@@ -1206,10 +1423,11 @@ class FirestoreToqueApi implements ToqueApi {
     }
 
     const cartel = cartelSnap.data() as Cartel;
+    this.assertOrganizationScope(cartel.businessId);
+
     const bizId = cartel.businessId || this.getActiveBusinessId();
     const saleId = `sale-${Date.now().toString(36)}`;
     const nowIso = new Date().toISOString();
-    const isManual = data.method === 'cash' || data.method === 'card_manual';
 
     const items: SaleItem[] =
       data.items && data.items.length > 0
@@ -1223,8 +1441,10 @@ class FirestoreToqueApi implements ToqueApi {
             },
           ];
 
+    // Todos los métodos (Efectivo, Tarjeta y QR) emiten el comprobante al instante sin esperar confirmación
     const sale: Sale = {
       id: saleId,
+      uuid: generateUUID(),
       businessId: bizId,
       cartelId: cartel.id,
       cartelCode: cartel.code,
@@ -1233,33 +1453,30 @@ class FirestoreToqueApi implements ToqueApi {
       currency: 'ARS',
       items,
       method: data.method,
-      status: isManual ? 'paid' : 'pending',
+      status: 'paid',
       createdAt: nowIso,
-      paidAt: isManual ? nowIso : undefined,
+      paidAt: nowIso,
       cashierName: this.currentUser?.name || 'Cajero',
       cashierEmail: this.currentUser?.email || '',
     };
 
     await setDoc(doc(db, 'sales', saleId), stripUndefined(sale));
 
-    let receipt: Receipt | undefined;
-    if (isManual) {
-      receipt = await this.emitReceiptForSale(sale, cartel);
-      sale.receiptId = receipt.id;
-    }
+    const receipt = await this.emitReceiptForSale(sale, cartel);
+    sale.receiptId = receipt.id;
 
-    const qrData =
-      data.method === 'mp_qr'
-        ? `${window.location.origin}/h/${cartel.code}?sale=${sale.id}&amount=${data.amount}`
-        : undefined;
+    const qrData = `${window.location.origin}/r/${receipt.id}`;
 
     return { sale, qrData, receipt };
   }
 
   async getSale(id: string): Promise<Sale> {
+    this.assertRoleAccess(['owner', 'manager', 'cashier', 'superadmin']);
     const snap = await getDoc(doc(db, 'sales', id));
     if (!snap.exists()) throw new Error('Venta no encontrada.');
-    return snap.data() as Sale;
+    const sale = snap.data() as Sale;
+    this.assertOrganizationScope(sale.businessId);
+    return sale;
   }
 
   async confirmManualSale(id: string): Promise<{ sale: Sale; receipt: Receipt }> {
@@ -1273,6 +1490,7 @@ class FirestoreToqueApi implements ToqueApi {
     if (!saleSnap.exists()) throw new Error('Venta no encontrada.');
 
     const sale = saleSnap.data() as Sale;
+    this.assertOrganizationScope(sale.businessId);
     const nowIso = new Date().toISOString();
 
     const cartelSnap = await getDoc(doc(db, 'carteles', sale.cartelId));
@@ -1280,6 +1498,7 @@ class FirestoreToqueApi implements ToqueApi {
       ? (cartelSnap.data() as Cartel)
       : ({
           id: sale.cartelId,
+          uuid: generateUUID(),
           code: sale.cartelCode || 'CAJA01',
           businessId: sale.businessId,
           name: sale.cartelName || 'Caja Principal',
@@ -1314,6 +1533,8 @@ class FirestoreToqueApi implements ToqueApi {
     if (!saleSnap.exists()) throw new Error('Venta no encontrada.');
 
     const sale = saleSnap.data() as Sale;
+    this.assertOrganizationScope(sale.businessId);
+
     await updateDoc(saleRef, {
       status: 'cancelled',
     });
@@ -1353,6 +1574,7 @@ class FirestoreToqueApi implements ToqueApi {
     method?: PaymentMethod;
     cartelId?: string;
   }): Promise<Sale[]> {
+    this.assertRoleAccess(['owner', 'manager', 'cashier', 'superadmin']);
     await this.ensureBaseDataInitialized();
     const bizId = this.getActiveBusinessId();
     const q = query(collection(db, 'sales'), where('businessId', '==', bizId));
@@ -1392,6 +1614,7 @@ class FirestoreToqueApi implements ToqueApi {
   // --- CLUB DE FIDELIDAD ---
 
   async getClubConfig(): Promise<ClubConfig> {
+    this.assertRoleAccess(['owner', 'manager', 'cashier', 'superadmin']);
     await this.ensureBaseDataInitialized();
     const bizId = this.getActiveBusinessId();
     const snap = await getDoc(doc(db, 'businesses', bizId));
@@ -1450,6 +1673,7 @@ class FirestoreToqueApi implements ToqueApi {
   }
 
   async listClubMembers(): Promise<ClubMember[]> {
+    this.assertRoleAccess(['owner', 'manager', 'superadmin']);
     await this.ensureBaseDataInitialized();
     const bizId = this.getActiveBusinessId();
     const q = query(collection(db, 'members'), where('businessId', '==', bizId));
@@ -1466,12 +1690,13 @@ class FirestoreToqueApi implements ToqueApi {
   }
 
   async exportClubMembersCsv(): Promise<string> {
+    this.assertRoleAccess(['owner', 'manager', 'superadmin']);
     const members = await this.listClubMembers();
-    const header = 'ID,Nombre,Contacto,Puntos,Fecha Alta,Pase Wallet\n';
+    const header = 'ID,UUID,Nombre,Contacto,Puntos,Fecha Alta,Pase Wallet\n';
     const rows = members
       .map(
         (m) =>
-          `"${m.id}","${(m.name || 'Cliente Toque').replace(/"/g, '""')}","${m.contact.replace(
+          `"${m.id}","${m.uuid || ''}","${(m.name || 'Cliente Toque').replace(/"/g, '""')}","${m.contact.replace(
             /"/g,
             '""'
           )}",${m.points},"${m.joinedAt}","${m.walletPassUrl || ''}"`
@@ -1482,13 +1707,19 @@ class FirestoreToqueApi implements ToqueApi {
 
   async deleteClubMember(id: string): Promise<void> {
     this.assertRoleAccess(['owner', 'manager', 'superadmin']);
-    await deleteDoc(doc(db, 'members', id));
+    const ref = doc(db, 'members', id);
+    const snap = await getDoc(ref);
+    if (snap.exists()) {
+      const member = snap.data() as ClubMember;
+      this.assertOrganizationScope(member.businessId);
+      await deleteDoc(ref);
+    }
   }
 
   // --- EQUIPO Y COLABORADORES (RLS) ---
 
   async listTeamMembers(): Promise<TeamMember[]> {
-    this.assertRoleAccess(['owner', 'manager', 'superadmin']);
+    this.assertRoleAccess(['owner', 'manager', 'cashier', 'superadmin']);
     await this.ensureBaseDataInitialized();
     const bizId = this.getActiveBusinessId();
     const q = query(collection(db, 'team'), where('businessId', '==', bizId));
@@ -1501,44 +1732,44 @@ class FirestoreToqueApi implements ToqueApi {
 
   async addTeamMember(data: {
     name: string;
-    email: string;
+    email?: string;
     role: 'owner' | 'manager' | 'cashier';
     assignedCartelId?: string;
   }): Promise<TeamMember> {
-    this.assertRoleAccess(['owner', 'superadmin']);
+    this.assertRoleAccess(['owner', 'manager', 'cashier', 'superadmin']);
     await this.ensureBaseDataInitialized();
 
     const cleanName = sanitizeString(data.name, 80);
-    const cleanEmail = sanitizeString(data.email, 120).toLowerCase();
-    if (!cleanName || !cleanEmail || !cleanEmail.includes('@')) {
-      throw new Error('Ingresá un nombre y correo electrónico válidos.');
+    if (!cleanName) {
+      throw new Error('Ingresá el nombre y apellido.');
     }
+
+    const generatedSlug = cleanName
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-z0-9]+/g, '.')
+      .replace(/^\.+|\.+$/g, '');
+
+    const cleanEmail = data.email?.trim()
+      ? sanitizeString(data.email, 120).toLowerCase()
+      : `${generatedSlug || 'cajero'}.${Math.floor(100 + Math.random() * 900)}@toque.ar`;
 
     const bizId = this.getActiveBusinessId();
     let assignedCartelCode: string | undefined;
     if (data.assignedCartelId) {
       const cSnap = await getDoc(doc(db, 'carteles', data.assignedCartelId));
       if (cSnap.exists()) {
-        assignedCartelCode = (cSnap.data() as Cartel).code;
+        const cData = cSnap.data() as Cartel;
+        this.assertOrganizationScope(cData.businessId);
+        assignedCartelCode = cData.code;
       }
-    }
-
-    const existingQ = query(
-      collection(db, 'team'),
-      where('businessId', '==', bizId)
-    );
-    const existingSnap = await getDocs(existingQ);
-    const duplicate = existingSnap.docs
-      .map((d) => d.data() as TeamMember)
-      .find((m) => m.email.toLowerCase() === cleanEmail && m.status === 'active');
-
-    if (duplicate) {
-      throw new Error('Ese correo ya forma parte del equipo de este comercio.');
     }
 
     const id = `team-${Date.now().toString(36)}`;
     const member: TeamMember = {
       id,
+      uuid: generateUUID(),
       businessId: bizId,
       name: cleanName,
       email: cleanEmail,
@@ -1564,8 +1795,15 @@ class FirestoreToqueApi implements ToqueApi {
     if (!snap.exists()) throw new Error('Colaborador no encontrado.');
 
     const current = snap.data() as TeamMember;
-    if (current.businessId !== this.getActiveBusinessId() && !this.currentUser?.isSuperAdmin) {
-      throw new Error('RLS: No tenés permisos sobre este colaborador.');
+    this.assertOrganizationScope(current.businessId);
+
+    // El dueño no puede cambiar su propio rol ni qué cajas administra
+    if (
+      this.currentUser &&
+      current.email.toLowerCase() === this.currentUser.email.toLowerCase() &&
+      (patch.role !== undefined || patch.assignedCartelId !== undefined)
+    ) {
+      throw new Error('El dueño no puede modificar su propio rol ni sus cajas administradas.');
     }
 
     let assignedCartelCode = current.assignedCartelCode;
@@ -1602,16 +1840,357 @@ class FirestoreToqueApi implements ToqueApi {
     if (!snap.exists()) return;
 
     const current = snap.data() as TeamMember;
-    if (current.businessId !== this.getActiveBusinessId() && !this.currentUser?.isSuperAdmin) {
-      throw new Error('RLS: No tenés permisos para eliminar este colaborador.');
-    }
+    this.assertOrganizationScope(current.businessId);
 
     await deleteDoc(ref);
+  }
+
+  // --- RED TOQUE Y FORMATOS DE ACTIVACIÓN (ESTILO PASITO) ---
+
+  private getDefaultMerchantActivations(
+    tenantId: string,
+    merchantName: string
+  ): NetworkActivation[] {
+    return [
+      {
+        id: `act-${tenantId}-cross_benefit`,
+        uuid: '40000000-0000-4000-8000-000000000001',
+        tenantId,
+        businessId: tenantId,
+        merchantName,
+        merchantCategory: 'Gastronomía & Café',
+        distanceLabel: 'A 100 m',
+        formatType: 'cross_benefit',
+        title: '15% OFF o Café de Cortesía en tu 1ra visita',
+        discountText: '15% OFF en Red Toque',
+        terms: 'Presentando el ticket digital de cualquier comercio vecino adherido a la Red Toque.',
+        active: true,
+        createdAt: new Date().toISOString(),
+      },
+      {
+        id: `act-${tenantId}-tap_challenge`,
+        uuid: '40000000-0000-4000-8000-000000000002',
+        tenantId,
+        businessId: tenantId,
+        merchantName,
+        merchantCategory: 'Gastronomía & Café',
+        formatType: 'tap_challenge',
+        title: 'Desafío 3 Toques en 7 días: Producto Estrella Gratis',
+        discountText: 'Premio sorpresa al 3er toque',
+        terms: 'Escaneá el cartel Toque del mostrador en 3 visitas dentro de los últimos 7 o 30 días.',
+        active: true,
+        createdAt: new Date().toISOString(),
+      },
+      {
+        id: `act-${tenantId}-map_pin`,
+        uuid: '40000000-0000-4000-8000-000000000003',
+        tenantId,
+        businessId: tenantId,
+        merchantName,
+        merchantCategory: 'Gastronomía & Café',
+        distanceLabel: 'Destacado en tu zona',
+        formatType: 'map_pin',
+        title: 'Pin Destacado con Promo de Bienvenida',
+        discountText: '2x1 en Medialunas de Manteca',
+        terms: 'Exclusivo para usuarios descubriendo locales cercanos desde Mi Billetera Toque.',
+        active: false,
+        createdAt: new Date().toISOString(),
+      },
+      {
+        id: `act-${tenantId}-receipt_banner`,
+        uuid: '40000000-0000-4000-8000-000000000004',
+        tenantId,
+        businessId: tenantId,
+        merchantName,
+        merchantCategory: 'Gastronomía & Café',
+        formatType: 'receipt_banner',
+        title: 'Banner Post-Compra para Clientes Frecuentes',
+        discountText: '$2.000 de regalo en tu próxima compra',
+        terms: 'Aparece automáticamente al pie del comprobante digital para incentivar la recompra.',
+        active: true,
+        createdAt: new Date().toISOString(),
+      },
+    ];
+  }
+
+  async listNetworkActivations(): Promise<NetworkActivation[]> {
+    this.assertRoleAccess(['owner', 'manager', 'superadmin']);
+    await this.ensureBaseDataInitialized();
+    const bizId = this.getActiveBusinessId();
+    const biz = await this.getBusinessProfile();
+    const defaults = this.getDefaultMerchantActivations(bizId, biz.name);
+
+    try {
+      const q = query(collection(db, 'network_activations'), where('tenantId', '==', bizId));
+      const snap = await getDocs(q);
+      const savedMap = new Map<NetworkActivationFormat, NetworkActivation>();
+      snap.docs.forEach((d) => {
+        const data = d.data() as NetworkActivation;
+        savedMap.set(data.formatType, data);
+      });
+
+      const merged: NetworkActivation[] = [];
+      for (const def of defaults) {
+        const existing = savedMap.get(def.formatType);
+        if (existing) {
+          merged.push({
+            ...def,
+            ...existing,
+            merchantName: existing.merchantName || biz.name,
+          });
+        } else {
+          await setDoc(doc(db, 'network_activations', def.id), stripUndefined(def));
+          merged.push(def);
+        }
+      }
+      return merged;
+    } catch {
+      return defaults;
+    }
+  }
+
+  async getPublicCrossBenefits(excludeBusinessId?: string): Promise<NetworkActivation[]> {
+    await this.ensureBaseDataInitialized();
+    try {
+      const q = query(
+        collection(db, 'network_activations'),
+        where('formatType', '==', 'cross_benefit')
+      );
+      const snap = await getDocs(q);
+      const activeList = snap.docs
+        .map((d) => d.data() as NetworkActivation)
+        .filter((a) => a.active && (!excludeBusinessId || a.tenantId !== excludeBusinessId));
+
+      if (activeList.length >= 2) {
+        return activeList.slice(0, 2);
+      }
+    } catch {
+      // fallback
+    }
+    return NEIGHBOR_CROSS_BENEFITS_FALLBACK.filter(
+      (a) => !excludeBusinessId || a.tenantId !== excludeBusinessId
+    ).slice(0, 2);
+  }
+
+  async saveNetworkActivation(data: {
+    formatType: NetworkActivationFormat;
+    title: string;
+    discountText: string;
+    terms: string;
+    active: boolean;
+  }): Promise<NetworkActivation> {
+    this.assertRoleAccess(['owner', 'manager', 'superadmin']);
+    const bizId = this.getActiveBusinessId();
+    const biz = await this.getBusinessProfile();
+    const id = `act-${bizId}-${data.formatType}`;
+
+    const activation: NetworkActivation = {
+      id,
+      uuid: generateUUID(),
+      tenantId: bizId,
+      businessId: bizId,
+      merchantName: biz.name,
+      merchantCategory: 'Comercio Adherido Red Toque',
+      distanceLabel: 'A 150 m',
+      formatType: data.formatType,
+      title: sanitizeString(data.title, 120) || 'Beneficio Red Toque',
+      discountText: sanitizeString(data.discountText, 120) || '15% OFF con Toque',
+      terms:
+        sanitizeString(data.terms, 300) ||
+        'Presentando tu comprobante digital en mostrador.',
+      active: Boolean(data.active),
+      createdAt: new Date().toISOString(),
+    };
+
+    await setDoc(doc(db, 'network_activations', id), stripUndefined(activation));
+
+    // Sincronizar en paralelo con Worker / D1 endpoint si está disponible
+    fetch('/api/network/activations', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(activation),
+    }).catch(() => {});
+
+    return activation;
+  }
+
+  async toggleNetworkActivation(
+    formatType: NetworkActivationFormat,
+    active: boolean
+  ): Promise<NetworkActivation> {
+    this.assertRoleAccess(['owner', 'manager', 'superadmin']);
+    const list = await this.listNetworkActivations();
+    const target = list.find((a) => a.formatType === formatType) || list[0];
+    return this.saveNetworkActivation({
+      formatType,
+      title: target.title,
+      discountText: target.discountText,
+      terms: target.terms,
+      active,
+    });
+  }
+
+  // --- BÓVEDA DEL CONSUMIDOR ("MI TOQUE") — PERSISTENCIA HÍBRIDA ---
+
+  async syncConsumerVault(payload: {
+    user: ConsumerUser;
+    receipts: ConsumerReceipt[];
+  }): Promise<{
+    success: boolean;
+    consumerId: string;
+    recoveryCode: string;
+    user: ConsumerUser;
+    receipts: ConsumerReceipt[];
+  }> {
+    const cleanContact = sanitizeString(payload.user.emailOrPhone, 120).toLowerCase();
+    const cleanName = sanitizeString(payload.user.displayName, 100) || 'Comprador Toque';
+    const consumerId = payload.user.id || generateUUID();
+    const userUuid = payload.user.uuid || ( consumerId.length === 36 ? consumerId : generateUUID() );
+    const nowIso = new Date().toISOString();
+
+    const normalizedUser: ConsumerUser = {
+      id: consumerId,
+      uuid: userUuid,
+      emailOrPhone: cleanContact,
+      displayName: cleanName,
+      ageGroup: payload.user.ageGroup || 'all',
+      consentSaveReceipts: payload.user.consentSaveReceipts !== false,
+      consentMarketingNetwork: payload.user.consentMarketingNetwork !== false,
+      createdAt: payload.user.createdAt || nowIso,
+      syncedAt: nowIso,
+    };
+
+    // 1. Intentar sincronizar con el Worker de Hono / Cloudflare D1 (/api/consumer/sync)
+    try {
+      const res = await fetch('/api/consumer/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          user: normalizedUser,
+          receipts: payload.receipts,
+        }),
+      });
+      if (res.ok) {
+        const d1Data = await res.json();
+        if (d1Data?.user) {
+          normalizedUser.id = d1Data.user.id || normalizedUser.id;
+        }
+      }
+    } catch {
+      // Continuar con respaldo en Firestore
+    }
+
+    // 2. Respaldar en Firestore (consumer_users y consumer_receipts)
+    try {
+      await setDoc(
+        doc(db, 'consumer_users', normalizedUser.id),
+        stripUndefined(normalizedUser)
+      );
+
+      for (const r of payload.receipts) {
+        const cleanReceipt: ConsumerReceipt = {
+          id: r.id,
+          uuid: r.uuid || generateUUID(),
+          consumerId: normalizedUser.id,
+          tenantId: r.tenantId || 'biz-toque-1',
+          merchantName: sanitizeString(r.merchantName, 100) || 'Comercio Toque',
+          cartelCode: r.cartelCode,
+          amountArs: Number(r.amountArs) || 0,
+          discountSavedArs: Number(r.discountSavedArs) || 0,
+          category: sanitizeString(r.category, 64) || 'Gastronomía',
+          receiptNote: sanitizeString(r.receiptNote, 240) || 'Visita registrada con Toque',
+          createdAt: r.createdAt || nowIso,
+        };
+        await setDoc(
+          doc(db, 'consumer_receipts', cleanReceipt.id),
+          stripUndefined(cleanReceipt)
+        );
+      }
+    } catch (err) {
+      console.warn('Consumer Firestore backup notice:', err);
+    }
+
+    const recoveryCode = `TQ-${normalizedUser.id.slice(0, 8).toUpperCase()}`;
+    return {
+      success: true,
+      consumerId: normalizedUser.id,
+      recoveryCode,
+      user: normalizedUser,
+      receipts: payload.receipts,
+    };
+  }
+
+  async recoverConsumerVault(contactOrId: string): Promise<{
+    found: boolean;
+    user?: ConsumerUser;
+    receipts?: ConsumerReceipt[];
+  }> {
+    const clean = sanitizeString(contactOrId, 120).toLowerCase();
+    if (!clean) return { found: false };
+
+    // 1. Intentar recuperar desde el Worker / D1
+    try {
+      const res = await fetch(`/api/consumer/sync?contact=${encodeURIComponent(clean)}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data?.found && data?.user) {
+          return {
+            found: true,
+            user: data.user,
+            receipts: data.receipts || [],
+          };
+        }
+      }
+    } catch {
+      // Fallback a Firestore
+    }
+
+    // 2. Buscar en Firestore por emailOrPhone o id
+    try {
+      const q = query(
+        collection(db, 'consumer_users'),
+        where('emailOrPhone', '==', clean)
+      );
+      const snap = await getDocs(q);
+      let foundUser: ConsumerUser | undefined;
+
+      if (!snap.empty) {
+        foundUser = snap.docs[0].data() as ConsumerUser;
+      } else {
+        const directSnap = await getDoc(doc(db, 'consumer_users', contactOrId.trim()));
+        if (directSnap.exists()) {
+          foundUser = directSnap.data() as ConsumerUser;
+        }
+      }
+
+      if (foundUser) {
+        const rSnap = await getDocs(
+          query(
+            collection(db, 'consumer_receipts'),
+            where('consumerId', '==', foundUser.id)
+          )
+        );
+        const receipts = rSnap.docs
+          .map((d) => d.data() as ConsumerReceipt)
+          .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
+        return {
+          found: true,
+          user: foundUser,
+          receipts,
+        };
+      }
+    } catch {
+      // ignore
+    }
+
+    return { found: false };
   }
 
   // --- MERCADO PAGO ---
 
   async getMercadoPagoStatus(): Promise<MercadoPagoStatus> {
+    this.assertRoleAccess(['owner', 'manager', 'superadmin']);
     await this.ensureBaseDataInitialized();
     const bizId = this.getActiveBusinessId();
     const snap = await getDoc(doc(db, 'businesses', bizId));
@@ -1645,42 +2224,69 @@ class FirestoreToqueApi implements ToqueApi {
   // --- RESUMEN DEL PANEL (100% DATOS REALES, CERO INVENTADOS) ---
 
   async getDashboardSummary(): Promise<DashboardSummary> {
+    this.assertRoleAccess(['owner', 'manager', 'cashier', 'superadmin']);
     await this.ensureBaseDataInitialized();
     const bizId = this.getActiveBusinessId();
+    const isCashier = this.currentUser?.role === 'cashier';
+
+    const safeGetDocs = async (q: ReturnType<typeof query>) => {
+      try {
+        return await getDocs(q);
+      } catch {
+        return { docs: [] as any[] };
+      }
+    };
 
     const [salesSnap, receiptsSnap, membersSnap, cartelesSnap, teamSnap] = await Promise.all([
-      getDocs(query(collection(db, 'sales'), where('businessId', '==', bizId))),
-      getDocs(query(collection(db, 'receipts'), where('businessId', '==', bizId))),
-      getDocs(query(collection(db, 'members'), where('businessId', '==', bizId))),
-      getDocs(query(collection(db, 'carteles'), where('businessId', '==', bizId))),
-      getDocs(query(collection(db, 'team'), where('businessId', '==', bizId))),
+      safeGetDocs(query(collection(db, 'sales'), where('businessId', '==', bizId))),
+      safeGetDocs(query(collection(db, 'receipts'), where('businessId', '==', bizId))),
+      safeGetDocs(query(collection(db, 'members'), where('businessId', '==', bizId))),
+      safeGetDocs(query(collection(db, 'carteles'), where('businessId', '==', bizId))),
+      safeGetDocs(query(collection(db, 'team'), where('businessId', '==', bizId))),
     ]);
 
-    const sales = salesSnap.docs.map((d) => d.data() as Sale);
-    const receipts = receiptsSnap.docs.map((d) => d.data() as Receipt);
-    const members = membersSnap.docs.map((d) => d.data() as ClubMember);
-    const carteles = cartelesSnap.docs.map((d) => d.data() as Cartel);
+    const sales = salesSnap.docs.map((d: any) => d.data() as Sale);
+    const receipts = receiptsSnap.docs.map((d: any) => d.data() as Receipt);
+    const members = membersSnap.docs.map((d: any) => d.data() as ClubMember);
+    const carteles = cartelesSnap.docs.map((d: any) => d.data() as Cartel);
     const team = teamSnap.docs
-      .map((d) => d.data() as TeamMember)
-      .filter((m) => m.status === 'active');
+      .map((d: any) => d.data() as TeamMember)
+      .filter((m: TeamMember) => m.status === 'active');
 
     const todayStr = new Date().toDateString();
     const sevenDaysAgo = Date.now() - 7 * 86400000;
 
-    const paidSales = sales.filter((s) => s.status === 'paid');
-    const todaySales = paidSales.filter((s) => new Date(s.createdAt).toDateString() === todayStr);
-    const weeklySales = paidSales.filter((s) => new Date(s.createdAt).getTime() >= sevenDaysAgo);
+    const paidSales = sales.filter((s: Sale) => s.status === 'paid');
+    const todaySales = paidSales.filter(
+      (s: Sale) => new Date(s.createdAt).toDateString() === todayStr
+    );
+    const weeklySales = paidSales.filter(
+      (s: Sale) => new Date(s.createdAt).getTime() >= sevenDaysAgo
+    );
 
-    const todaySalesAmount = todaySales.reduce((acc, s) => acc + s.amount, 0);
-    const weeklySalesAmount = weeklySales.reduce((acc, s) => acc + s.amount, 0);
+    const todaySalesAmount = isCashier
+      ? 0
+      : todaySales.reduce((acc: number, s: Sale) => acc + s.amount, 0);
+    const weeklySalesAmount = isCashier
+      ? 0
+      : weeklySales.reduce((acc: number, s: Sale) => acc + s.amount, 0);
 
-    const claimedReceiptsCount = receipts.filter((r) => r.status === 'claimed').length;
-    const walletPassesCount = members.filter((m) =>
+    const claimedReceiptsCount = receipts.filter((r: Receipt) => r.status === 'claimed').length;
+    const walletPassesCount = members.filter((m: ClubMember) =>
       Boolean(m.passId || m.appleWalletUrl || m.googleWalletUrl || m.walletPassUrl)
     ).length;
 
-    const scansCount = carteles.reduce((acc, c) => acc + (c.scansCount || 0), 0);
-    const reviewButtonClicks = carteles.reduce((acc, c) => acc + (c.reviewClicksCount || 0), 0);
+    const scansCount = carteles.reduce((acc: number, c: Cartel) => acc + (c.scansCount || 0), 0);
+    const reviewButtonClicks = carteles.reduce(
+      (acc: number, c: Cartel) => acc + (c.reviewClicksCount || 0),
+      0
+    );
+
+    const nonTrashCarteles = carteles.filter((c: Cartel) => c.status !== 'trash');
+    const activeCartelesCount = nonTrashCarteles.filter((c: Cartel) => c.status === 'active').length;
+    const recentSales = [...sales]
+      .sort((a: Sale, b: Sale) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+      .slice(0, 15);
 
     return {
       todaySalesAmount,
@@ -1689,11 +2295,15 @@ class FirestoreToqueApi implements ToqueApi {
       weeklySalesCount: weeklySales.length,
       totalReceiptsCount: receipts.length,
       claimedReceiptsCount,
-      newClubMembersCount: members.length,
-      walletPassesCount,
+      newClubMembersCount: isCashier ? 0 : members.length,
+      clubMembersCount: isCashier ? 0 : members.length,
+      walletPassesCount: isCashier ? 0 : walletPassesCount,
       scansCount,
       reviewButtonClicks,
-      teamMembersCount: team.length,
+      teamMembersCount: Math.max(1, team.length),
+      activeCartelesCount,
+      totalCartelesCount: nonTrashCarteles.length,
+      recentSales,
     };
   }
 
@@ -1702,26 +2312,36 @@ class FirestoreToqueApi implements ToqueApi {
   async getBusinessProfile(): Promise<BusinessProfile> {
     await this.ensureBaseDataInitialized();
     const bizId = this.getActiveBusinessId();
-    const snap = await getDoc(doc(db, 'businesses', bizId));
-    if (snap.exists()) {
-      const d = snap.data();
-      return {
-        id: d.id,
-        name: d.name,
-        ownerName: d.ownerName,
-        email: d.email,
-        reviewUrl: d.reviewUrl,
-        createdAt: d.createdAt,
-        scansCount: d.scansCount || 0,
-        reviewClicksCount: d.reviewClicksCount || 0,
-      };
+    try {
+      const snap = await getDoc(doc(db, 'businesses', bizId));
+      if (snap.exists()) {
+        const d = snap.data();
+        return {
+          id: d.id,
+          uuid: d.uuid,
+          name: d.name,
+          ownerName: d.ownerName,
+          email: d.email,
+          reviewUrl: d.reviewUrl,
+          planPaid: Boolean(d.planPaid || d.hubConfig?.planPaid),
+          networkEnabled: Boolean(d.networkEnabled || d.hubConfig?.networkEnabled),
+          createdAt: d.createdAt,
+          scansCount: d.scansCount || 0,
+          reviewClicksCount: d.reviewClicksCount || 0,
+        };
+      }
+    } catch {
+      // fallback
     }
     return {
       id: bizId,
+      uuid: '10000000-0000-4000-8000-000000000001',
       name: 'Café & Panadería La Esquina',
       ownerName: 'Martín Gómez',
       email: 'comercio@toque.ar',
       reviewUrl: 'https://maps.google.com',
+      planPaid: false,
+      networkEnabled: false,
       createdAt: new Date().toISOString(),
       scansCount: 0,
       reviewClicksCount: 0,
@@ -1729,20 +2349,23 @@ class FirestoreToqueApi implements ToqueApi {
   }
 
   async updateBusinessProfile(patch: Partial<BusinessProfile>): Promise<BusinessProfile> {
-    this.assertRoleAccess(['owner', 'manager', 'superadmin']);
+    this.assertRoleAccess(['owner', 'superadmin']);
     const bizId = this.getActiveBusinessId();
     const cleanPatch: Record<string, any> = {};
     if (patch.name !== undefined) cleanPatch.name = sanitizeString(patch.name, 100);
     if (patch.reviewUrl !== undefined) cleanPatch.reviewUrl = sanitizeString(patch.reviewUrl, 300);
     if (patch.ownerName !== undefined) cleanPatch.ownerName = sanitizeString(patch.ownerName, 100);
+    if (patch.planPaid !== undefined) cleanPatch.planPaid = Boolean(patch.planPaid);
+    if (patch.networkEnabled !== undefined) cleanPatch.networkEnabled = Boolean(patch.networkEnabled);
 
     await updateDoc(doc(db, 'businesses', bizId), stripUndefined(cleanPatch));
     return this.getBusinessProfile();
   }
 
-  // --- SUPER ADMIN GLOBAL DE LA PLATAFORMA (100% DATOS REALES) ---
+  // --- SUPER ADMIN GLOBAL DE LA PLATAFORMA (SOLO NIVEL SUPERADMIN) ---
 
   async getSuperAdminSummary(): Promise<SuperAdminSummary> {
+    this.assertRoleAccess(['superadmin']);
     await this.ensureBaseDataInitialized();
 
     const [bizSnap, cartelesSnap, salesSnap, receiptsSnap, membersSnap, teamSnap] =

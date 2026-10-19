@@ -21,6 +21,10 @@ import {
   TeamMember,
   WalletPassResponse,
   SuperAdminSummary,
+  NetworkActivation,
+  NetworkActivationFormat,
+  ConsumerUser,
+  ConsumerReceipt,
 } from './types';
 
 export interface ToqueApi {
@@ -163,7 +167,7 @@ export interface ToqueApi {
 
   addTeamMember(data: {
     name: string;
-    email: string;
+    email?: string;
     role: 'owner' | 'manager' | 'cashier';
     assignedCartelId?: string;
   }): Promise<TeamMember>;
@@ -174,6 +178,42 @@ export interface ToqueApi {
   ): Promise<TeamMember>;
 
   removeTeamMember(id: string): Promise<void>;
+
+  // Red Toque y Formatos de Activación (Estilo Pasito)
+  listNetworkActivations(): Promise<NetworkActivation[]>;
+
+  getPublicCrossBenefits(excludeBusinessId?: string): Promise<NetworkActivation[]>;
+
+  saveNetworkActivation(data: {
+    formatType: NetworkActivationFormat;
+    title: string;
+    discountText: string;
+    terms: string;
+    active: boolean;
+  }): Promise<NetworkActivation>;
+
+  toggleNetworkActivation(
+    formatType: NetworkActivationFormat,
+    active: boolean
+  ): Promise<NetworkActivation>;
+
+  // Bóveda del Consumidor ("Mi Toque") — Sincronización Híbrida localStorage + D1 + Firestore
+  syncConsumerVault(payload: {
+    user: ConsumerUser;
+    receipts: ConsumerReceipt[];
+  }): Promise<{
+    success: boolean;
+    consumerId: string;
+    recoveryCode: string;
+    user: ConsumerUser;
+    receipts: ConsumerReceipt[];
+  }>;
+
+  recoverConsumerVault(contactOrId: string): Promise<{
+    found: boolean;
+    user?: ConsumerUser;
+    receipts?: ConsumerReceipt[];
+  }>;
 
   // Mercado Pago
   getMercadoPagoStatus(): Promise<MercadoPagoStatus>;

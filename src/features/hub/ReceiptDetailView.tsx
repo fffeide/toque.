@@ -1,247 +1,276 @@
 import React, { useState, useEffect } from 'react';
-import { useParams, useNavigate, Link } from 'react-router-dom';
+import { useParams, Link } from 'react-router-dom';
 import { api, Receipt } from '../../api';
-import { PublicHeader } from '../../components/layout/PublicHeader';
-import { Card } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
 import { Skeleton } from '../../components/ui/Skeleton';
-import { formatCurrency, formatDate } from '../../lib/formatters';
-import { downloadReceiptAsImage, downloadReceiptAsPdf } from '../../lib/receiptDownload';
 import { useToast } from '../../components/ui/Toast';
+import { formatCurrency, formatDate } from '../../lib/formatters';
 import {
-  Receipt as ReceiptIcon,
-  Download,
-  Image as ImageIcon,
   CheckCircle2,
-  ArrowRight,
-  AlertCircle,
+  Printer,
+  Share2,
+  ArrowLeft,
+  Clock,
+  Lock,
 } from 'lucide-react';
 
+const OPENED_RECEIPTS_KEY = 'toque_opened_receipts_v1';
+
+function hasOpenedReceiptLocally(id: string): boolean {
+  try {
+    const raw = window.localStorage.getItem(OPENED_RECEIPTS_KEY);
+    if (!raw) return false;
+    const list = JSON.parse(raw) as string[];
+    return Array.isArray(list) && list.includes(id.toUpperCase());
+  } catch {
+    return false;
+  }
+}
+
+function markReceiptOpenedLocally(id: string): void {
+  try {
+    const raw = window.localStorage.getItem(OPENED_RECEIPTS_KEY);
+    const list: string[] = raw ? JSON.parse(raw) : [];
+    const upper = id.toUpperCase();
+    if (!list.includes(upper)) {
+      list.push(upper);
+      window.localStorage.setItem(OPENED_RECEIPTS_KEY, JSON.stringify(list.slice(-50)));
+    }
+  } catch {
+    // ignore
+  }
+}
+
 export const ReceiptDetailView: React.FC = () => {
-  const { code } = useParams<{ code: string }>();
-  const navigate = useNavigate();
-  const { success, error: toastError } = useToast();
+  const { id = '' } = useParams<{ id: string }>();
+  const { showToast } = useToast();
 
   const [receipt, setReceipt] = useState<Receipt | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-
-  const cleanCode = (code || '').trim();
+  const [isLockedOrExpired, setIsLockedOrExpired] = useState(false);
 
   useEffect(() => {
-    if (!cleanCode) {
-      navigate('/', { replace: true });
-      return;
-    }
+    let active = true;
 
-    const upper = cleanCode.toUpperCase();
-    // Si el código de /r/:code es un código de cartel (ej. CAJA01, DEMO01), redirigir a su destino correspondiente
-    if (!upper.startsWith('RCP-')) {
-      if (upper === 'DEMO01' || upper === 'VIRGEN01') {
-        navigate(`/activar/${upper}`, { replace: true });
-      } else {
-        navigate(`/hub/${upper}`, { replace: true });
-      }
-      return;
-    }
+    const loadAndClaimReceipt = async () => {
+      setIsLoading(true);
+      try {
+        const data = await api.getReceiptById(id);
+        if (!active) return;
 
-    let unsubscribe: (() => void) | null = null;
-
-    api
-      .getReceiptById(cleanCode)
-      .then((found) => {
-        if (found) {
-          setReceipt(found);
-          if (found.status === 'ready') {
-            api.claimReceipt(found.id).catch(() => {});
-          }
-          unsubscribe = api.subscribeToReceipt(found.id, (updated) => {
-            if (updated) setReceipt(updated);
-          });
+        if (!data) {
+          setReceipt(null);
+          setIsLockedOrExpired(true);
+          return;
         }
-      })
-      .finally(() => setIsLoading(false));
+
+        const now = Date.now();
+        const expiresMs = new Date(data.expiresAt).getTime();
+        const createdMs = new Date(data.createdAt).getTime();
+        const withinTwoMinutes = now <= expiresMs && now - createdMs <= 2 * 60 * 1000;
+        const openedByThisDevice = hasOpenedReceiptLocally(data.id);
+
+        if (openedByThisDevice) {
+          setReceipt(data);
+          setIsLockedOrExpired(false);
+          return;
+        }
+
+        // Si no fue abierto por este dispositivo, debe estar 'ready' y dentro del límite de 2 minutos
+        if (data.status !== 'ready' || !withinTwoMinutes) {
+          setReceipt(null);
+          setIsLockedOrExpired(true);
+          return;
+        }
+
+        // Al abrirlo dentro de los 2 minutos, se bloquea inmediatamente para cualquier otro escaneo
+        markReceiptOpenedLocally(data.id);
+        const claimed = await api.claimReceipt(data.id);
+        if (active) {
+          setReceipt(claimed.receipt);
+          setIsLockedOrExpired(false);
+        }
+      } catch {
+        if (active) {
+          setReceipt(null);
+          setIsLockedOrExpired(true);
+        }
+      } finally {
+        if (active) {
+          setIsLoading(false);
+        }
+      }
+    };
+
+    loadAndClaimReceipt();
 
     return () => {
-      if (unsubscribe) unsubscribe();
+      active = false;
     };
-  }, [cleanCode, navigate]);
+  }, [id]);
 
-  const handleDownloadImage = async () => {
+  const handleShare = async () => {
     if (!receipt) return;
-    try {
-      await downloadReceiptAsImage(receipt);
-      success('Comprobante guardado', 'La imagen se descargó en tu dispositivo.');
-    } catch {
-      toastError('No pudimos generar la imagen');
-    }
-  };
+    const shareData = {
+      title: `Comprobante ${receipt.businessName}`,
+      text: `Comprobante digital de compra por ${formatCurrency(receipt.total)} en ${receipt.businessName}`,
+      url: window.location.href,
+    };
 
-  const handleDownloadPdf = () => {
-    if (!receipt) return;
-    try {
-      downloadReceiptAsPdf(receipt);
-    } catch {
-      toastError('No pudimos abrir el PDF imprimible');
+    if (navigator.share) {
+      try {
+        await navigator.share(shareData);
+      } catch {
+        // cancelado
+      }
+    } else {
+      await navigator.clipboard.writeText(window.location.href);
+      showToast('Enlace del comprobante copiado', 'success');
     }
   };
 
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-[#0c0c0c] text-[#f1f1ee]">
-        <PublicHeader showToqueMark />
-        <div className="max-w-md mx-auto p-6 space-y-4 pt-10">
-          <Skeleton className="h-72 w-full rounded-2xl bg-[#111113]" />
+      <div className="min-h-screen bg-[#f1f1ee] flex items-center justify-center p-4">
+        <div className="max-w-md w-full space-y-4">
+          <Skeleton className="h-96 w-full rounded-3xl bg-black/5" />
         </div>
       </div>
     );
   }
 
-  if (!receipt) {
+  if (!receipt || isLockedOrExpired) {
     return (
-      <div className="min-h-screen bg-[#0c0c0c] text-[#f1f1ee]">
-        <PublicHeader showToqueMark />
-        <div className="max-w-md mx-auto p-6 pt-16 text-center space-y-4">
-          <div className="w-14 h-14 rounded-2xl bg-[#18181b] border border-[#242426] text-red-400 flex items-center justify-center mx-auto">
-            <AlertCircle className="w-7 h-7" />
+      <div className="min-h-screen bg-[#f1f1ee] text-[#0c0c0c] flex items-center justify-center p-4">
+        <div className="max-w-md w-full rounded-[32px] bg-[#ffffff] border border-black/15 p-7 text-center space-y-4 shadow-xl">
+          <div className="w-12 h-12 rounded-2xl bg-[#0c0c0c] text-[#bec8ff] flex items-center justify-center mx-auto">
+            <Lock className="w-6 h-6" />
           </div>
-          <h1 className="font-bold text-xl text-[#f1f1ee]">Comprobante no encontrado</h1>
-          <p className="text-xs text-[#a1a1aa]">
-            El comprobante <span className="font-mono text-[#f1f1ee]">{cleanCode}</span> no existe o fue anulado.
+          <h1 className="text-xl font-bold text-[#0c0c0c]">Comprobante no disponible</h1>
+          <p className="text-xs text-[#52525b] leading-relaxed">
+            Por seguridad, el comprobante tiene un límite de 2 minutos para abrirse y se cierra automáticamente una vez abierto o cuando la caja continúa con otros pagos.
           </p>
-          <Link to="/">
-            <Button variant="secundario" size="touch">
+          <div className="pt-2">
+            <Link
+              to="/"
+              className="w-full py-3 px-5 rounded-full bg-[#0c0c0c] text-[#f1f1ee] font-semibold text-xs flex items-center justify-center"
+            >
               Volver al inicio
-            </Button>
-          </Link>
+            </Link>
+          </div>
         </div>
       </div>
     );
   }
 
   const methodLabel =
-    receipt.method === 'mp_qr'
-      ? 'Mercado Pago QR'
+    receipt.method === 'mercadopago'
+      ? 'QR'
       : receipt.method === 'cash'
       ? 'Efectivo'
-      : 'Posnet / Tarjeta';
+      : 'Tarjeta';
 
   return (
-    <div className="min-h-screen bg-[#0c0c0c] text-[#f1f1ee] flex flex-col">
-      <PublicHeader businessName={receipt.businessName} showToqueMark />
+    <div className="min-h-screen bg-[#f1f1ee] text-[#0c0c0c] py-8 px-4 flex flex-col items-center justify-center">
+      <div className="max-w-md w-full space-y-4">
+        <div className="flex items-center justify-between print:hidden">
+          <Link
+            to={`/h/${receipt.cartelCode}`}
+            className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#52525b] hover:text-[#0c0c0c] transition-colors"
+          >
+            <ArrowLeft className="w-4 h-4" /> Volver al Hub del local
+          </Link>
+          <span className="text-[11px] font-mono text-[#52525b]">#{receipt.id}</span>
+        </div>
 
-      <main className="flex-1 max-w-md w-full mx-auto p-4 sm:p-6 space-y-5">
-        <Card className="p-6 space-y-5 border border-[#242426] bg-[#111113]">
-          <div className="flex items-start justify-between border-b border-[#242426] pb-4">
-            <div className="space-y-1">
-              <span className="inline-flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-[#34d399]">
-                <CheckCircle2 className="w-3.5 h-3.5" />
-                Comprobante Digital Verificado
-              </span>
-              <h1 className="font-bold text-xl text-[#f1f1ee] tracking-tight">
-                {receipt.businessName}
-              </h1>
-              <p className="text-xs font-mono text-[#a1a1aa]">
-                Código: <strong className="text-[#f1f1ee]">{receipt.id}</strong>
-              </p>
+        {/* Ticket Digital Imprimible */}
+        <div className="rounded-[32px] bg-[#ffffff] border border-black/15 p-6 sm:p-8 shadow-2xl space-y-6">
+          <div className="text-center border-b border-dashed border-black/15 pb-6 space-y-2">
+            <div className="w-12 h-12 rounded-2xl bg-[#2fb36a]/15 text-[#1f8a4c] flex items-center justify-center mx-auto">
+              <CheckCircle2 className="w-6 h-6" />
             </div>
-            <div className="w-10 h-10 rounded-xl bg-[#18181b] border border-[#28282a] flex items-center justify-center text-[#bec8ff]">
-              <ReceiptIcon className="w-5 h-5" />
-            </div>
-          </div>
-
-          {/* Detalle de fecha y medio de pago */}
-          <div className="grid grid-cols-2 gap-3 p-3.5 rounded-xl bg-[#18181b] border border-[#28282a] text-xs">
-            <div>
-              <span className="text-[#a1a1aa] block text-[10px] uppercase tracking-wider">
-                Fecha y hora
-              </span>
-              <span className="font-mono font-semibold text-[#f1f1ee]">
-                {formatDate(receipt.createdAt)}
-              </span>
-            </div>
-            <div className="text-right">
-              <span className="text-[#a1a1aa] block text-[10px] uppercase tracking-wider">
-                Medio de pago
-              </span>
-              <span className="font-semibold text-[#f1f1ee]">{methodLabel}</span>
-            </div>
-          </div>
-
-          {/* Ítems */}
-          <div className="space-y-2.5 text-xs">
-            <span className="block text-[10px] uppercase tracking-wider font-semibold text-[#a1a1aa]">
-              Detalle de tu compra
+            <span className="inline-block text-[10px] font-bold uppercase tracking-widest text-[#1f8a4c] bg-[#2fb36a]/15 px-2.5 py-0.5 rounded-full">
+              Comprobante de compra
             </span>
-            {receipt.items.map((item, idx) => (
-              <div
-                key={idx}
-                className="flex justify-between items-center py-2 border-b border-[#242426]/60 text-[#f1f1ee]"
-              >
-                <span>
-                  {item.quantity > 1 && (
-                    <strong className="font-bold text-[#bec8ff]">{item.quantity}x </strong>
-                  )}
-                  {item.name}
-                </span>
-                <span className="font-mono font-bold tabular-nums">
-                  {formatCurrency(item.price * item.quantity)}
-                </span>
-              </div>
-            ))}
+            <h1 className="text-xl font-bold text-[#0c0c0c] pt-1">{receipt.businessName}</h1>
+            <p className="text-xs text-[#52525b] flex items-center justify-center gap-1.5">
+              <Clock className="w-3.5 h-3.5" /> {formatDate(receipt.createdAt)}
+            </p>
+          </div>
+
+          {/* Detalle de Ítems */}
+          <div className="space-y-3">
+            <div className="flex justify-between text-[11px] font-semibold uppercase tracking-wider text-[#52525b]">
+              <span>Concepto</span>
+              <span>Importe</span>
+            </div>
+            <div className="divide-y divide-black/10">
+              {receipt.items.map((item) => (
+                <div
+                  key={item.id}
+                  className="py-2.5 flex items-center justify-between text-sm"
+                >
+                  <div>
+                    <span className="font-medium text-[#0c0c0c]">{item.name}</span>
+                    <span className="text-xs text-[#52525b] ml-2">x{item.quantity}</span>
+                  </div>
+                  <span className="font-mono font-semibold text-[#0c0c0c]">
+                    {formatCurrency(item.price * item.quantity)}
+                  </span>
+                </div>
+              ))}
+            </div>
           </div>
 
           {/* Total */}
-          <div className="pt-2 flex justify-between items-baseline">
-            <span className="font-bold text-sm text-[#a1a1aa] uppercase tracking-wider">
-              Total abonado
-            </span>
-            <span className="font-mono font-bold text-3xl text-[#f1f1ee] tabular-nums tracking-tight">
-              {formatCurrency(receipt.total)}
-            </span>
+          <div className="border-t border-dashed border-black/15 pt-4 space-y-2">
+            <div className="flex justify-between items-center text-xs text-[#52525b]">
+              <span>Medio de pago</span>
+              <span className="text-[#0c0c0c] font-semibold">{methodLabel}</span>
+            </div>
+            <div className="flex justify-between items-center text-xs text-[#52525b]">
+              <span>Punto de cobro</span>
+              <span className="font-mono text-[#0c0c0c] font-semibold">{receipt.cartelCode}</span>
+            </div>
+            <div className="flex justify-between items-baseline pt-2">
+              <span className="text-base font-bold text-[#0c0c0c]">Total abonado</span>
+              <span className="text-2xl font-extrabold bg-[#0c0c0c] text-[#bec8ff] px-3 py-1 rounded-xl font-mono tabular-nums">
+                {formatCurrency(receipt.total)}
+              </span>
+            </div>
           </div>
 
-          {/* Botones de Descarga */}
-          <div className="grid grid-cols-2 gap-2.5 pt-2">
-            <Button
-              variant="ultramar"
-              size="touch"
-              onClick={handleDownloadImage}
-              icon={<ImageIcon className="w-4 h-4 text-[#0c0c0c]" />}
-            >
-              Guardar imagen
-            </Button>
-            <Button
-              variant="secundario"
-              size="touch"
-              onClick={handleDownloadPdf}
-              icon={<Download className="w-4 h-4" />}
-            >
-              Descargar PDF
-            </Button>
+          {/* Acciones (No salen al imprimir) */}
+          <div className="pt-2 space-y-2.5 print:hidden">
+            <div className="grid grid-cols-2 gap-2.5">
+              <Button
+                variant="secundario"
+                size="sm"
+                fullWidth
+                icon={<Printer className="w-4 h-4" />}
+                onClick={() => window.print()}
+              >
+                Descargar PDF
+              </Button>
+              <Button
+                variant="secundario"
+                size="sm"
+                fullWidth
+                icon={<Share2 className="w-4 h-4" />}
+                onClick={handleShare}
+              >
+                Compartir
+              </Button>
+            </div>
           </div>
 
-          <div className="pt-3 text-center border-t border-[#242426]">
-            <p className="text-[11px] font-medium text-[#a1a1aa]">
-              Comprobante digital de compra · No válido como factura fiscal.
+          <div className="text-center pt-2 border-t border-black/10">
+            <p className="text-[11px] text-[#52525b]">
+              Comprobante digital de compra · No válido como factura fiscal
             </p>
           </div>
-        </Card>
-
-        {/* Acceso directo al Hub del Cartel para Club WalletWallet y Reseñas */}
-        <Link to={`/h/${receipt.cartelCode}`} className="block">
-          <div className="p-4 rounded-2xl bg-[#111113] border border-[#242426] hover:border-[#bec8ff] flex items-center justify-between transition-colors">
-            <div>
-              <p className="text-xs font-bold text-[#f1f1ee]">
-                Sumá puntos en tu Wallet o dejá tu reseña
-              </p>
-              <p className="text-[11px] text-[#a1a1aa]">
-                Abrir el Hub completo de {receipt.businessName}
-              </p>
-            </div>
-            <ArrowRight className="w-4 h-4 text-[#bec8ff] shrink-0" />
-          </div>
-        </Link>
-      </main>
+        </div>
+      </div>
     </div>
   );
 };

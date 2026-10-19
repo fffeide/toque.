@@ -232,7 +232,7 @@ export const ActivationView: React.FC = () => {
                 onChange={(e) => setPassword(e.target.value)}
                 required
               />
-              <Button type="submit" fullWidth size="lg" isLoading={authLoading}>
+              <Button type="submit" fullWidth size="touch" isLoading={authLoading}>
                 Continuar al Paso 2
               </Button>
             </form>
@@ -310,7 +310,7 @@ export const ActivationView: React.FC = () => {
                 onChange={(e) => setGoogleReviewUrl(e.target.value)}
               />
 
-              <Button type="submit" fullWidth size="lg" isLoading={isActivating}>
+              <Button type="submit" fullWidth size="touch" isLoading={isActivating}>
                 Activar Cartel Ahora
               </Button>
             </form>

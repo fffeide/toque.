@@ -18,6 +18,7 @@ export interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElemen
   size?: 'touch' | 'md' | 'sm';
   fullWidth?: boolean;
   isLoading?: boolean;
+  loading?: boolean;
   icon?: React.ReactNode;
 }
 
@@ -27,11 +28,13 @@ export const Button: React.FC<ButtonProps> = ({
   size = 'md',
   fullWidth = false,
   isLoading = false,
+  loading = false,
   icon,
   className = '',
   disabled,
   ...props
 }) => {
+  const busy = Boolean(isLoading || loading);
   const variantStyles: Record<ButtonVariant, string> = {
     estrella:
       'bg-[#f1f1ee] text-[#0c0c0c] hover:bg-white active:bg-[#e4e4e0] font-semibold',
@@ -61,7 +64,7 @@ export const Button: React.FC<ButtonProps> = ({
     sm: 'min-h-[34px] px-3.5 text-xs rounded-xl',
   }[size];
 
-  const isDisabled = Boolean(disabled || isLoading);
+  const isDisabled = Boolean(disabled || busy);
   const widthStyle = fullWidth ? 'w-full' : '';
   const disabledStyle = isDisabled
     ? 'opacity-50 cursor-not-allowed pointer-events-none'
@@ -73,7 +76,7 @@ export const Button: React.FC<ButtonProps> = ({
       disabled={isDisabled}
       {...props}
     >
-      {isLoading ? (
+      {busy ? (
         <Loader2 className="w-4 h-4 animate-spin shrink-0" />
       ) : (
         icon && <span className="shrink-0">{icon}</span>

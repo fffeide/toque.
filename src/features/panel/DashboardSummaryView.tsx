@@ -1,36 +1,36 @@
 import React, { useState, useEffect } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
-import { api, DashboardSummary, Cartel } from '../../api';
+import { Link } from 'react-router-dom';
+import { api, DashboardSummary } from '../../api';
 import { useAuth } from '../../lib/authContext';
+import { Card } from '../../components/ui/Card';
+import { Button } from '../../components/ui/Button';
 import { Skeleton } from '../../components/ui/Skeleton';
-import { formatCurrency } from '../../lib/formatters';
+import { formatCurrency, formatDate } from '../../lib/formatters';
 import {
-  Zap,
+  TrendingUp,
   Receipt,
-  QrCode,
   Award,
-  MapPin,
-  ArrowUpRight,
-  Users,
+  QrCode,
   CreditCard,
-  ShieldCheck,
+  Users,
+  Wallet,
+  Star,
+  RefreshCw,
 } from 'lucide-react';
 
 export const DashboardSummaryView: React.FC = () => {
-  const { business, user } = useAuth();
-  const navigate = useNavigate();
+  const { user } = useAuth();
+  const isCashier = user?.role === 'cashier';
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
-  const [carteles, setCarteles] = useState<Cartel[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
   const loadSummary = async () => {
+    setIsLoading(true);
     try {
-      const [sumData, cartelesData] = await Promise.all([
-        api.getDashboardSummary(),
-        api.listCarteles(),
-      ]);
-      setSummary(sumData);
-      setCarteles(cartelesData.filter((c) => c.status !== 'trash'));
+      const data = await api.getDashboardSummary();
+      setSummary(data);
+    } catch {
+      // ignore
     } finally {
       setIsLoading(false);
     }
@@ -39,289 +39,325 @@ export const DashboardSummaryView: React.FC = () => {
   useEffect(() => {
     loadSummary();
     const unsub = api.subscribeToBusinessSales(() => {
-      loadSummary();
+      api
+        .getDashboardSummary()
+        .then(setSummary)
+        .catch(() => {});
     });
     return () => unsub();
-  }, [business?.id]);
+  }, []);
 
   if (isLoading || !summary) {
     return (
       <div className="space-y-6">
-        <Skeleton className="h-10 w-64 bg-[#111113]" />
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mt-6">
+        <Skeleton className="h-10 w-64" />
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           {[1, 2, 3, 4].map((i) => (
-            <Skeleton key={i} className="h-36 rounded-2xl bg-[#111113]" />
+            <Skeleton key={i} className="h-32 rounded-xl" />
           ))}
         </div>
+        <Skeleton className="h-64 rounded-xl" />
       </div>
     );
   }
 
-  const activeCarteles = carteles.filter((c) => c.status === 'active');
-  const businessName = business?.name || 'Café La Esquina';
-  const businessInitial = businessName.charAt(0).toUpperCase();
-  const primaryCartelCode = activeCarteles[0]?.code || carteles[0]?.code || 'CAJA01';
+  const todaySalesCount = summary.todaySalesCount ?? 0;
+  const weeklySalesCount = summary.weeklySalesCount ?? 0;
+  const totalReceiptsCount = summary.totalReceiptsCount ?? 0;
+  const claimedReceiptsCount = summary.claimedReceiptsCount ?? 0;
+  const scansCount = summary.scansCount ?? 0;
+  const activeCartelesCount = summary.activeCartelesCount ?? 0;
+  const totalCartelesCount = summary.totalCartelesCount ?? 0;
+  const clubMembersCount = summary.clubMembersCount ?? summary.newClubMembersCount ?? 0;
+  const walletPassesCount = summary.walletPassesCount ?? 0;
+  const recentSales = summary.recentSales ?? [];
 
-  const kpiCards = [
-    {
-      title: 'Ventas de hoy',
-      value: formatCurrency(summary.todaySalesAmount),
-      sub: `${summary.todaySalesCount} cobro(s) hoy`,
-      icon: Zap,
-      iconBg: 'bg-[#bec8ff]/15',
-      iconColor: 'text-[#bec8ff]',
-      to: '/panel/ventas',
-    },
-    {
-      title: 'Recibos digitales',
-      value: summary.totalReceiptsCount.toString(),
-      sub: `${summary.claimedReceiptsCount} abiertos por clientes`,
-      icon: Receipt,
-      iconBg: 'bg-[#2fb36a]/15',
-      iconColor: 'text-[#34d399]',
-      to: '/panel/ventas',
-    },
-    {
-      title: 'Escaneos QR / NFC',
-      value: summary.scansCount.toString(),
-      sub: `${summary.reviewButtonClicks} clics a reseñas Google`,
-      icon: QrCode,
-      iconBg: 'bg-[#f1f1ee]/10',
-      iconColor: 'text-[#f1f1ee]',
-      to: '/panel/resenas',
-    },
-    {
-      title: 'Club & WalletWallet',
-      value: summary.newClubMembersCount.toString(),
-      sub: `${summary.walletPassesCount} pases Wallet emitidos`,
-      icon: Award,
-      iconBg: 'bg-[#bec8ff]/15',
-      iconColor: 'text-[#bec8ff]',
-      to: '/panel/club',
-    },
-  ];
+  const kpis = isCashier
+    ? [
+        {
+          label: 'Operaciones de hoy',
+          value: todaySalesCount.toString(),
+          sub: 'Cobros registrados hoy en caja',
+          icon: TrendingUp,
+          accent: 'text-[#34d399] bg-[#2fb36a]/15',
+        },
+        {
+          label: 'Operaciones (7 días)',
+          value: weeklySalesCount.toString(),
+          sub: 'Total de cobros de la semana',
+          icon: CreditCard,
+          accent: 'text-[#bec8ff] bg-[#bec8ff]/15',
+        },
+        {
+          label: 'Comprobantes emitidos',
+          value: totalReceiptsCount.toString(),
+          sub: `${claimedReceiptsCount} abiertos por clientes`,
+          icon: Receipt,
+          accent: 'text-[#bec8ff] bg-[#bec8ff]/15',
+        },
+        {
+          label: 'Escaneos QR / NFC',
+          value: scansCount.toString(),
+          sub: `${activeCartelesCount} de ${totalCartelesCount} carteles activos`,
+          icon: QrCode,
+          accent: 'text-[#34d399] bg-[#2fb36a]/15',
+        },
+      ]
+    : [
+        {
+          label: 'Ventas de hoy',
+          value: formatCurrency(summary.todaySalesAmount ?? 0),
+          sub: `${todaySalesCount} cobro(s) registrado(s) hoy`,
+          icon: TrendingUp,
+          accent: 'text-[#34d399] bg-[#2fb36a]/15',
+        },
+        {
+          label: 'Últimos 7 días',
+          value: formatCurrency(summary.weeklySalesAmount ?? 0),
+          sub: `${weeklySalesCount} operación(es) en la semana`,
+          icon: CreditCard,
+          accent: 'text-[#bec8ff] bg-[#bec8ff]/15',
+        },
+        {
+          label: 'Comprobantes emitidos',
+          value: totalReceiptsCount.toString(),
+          sub: `${claimedReceiptsCount} abiertos por clientes`,
+          icon: Receipt,
+          accent: 'text-[#bec8ff] bg-[#bec8ff]/15',
+        },
+        {
+          label: 'Socios en el Club',
+          value: clubMembersCount.toString(),
+          sub: `${walletPassesCount} pases Wallet emitidos`,
+          icon: Award,
+          accent: 'text-[#34d399] bg-[#2fb36a]/15',
+        },
+      ];
 
   return (
-    <div>
-      {/* 1. CABECERA DE SECCIÓN */}
+    <div className="space-y-8">
+      {/* Encabezado */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <span className="block text-[11px] uppercase tracking-wider text-[#a1a1aa] font-semibold mb-1">
-            PANEL EN TIEMPO REAL · DATOS 100% VERIFICADOS
-          </span>
-          <h1 className="text-3xl font-bold text-[#f1f1ee] tracking-tight">
-            {businessName}
-          </h1>
+          <h1 className="text-2xl font-bold text-[#f1f1ee] tracking-tight">Resumen</h1>
+          <p className="text-xs text-[#a1a1aa] mt-0.5">
+            {isCashier
+              ? 'Actividad operativa de carteles y comprobantes en mostrador.'
+              : 'Métricas reales en tiempo real de tus cajas, carteles y club de fidelidad.'}
+          </p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2.5">
-          <Link
-            to="/panel/equipo"
-            className="bg-[#111113] border border-[#242426] hover:border-[#343438] hover:bg-[#18181b] text-[#f1f1ee] rounded-xl px-4 py-2.5 text-xs font-semibold transition-colors inline-flex items-center gap-2"
+          <Button
+            variant="secundario"
+            size="sm"
+            onClick={loadSummary}
+            icon={<RefreshCw className="w-3.5 h-3.5" />}
           >
-            <Users className="w-4 h-4 text-[#bec8ff]" />
-            <span>Equipo ({summary.teamMembersCount})</span>
-          </Link>
-          <Link
-            to="/caja"
-            className="bg-[#bec8ff] hover:bg-[#d6daf6] text-[#0c0c0c] rounded-xl px-4 py-2.5 text-xs font-bold transition-colors inline-flex items-center gap-2"
-          >
-            <CreditCard className="w-4 h-4 text-[#0c0c0c]" />
-            <span>Ir a Caja y emitir recibo</span>
+            Actualizar
+          </Button>
+          <Link to="/caja">
+            <Button variant="ultramar" size="sm" icon={<CreditCard className="w-4 h-4" />}>
+              Abrir Caja
+            </Button>
           </Link>
         </div>
       </div>
 
-      {/* 2. FILA DE 4 TARJETAS KPI (100% DATOS REALES) */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mt-6">
-        {kpiCards.map((kpi) => {
+      {/* KPIs Principales */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        {kpis.map((kpi) => {
           const Icon = kpi.icon;
           return (
-            <div
-              key={kpi.title}
-              onClick={() => navigate(kpi.to)}
-              className="bg-[#111113] border border-[#242426] rounded-2xl p-5 flex flex-col justify-between h-36 hover:border-[#343438] transition-colors cursor-pointer"
-            >
-              <div className="flex items-center justify-between gap-2">
-                <div className="flex items-center gap-3 min-w-0">
-                  <div
-                    className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${kpi.iconBg} ${kpi.iconColor}`}
-                  >
-                    <Icon className="w-4 h-4" />
-                  </div>
-                  <span className="text-xs font-semibold text-[#a1a1aa] truncate">
-                    {kpi.title}
-                  </span>
+            <Card key={kpi.label} className="p-5 flex flex-col justify-between gap-4">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-semibold text-[#a1a1aa]">{kpi.label}</span>
+                <div
+                  className={`w-9 h-9 rounded-xl flex items-center justify-center ${kpi.accent}`}
+                >
+                  <Icon className="w-4 h-4" />
                 </div>
-                <span className="text-sm text-[#a1a1aa] shrink-0">↗</span>
               </div>
-
               <div>
-                <div className="text-3xl font-bold text-[#f1f1ee] tabular-nums tracking-tight">
+                <p className="text-2xl sm:text-3xl font-bold text-[#f1f1ee] tabular-nums tracking-tight">
                   {kpi.value}
-                </div>
-                <p className="text-[11px] text-[#a1a1aa] mt-0.5">{kpi.sub}</p>
+                </p>
+                <p className="text-[11px] text-[#a1a1aa] mt-1">{kpi.sub}</p>
               </div>
-            </div>
+            </Card>
           );
         })}
       </div>
 
-      {/* 3. GRILLA INFERIOR EN 2 COLUMNAS */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 mt-6">
-        {/* Columna Izquierda (lg:col-span-8): Tus carteles activos */}
-        <div className="lg:col-span-8 bg-[#111113] border border-[#242426] rounded-2xl p-6 flex flex-col justify-between">
-          <div>
-            <div className="flex items-center justify-between mb-5">
-              <div>
-                <span className="block text-[11px] uppercase tracking-wider text-[#a1a1aa] font-semibold">
-                  CONEXIÓN CAJA ↔ HUB
-                </span>
-                <h2 className="text-lg font-bold text-[#f1f1ee] tracking-tight mt-0.5">
-                  Tus carteles inteligentes ({activeCarteles.length} activos)
-                </h2>
+      {/* Segunda fila de métricas operativas (Solo para Dueño y Encargado) */}
+      {!isCashier && (
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <Card className="p-4 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-[#18181b] border border-[#28282a] flex items-center justify-center text-[#bec8ff]">
+                <QrCode className="w-5 h-5" />
               </div>
-              <Link
-                to="/panel/carteles"
-                className="bg-[#18181b] border border-[#28282a] hover:border-[#343438] text-[#f1f1ee] text-xs font-medium px-3.5 py-2 rounded-xl transition-colors"
-              >
-                Administrar carteles
+              <div>
+                <p className="text-xs text-[#a1a1aa]">Escaneos QR / NFC</p>
+                <p className="text-lg font-bold text-[#f1f1ee] tabular-nums">
+                  {scansCount}
+                </p>
+              </div>
+            </div>
+            <span className="text-[11px] text-[#a1a1aa]">
+              {activeCartelesCount} de {totalCartelesCount} carteles activos
+            </span>
+          </Card>
+
+          <Card className="p-4 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-[#18181b] border border-[#28282a] flex items-center justify-center text-[#34d399]">
+                <Star className="w-5 h-5" />
+              </div>
+              <div>
+                <p className="text-xs text-[#a1a1aa]">Clics a Google Maps</p>
+                <p className="text-lg font-bold text-[#f1f1ee] tabular-nums">
+                  {summary.reviewButtonClicks ?? 0}
+                </p>
+              </div>
+            </div>
+            <span className="text-[11px] text-[#34d399] font-medium">Directo desde Hub</span>
+          </Card>
+
+          <Card className="p-4 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-[#18181b] border border-[#28282a] flex items-center justify-center text-[#f1f1ee]">
+                <Users className="w-5 h-5" />
+              </div>
+              <div>
+                <p className="text-xs text-[#a1a1aa]">Equipo activo</p>
+                <p className="text-lg font-bold text-[#f1f1ee] tabular-nums">
+                  {summary.teamMembersCount ?? 1}
+                </p>
+              </div>
+            </div>
+            <Link
+              to="/panel/equipo"
+              className="text-xs font-semibold text-[#bec8ff] hover:underline"
+            >
+              Gestionar →
+            </Link>
+          </Card>
+        </div>
+      )}
+
+      {/* Tabla de Últimas Ventas */}
+      <Card padding="none" className="overflow-hidden">
+        <div className="p-5 border-b border-[#242426] flex items-center justify-between">
+          <div>
+            <h2 className="font-bold text-base text-[#f1f1ee]">Últimos cobros en caja</h2>
+            <p className="text-xs text-[#a1a1aa]">
+              {isCashier
+                ? 'Registro operativo de comprobantes emitidos en mostrador.'
+                : 'Se actualiza en vivo cada vez que un cajero emite un cobro.'}
+            </p>
+          </div>
+          <Link
+            to="/caja"
+            className="text-xs font-semibold text-[#bec8ff] hover:underline flex items-center gap-1"
+          >
+            Ir a Caja →
+          </Link>
+        </div>
+
+        {recentSales.length === 0 ? (
+          <div className="p-10 text-center space-y-3">
+            <div className="w-12 h-12 rounded-2xl bg-[#18181b] border border-[#242426] flex items-center justify-center mx-auto text-[#a1a1aa]">
+              <Receipt className="w-6 h-6" />
+            </div>
+            <div className="space-y-1 max-w-sm mx-auto">
+              <p className="text-sm font-semibold text-[#f1f1ee]">
+                Todavía no hay ventas registradas
+              </p>
+              <p className="text-xs text-[#a1a1aa]">
+                Abrí la pantalla de Caja y cobrá tu primera venta para ver los comprobantes en tiempo real.
+              </p>
+            </div>
+            <div className="pt-2">
+              <Link to="/caja">
+                <Button variant="ultramar" size="sm">
+                  Realizar primer cobro en Caja
+                </Button>
               </Link>
             </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              {carteles.slice(0, 4).map((cartel) => {
-                const realScans = cartel.scansCount || 0;
-                return (
-                  <div
-                    key={cartel.id}
-                    className="bg-[#18181b] border border-[#28282a] hover:border-[#343438] rounded-2xl p-4 flex flex-col justify-between gap-4 transition-colors"
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="flex items-center gap-3 min-w-0">
-                        <div className="w-10 h-10 rounded-xl bg-[#111113] border border-[#242426] flex items-center justify-center text-[#bec8ff] shrink-0">
-                          <QrCode className="w-5 h-5" />
-                        </div>
-                        <div className="min-w-0">
-                          <h3 className="text-sm font-bold text-[#f1f1ee] truncate">
-                            {cartel.name}
-                          </h3>
-                          <p className="text-xs text-[#a1a1aa] flex items-center gap-1 mt-0.5">
-                            <MapPin className="w-3 h-3 text-[#a1a1aa]" />
-                            <span className="capitalize">{cartel.role}</span>
-                            <span>·</span>
-                            <span className="font-mono text-[#bec8ff] font-semibold">
-                              {cartel.code}
-                            </span>
-                          </p>
-                        </div>
-                      </div>
-
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="border-b border-[#242426] text-[11px] uppercase tracking-wider text-[#a1a1aa] bg-[#161619]">
+                  <th className="py-3 px-5">Fecha y Hora</th>
+                  <th className="py-3 px-5">Cartel / Caja</th>
+                  <th className="py-3 px-5">Medio</th>
+                  <th className="py-3 px-5">Estado</th>
+                  {!isCashier && <th className="py-3 px-5 text-right">Importe</th>}
+                  <th className="py-3 px-5 text-right">Comprobante</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-[#242426] text-xs">
+                {recentSales.map((sale) => (
+                  <tr key={sale.id} className="hover:bg-[#161619] transition-colors">
+                    <td className="py-3.5 px-5 text-[#a1a1aa] whitespace-nowrap">
+                      {formatDate(sale.createdAt)}
+                    </td>
+                    <td className="py-3.5 px-5 font-mono text-[#f1f1ee]">
+                      {sale.cartelCode || 'CAJA01'}
+                    </td>
+                    <td className="py-3.5 px-5 text-[#f1f1ee]">
+                      {sale.method === 'mercadopago' || sale.method === 'mp_qr'
+                        ? 'QR'
+                        : sale.method === 'cash'
+                        ? 'Efectivo'
+                        : 'Tarjeta'}
+                    </td>
+                    <td className="py-3.5 px-5">
                       <span
-                        className={`text-[11px] px-2.5 py-0.5 rounded-full font-semibold border ${
-                          cartel.status === 'active'
-                            ? 'bg-[#2fb36a]/20 text-[#34d399] border-[#2fb36a]/40'
-                            : 'bg-[#242426] text-[#a1a1aa] border-[#343438]'
+                        className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold ${
+                          sale.status === 'paid'
+                            ? 'bg-[#2fb36a]/15 text-[#34d399]'
+                            : sale.status === 'pending'
+                            ? 'bg-amber-500/15 text-amber-400'
+                            : 'bg-red-500/15 text-red-400'
                         }`}
                       >
-                        {cartel.status === 'active' ? 'Activo' : 'Sin activar'}
+                        {sale.status === 'paid'
+                          ? 'Cobrado'
+                          : sale.status === 'pending'
+                          ? 'Pendiente'
+                          : 'Cancelado'}
                       </span>
-                    </div>
-
-                    <div className="pt-3 border-t border-[#242426] flex items-center justify-between text-xs">
-                      <span className="text-[#a1a1aa]">
-                        <strong className="text-[#f1f1ee] font-bold tabular-nums">
-                          {realScans}
-                        </strong>{' '}
-                        escaneo(s) reales
-                      </span>
-                      <Link
-                        to={`/h/${cartel.code}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-[#bec8ff] hover:text-[#d6daf6] font-semibold inline-flex items-center gap-1"
-                      >
-                        <span>Abrir Hub</span>
-                        <ArrowUpRight className="w-3.5 h-3.5" />
-                      </Link>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
+                    </td>
+                    {!isCashier && (
+                      <td className="py-3.5 px-5 text-right font-bold text-[#f1f1ee] font-mono tabular-nums">
+                        {formatCurrency(sale.amount ?? 0)}
+                      </td>
+                    )}
+                    <td className="py-3.5 px-5 text-right">
+                      {sale.receiptId ? (
+                        <Link
+                          to={`/r/${sale.receiptId}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 text-[#bec8ff] hover:underline font-medium"
+                        >
+                          Ver ticket
+                        </Link>
+                      ) : (
+                        <span className="text-[#a1a1aa]">—</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
-
-          <div className="mt-5 pt-4 border-t border-[#242426] flex flex-wrap items-center justify-between gap-3 text-xs text-[#a1a1aa]">
-            <span>
-              Emití un cobro en Caja para ver el comprobante aparecer en vivo en el Hub del cartel.
-            </span>
-            <Link
-              to="/caja"
-              className="text-[#bec8ff] hover:text-[#d6daf6] font-semibold transition-colors"
-            >
-              Abrir Terminal de Caja →
-            </Link>
-          </div>
-        </div>
-
-        {/* Columna Derecha (lg:col-span-4): Tarjeta de acceso rápido y estado RLS */}
-        <div className="lg:col-span-4 bg-[#111113] border border-[#242426] rounded-2xl p-6 flex flex-col items-center justify-between text-center">
-          <div className="w-full flex flex-col items-center">
-            <span className="text-[11px] uppercase tracking-wider text-[#a1a1aa] font-semibold mb-4">
-              VISTA PÚBLICA DEL CLIENTE
-            </span>
-
-            <div className="w-20 h-20 rounded-full bg-[#18181b] border border-[#28282a] flex items-center justify-center text-2xl font-bold text-[#bec8ff] mb-4">
-              {businessInitial}
-            </div>
-
-            <h3 className="text-xl font-bold text-[#f1f1ee] tracking-tight">
-              {businessName}
-            </h3>
-            <p className="text-xs text-[#a1a1aa] mt-1">
-              Cartel principal:{' '}
-              <span className="font-mono font-bold text-[#f1f1ee]">{primaryCartelCode}</span>
-            </p>
-
-            <div className="mt-4 w-full p-3 rounded-xl bg-[#18181b] border border-[#28282a] text-left space-y-1.5 text-xs">
-              <div className="flex items-center justify-between">
-                <span className="text-[#a1a1aa]">Sesión RLS:</span>
-                <span className="font-bold text-[#34d399] inline-flex items-center gap-1">
-                  <ShieldCheck className="w-3.5 h-3.5" />
-                  {user?.role === 'superadmin'
-                    ? 'Super Admin'
-                    : user?.role === 'manager'
-                    ? 'Encargado'
-                    : 'Dueño'}
-                </span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-[#a1a1aa]">Facturado 7 días:</span>
-                <span className="font-mono font-bold text-[#f1f1ee]">
-                  {formatCurrency(summary.weeklySalesAmount)}
-                </span>
-              </div>
-            </div>
-          </div>
-
-          <div className="w-full space-y-2.5 mt-6">
-            <Link
-              to={`/h/${primaryCartelCode}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="w-full bg-[#bec8ff] hover:bg-[#d6daf6] text-[#0c0c0c] font-bold py-3 rounded-xl text-sm transition-colors block"
-            >
-              Probar mi cartel público ↗
-            </Link>
-            <Link
-              to="/admin"
-              className="w-full bg-[#18181b] hover:bg-[#222226] border border-[#28282a] text-[#f1f1ee] font-semibold py-2.5 rounded-xl text-xs transition-colors block"
-            >
-              Ver Panel Super Admin Global
-            </Link>
-          </div>
-        </div>
-      </div>
+        )}
+      </Card>
     </div>
   );
 };

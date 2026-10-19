@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { api, SuperAdminSummary } from '../../api';
+import { useAuth } from '../../lib/authContext';
+import { useTheme } from '../../lib/themeContext';
 import { Card } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
 import { Skeleton } from '../../components/ui/Skeleton';
@@ -16,27 +18,23 @@ import {
   ArrowLeft,
   ExternalLink,
   Zap,
+  Sun,
+  Moon,
+  LogOut,
 } from 'lucide-react';
 
 export const SuperAdminView: React.FC = () => {
+  const { logout } = useAuth();
+  const { isDark, toggleTheme } = useTheme();
+  const navigate = useNavigate();
   const [summary, setSummary] = useState<SuperAdminSummary | null>(null);
-  const [walletStatus, setWalletStatus] = useState<{
-    configured: boolean;
-    provider: string;
-  } | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
   const loadGlobalMetrics = async () => {
     setIsLoading(true);
     try {
-      const [data, wRes] = await Promise.all([
-        api.getSuperAdminSummary(),
-        fetch('/api/wallet/status')
-          .then((r) => (r.ok ? r.json() : { configured: false, provider: 'api.walletwallet.dev' }))
-          .catch(() => ({ configured: false, provider: 'api.walletwallet.dev' })),
-      ]);
+      const data = await api.getSuperAdminSummary();
       setSummary(data);
-      setWalletStatus(wRes);
     } catch {
       // ignore
     } finally {
@@ -47,6 +45,11 @@ export const SuperAdminView: React.FC = () => {
   useEffect(() => {
     loadGlobalMetrics();
   }, []);
+
+  const handleLogout = async () => {
+    await logout();
+    navigate('/login');
+  };
 
   if (isLoading || !summary) {
     return (
@@ -96,7 +99,7 @@ export const SuperAdminView: React.FC = () => {
   ];
 
   return (
-    <div className="min-h-screen bg-[#000000] text-[#f1f1ee]">
+    <div className="theme-panel min-h-screen bg-[#000000] text-[#f1f1ee]">
       {/* Header Global */}
       <header className="border-b border-[#242426] bg-[#0c0c0c] px-4 sm:px-8 py-4 sticky top-0 z-20">
         <div className="max-w-6xl mx-auto flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -104,7 +107,7 @@ export const SuperAdminView: React.FC = () => {
             <Link
               to="/panel"
               className="w-9 h-9 rounded-xl bg-[#111113] border border-[#242426] hover:border-[#343438] text-[#f1f1ee] flex items-center justify-center transition-colors"
-              title="Volver al panel del comercio"
+              title="Ir al panel del comercio"
             >
               <ArrowLeft className="w-4 h-4" />
             </Link>
@@ -114,27 +117,25 @@ export const SuperAdminView: React.FC = () => {
                   Super Admin Global · toque™
                 </span>
                 <span className="text-[10px] font-bold uppercase tracking-wider bg-[#bec8ff] text-[#0c0c0c] px-2.5 py-0.5 rounded-full">
-                  Datos 100% Reales
+                  Nivel Plataforma
                 </span>
               </div>
               <p className="text-xs text-[#a1a1aa]">
-                Auditoría en vivo de comercios, carteles NFC/QR, ventas en caja y pases WalletWallet.
+                Monitoreo general de comercios adheridos, carteles activos y operaciones en vivo.
               </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-3">
-            <div className="px-3 py-1.5 rounded-xl bg-[#111113] border border-[#242426] text-xs flex items-center gap-2">
-              <span
-                className={`w-2 h-2 rounded-full ${
-                  walletStatus?.configured ? 'bg-[#2fb36a]' : 'bg-amber-400'
-                }`}
-              />
-              <span className="text-[#a1a1aa]">WalletWallet API:</span>
-              <strong className="text-[#f1f1ee]">
-                {walletStatus?.configured ? 'Activa (Backend Seguro)' : 'Modo local'}
-              </strong>
-            </div>
+          <div className="flex items-center gap-2.5">
+            <button
+              type="button"
+              onClick={toggleTheme}
+              title={isDark ? 'Cambiar a modo claro' : 'Cambiar a modo oscuro'}
+              aria-label="Cambiar tema"
+              className="w-9 h-9 rounded-xl bg-[#111113] border border-[#242426] hover:border-[#bec8ff] text-[#f1f1ee] flex items-center justify-center transition-colors cursor-pointer"
+            >
+              {isDark ? <Sun className="w-4 h-4 text-[#bec8ff]" /> : <Moon className="w-4 h-4" />}
+            </button>
 
             <Button
               variant="secundario"
@@ -144,6 +145,16 @@ export const SuperAdminView: React.FC = () => {
             >
               Actualizar
             </Button>
+
+            <button
+              type="button"
+              onClick={handleLogout}
+              title="Cerrar sesión"
+              aria-label="Cerrar sesión"
+              className="w-9 h-9 rounded-xl bg-[#111113] border border-[#242426] hover:border-[#343438] text-[#a1a1aa] hover:text-[#f1f1ee] flex items-center justify-center transition-colors cursor-pointer"
+            >
+              <LogOut className="w-4 h-4" />
+            </button>
           </div>
         </div>
       </header>
@@ -194,7 +205,7 @@ export const SuperAdminView: React.FC = () => {
                   <th className="py-3 px-4">Comercio</th>
                   <th className="py-3 px-4">Titular / Correo</th>
                   <th className="py-3 px-4 text-center">Carteles</th>
-                  <th className="py-3 px-4 text-center">Equipo (RLS)</th>
+                  <th className="py-3 px-4 text-center">Equipo</th>
                   <th className="py-3 px-4 text-center">Socios Club</th>
                   <th className="py-3 px-4 text-right">Ventas Reales</th>
                 </tr>
@@ -204,9 +215,6 @@ export const SuperAdminView: React.FC = () => {
                   <tr key={biz.id} className="hover:bg-[#18181b] transition-colors">
                     <td className="py-3.5 px-4 font-bold text-[#f1f1ee]">
                       {biz.name}
-                      <span className="block text-[10px] font-mono text-[#a1a1aa] font-normal">
-                        ID: {biz.id}
-                      </span>
                     </td>
                     <td className="py-3.5 px-4 text-[#f1f1ee]">
                       <div>{biz.ownerName}</div>

@@ -1,366 +1,368 @@
-import React, { useState, useEffect } from 'react';
-import { NavLink, Outlet, useLocation, Link, useNavigate, Navigate } from 'react-router-dom';
+import React, { useState } from 'react';
+import { NavLink, Outlet, useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../../lib/authContext';
-import { api, Cartel } from '../../api';
+import { useTheme } from '../../lib/themeContext';
+import { UserRole } from '../../api/types';
 import {
   LayoutDashboard,
-  Receipt,
   QrCode,
-  SlidersHorizontal,
+  Smartphone,
   Award,
-  Users,
-  Star,
   Settings,
-  CreditCard,
   LogOut,
+  Menu,
+  X,
+  CreditCard,
+  Users,
   ShieldCheck,
+  Sparkles,
   Sun,
   Moon,
-  MessageCircle,
+  ShoppingBag,
 } from 'lucide-react';
 
-const ROLE_LABELS: Record<string, string> = {
-  owner: 'Dueño',
-  manager: 'Encargado',
-  cashier: 'Cajero',
-  superadmin: 'Super Admin',
-};
+interface NavItem {
+  to: string;
+  label: string;
+  icon: React.FC<{ className?: string }>;
+  roles: UserRole[];
+  requiresNetworkEnabled?: boolean;
+}
+
+const ALL_NAV_ITEMS: NavItem[] = [
+  {
+    to: '/panel/resumen',
+    label: 'Resumen',
+    icon: LayoutDashboard,
+    roles: ['owner', 'manager', 'cashier', 'superadmin'],
+  },
+  {
+    to: '/panel/carteles',
+    label: 'Mis Carteles',
+    icon: QrCode,
+    roles: ['owner', 'manager', 'cashier', 'superadmin'],
+  },
+  {
+    to: '/panel/hub',
+    label: 'Hub',
+    icon: Smartphone,
+    roles: ['owner', 'manager', 'superadmin'],
+  },
+  {
+    to: '/panel/productos',
+    label: 'Productos',
+    icon: ShoppingBag,
+    roles: ['owner', 'manager', 'superadmin'],
+  },
+  {
+    to: '/panel/fidelidad',
+    label: 'Club Fidelidad',
+    icon: Award,
+    roles: ['owner', 'manager', 'superadmin'],
+  },
+  {
+    to: '/panel/red',
+    label: 'Red de Beneficios',
+    icon: Sparkles,
+    roles: ['owner', 'manager', 'superadmin'],
+    requiresNetworkEnabled: true,
+  },
+  {
+    to: '/panel/equipo',
+    label: 'Equipo',
+    icon: Users,
+    roles: ['owner', 'superadmin'],
+  },
+  {
+    to: '/panel/cuenta',
+    label: 'Mi Cuenta',
+    icon: Settings,
+    roles: ['owner', 'superadmin'],
+  },
+];
 
 export const PanelLayout: React.FC = () => {
-  const { user, business, isLoading, logout } = useAuth();
-  const location = useLocation();
+  const { user, business, logout } = useAuth();
+  const { isDark, toggleTheme } = useTheme();
   const navigate = useNavigate();
-  const [darkMode, setDarkMode] = useState(true);
-  const [primaryCartelCode, setPrimaryCartelCode] = useState('CAJA01');
+  const [mobileOpen, setMobileOpen] = useState(false);
 
-  useEffect(() => {
-    api
-      .listCarteles()
-      .then((list) => {
-        const active = list.find((c: Cartel) => c.status === 'active') || list[0];
-        if (active?.code) {
-          setPrimaryCartelCode(active.code);
-        }
-      })
-      .catch(() => {});
-  }, [business?.id]);
+  const currentRole: UserRole = user?.isSuperAdmin
+    ? 'superadmin'
+    : (user?.role || 'owner');
 
-  // Guardián RLS: El rol Cajero solo tiene permiso sobre la terminal de mostrador (/caja)
-  if (!isLoading && user?.role === 'cashier') {
-    return <Navigate to="/caja" replace />;
-  }
+  const isNetworkEnabled = Boolean(business?.networkEnabled);
+
+  const visibleNavItems = ALL_NAV_ITEMS.filter((item) => {
+    if (!item.roles.includes(currentRole)) return false;
+    if (item.requiresNetworkEnabled && !isNetworkEnabled) return false;
+    return true;
+  });
 
   const handleLogout = async () => {
     await logout();
     navigate('/login');
   };
 
-  const now = new Date();
-  const hour = now.getHours();
-  const greeting =
-    hour >= 5 && hour < 12
-      ? 'Buenos días'
-      : hour >= 12 && hour < 19
-      ? 'Buenas tardes'
-      : 'Buenas noches';
-
-  const formattedDate = new Intl.DateTimeFormat('es-AR', {
-    weekday: 'long',
-    day: 'numeric',
-    month: 'long',
-  }).format(now);
-
-  const serviceItems = [
-    {
-      to: '/panel',
-      matchPaths: ['/panel', '/panel/resumen', '/resumen'],
-      label: 'Resumen',
-      icon: LayoutDashboard,
-      exact: true,
-    },
-    {
-      to: '/panel/carteles',
-      matchPaths: ['/panel/carteles'],
-      label: 'Mis Carteles',
-      icon: QrCode,
-    },
-    {
-      to: '/panel/hub',
-      matchPaths: ['/panel/hub', '/panel/canales'],
-      label: 'Canales y Hub',
-      icon: SlidersHorizontal,
-    },
-    {
-      to: '/panel/ventas',
-      matchPaths: ['/panel/ventas', '/panel/reportes'],
-      label: 'Reportes y Ventas',
-      icon: Receipt,
-    },
-    {
-      to: '/panel/club',
-      matchPaths: ['/panel/club'],
-      label: 'Club de Fidelidad',
-      icon: Award,
-    },
-    {
-      to: '/panel/resenas',
-      matchPaths: ['/panel/resenas'],
-      label: 'Reseñas',
-      icon: Star,
-    },
-  ];
-
-  const configItems = [
-    {
-      to: '/panel/equipo',
-      matchPaths: ['/panel/equipo'],
-      label: 'Equipo',
-      icon: Users,
-    },
-    {
-      to: '/panel/cuenta',
-      matchPaths: ['/panel/cuenta'],
-      label: 'Mi Cuenta',
-      icon: Settings,
-    },
-    {
-      to: '/caja',
-      matchPaths: ['/caja'],
-      label: 'Pantalla de Caja',
-      icon: CreditCard,
-    },
-    {
-      to: '/admin',
-      matchPaths: ['/admin'],
-      label: 'Super Admin Global',
-      icon: ShieldCheck,
-    },
-  ];
-
-  const isItemActive = (item: { to: string; matchPaths: string[]; exact?: boolean }) => {
-    if (item.exact) {
-      return item.matchPaths.includes(location.pathname);
-    }
-    return item.matchPaths.some((p) => location.pathname.startsWith(p));
-  };
-
-  const businessInitial = (business?.name || 'C').charAt(0).toUpperCase();
-  const userInitial = (user?.name || user?.email || 'D').charAt(0).toUpperCase();
-  const userRoleLabel = ROLE_LABELS[user?.role || 'owner'] || 'Dueño';
+  const roleBadgeLabel =
+    currentRole === 'superadmin'
+      ? 'Super Admin'
+      : currentRole === 'owner'
+      ? 'Dueño'
+      : currentRole === 'manager'
+      ? 'Encargado'
+      : 'Cajero';
 
   return (
-    <div className="min-h-screen bg-[#000000] text-[#f1f1ee] flex flex-col md:flex-row selection:bg-[#bec8ff] selection:text-[#0c0c0c]">
-      {/* 1. SIDEBAR IZQUIERDO FIJO */}
-      <aside className="hidden md:flex w-64 bg-[#0c0c0c] border-r border-[#242426] flex-col justify-between shrink-0 sticky top-0 h-screen overflow-y-auto z-20">
-        <div>
-          {/* Arriba: Logo de toque™ + píldora verde con contraste WCAG AA */}
-          <div className="px-4 pt-5 pb-3 flex items-center justify-between">
-            <Link to="/" className="flex items-center gap-2.5">
-              <div className="w-8 h-8 rounded-full bg-[#f1f1ee] border border-[#242426] flex items-center justify-center">
-                <img src="/assets/logo.svg" alt="" className="w-5 h-5 object-contain" />
-              </div>
-              <span className="font-bold text-base tracking-tight text-[#f1f1ee]">toque™</span>
-            </Link>
-            <span className="bg-[#2fb36a]/20 text-[#34d399] border border-[#2fb36a]/40 text-xs px-2.5 py-0.5 rounded-full font-semibold">
-              • Gratis
-            </span>
-          </div>
-
-          {/* Selector de Local */}
-          <div className="bg-[#111113] border border-[#242426] rounded-2xl p-3 mx-3 my-2 flex items-center gap-3">
-            <div className="w-9 h-9 rounded-full bg-[#bec8ff] text-[#0c0c0c] font-bold text-sm flex items-center justify-center shrink-0">
-              {businessInitial}
+    <div className="theme-panel min-h-screen flex flex-col md:flex-row bg-[#000000] text-[#f1f1ee]">
+      {/* Sidebar Desktop */}
+      <aside className="hidden md:flex md:w-64 md:flex-col border-r border-[#242426] bg-[#111113] shrink-0">
+        {/* Brand Header */}
+        <div className="h-16 px-6 flex items-center justify-between border-b border-[#242426]">
+          <Link to="/" className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-lg bg-[#bec8ff] flex items-center justify-center text-[#0c0c0c] font-bold text-sm">
+              T
             </div>
-            <div className="min-w-0 flex-1">
-              <span className="block text-[11px] uppercase tracking-wider text-[#a1a1aa] font-semibold">
-                TU LOCAL
+            <div>
+              <span className="font-bold text-base tracking-tight text-[#f1f1ee] block leading-none">
+                toque™
               </span>
-              <span className="block text-sm font-bold text-[#f1f1ee] truncate">
-                {business?.name || 'Café La Esquina'}
+              <span className="text-[11px] text-[#a1a1aa] font-medium">
+                Panel Comercio
               </span>
             </div>
-          </div>
-
-          {/* Navegación por Secciones: SERVICIO */}
-          <div className="text-[11px] font-semibold text-[#a1a1aa] px-4 mt-4 mb-2 uppercase tracking-wider">
-            SERVICIO
-          </div>
-          <nav className="space-y-1">
-            {serviceItems.map((item) => {
-              const Icon = item.icon;
-              const active = isItemActive(item);
-              return (
-                <NavLink
-                  key={item.to}
-                  to={item.to}
-                  className={`mx-3 px-3.5 py-2.5 rounded-xl text-sm font-medium flex items-center gap-3 transition-colors ${
-                    active
-                      ? 'bg-[#bec8ff] text-[#0c0c0c] font-semibold'
-                      : 'text-[#a1a1aa] hover:text-[#f1f1ee] hover:bg-[#18181b]'
-                  }`}
-                >
-                  <Icon className="w-4 h-4 shrink-0" />
-                  <span className="truncate">{item.label}</span>
-                </NavLink>
-              );
-            })}
-          </nav>
-
-          {/* Navegación por Secciones: CONFIGURACIÓN */}
-          <div className="text-[11px] font-semibold text-[#a1a1aa] px-4 mt-5 mb-2 uppercase tracking-wider">
-            CONFIGURACIÓN
-          </div>
-          <nav className="space-y-1 pb-4">
-            {configItems.map((item) => {
-              const Icon = item.icon;
-              const active = isItemActive(item);
-              return (
-                <NavLink
-                  key={item.to}
-                  to={item.to}
-                  className={`mx-3 px-3.5 py-2.5 rounded-xl text-sm font-medium flex items-center gap-3 transition-colors ${
-                    active
-                      ? 'bg-[#bec8ff] text-[#0c0c0c] font-semibold'
-                      : 'text-[#a1a1aa] hover:text-[#f1f1ee] hover:bg-[#18181b]'
-                  }`}
-                >
-                  <Icon className="w-4 h-4 shrink-0" />
-                  <span className="truncate">{item.label}</span>
-                </NavLink>
-              );
-            })}
-          </nav>
+          </Link>
         </div>
 
-        {/* Footer fijo del Sidebar */}
-        <a
-          href="https://wa.me/5491100000000"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="border-t border-[#242426] p-4 flex items-center gap-3 hover:bg-[#141416] transition-colors"
-        >
-          <div className="bg-[#2fb36a]/20 text-[#34d399] p-2.5 rounded-xl shrink-0">
-            <MessageCircle className="w-5 h-5" />
-          </div>
-          <div className="min-w-0">
-            <p className="text-xs font-bold text-[#f1f1ee] leading-tight">¿Necesitás ayuda?</p>
+        {/* Business Pill */}
+        <div className="p-4 border-b border-[#242426]">
+          <div className="p-3 rounded-xl bg-[#18181b] border border-[#28282a]">
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-xs font-semibold text-[#f1f1ee] truncate">
+                {business?.name || 'Café & Panadería La Esquina'}
+              </p>
+              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-[#bec8ff]/15 text-[#bec8ff] shrink-0">
+                {roleBadgeLabel}
+              </span>
+            </div>
             <p className="text-[11px] text-[#a1a1aa] truncate mt-0.5">
-              Soporte 24/7 por WhatsApp
+              {user?.name || 'Martín Gómez'}
             </p>
           </div>
-        </a>
+        </div>
+
+        {/* Navigation Links */}
+        <nav className="flex-1 p-3 space-y-1">
+          {visibleNavItems.map((item) => {
+            const Icon = item.icon;
+            return (
+              <NavLink
+                key={item.to}
+                to={item.to}
+                className={({ isActive }) =>
+                  `flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-sm font-medium transition-colors duration-150 ${
+                    isActive
+                      ? 'bg-[#bec8ff] text-[#0c0c0c] font-bold'
+                      : 'text-[#a1a1aa] hover:bg-[#18181b] hover:text-[#f1f1ee]'
+                  }`
+                }
+              >
+                <Icon className="w-4 h-4 shrink-0" />
+                <span>{item.label}</span>
+              </NavLink>
+            );
+          })}
+
+          {currentRole === 'superadmin' && (
+            <NavLink
+              to="/admin"
+              className={({ isActive }) =>
+                `flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-sm font-medium transition-colors duration-150 mt-2 border border-[#bec8ff]/30 ${
+                  isActive
+                    ? 'bg-[#bec8ff] text-[#0c0c0c] font-bold'
+                    : 'bg-[#bec8ff]/10 text-[#bec8ff] hover:bg-[#bec8ff]/20'
+                }`
+              }
+            >
+              <ShieldCheck className="w-4 h-4 shrink-0" />
+              <span>Super Admin Global</span>
+            </NavLink>
+          )}
+        </nav>
+
+        {/* Quick Actions Footer */}
+        <div className="p-4 border-t border-[#242426] space-y-2">
+          <Link
+            to="/caja"
+            className="flex items-center justify-between w-full px-3.5 py-2.5 rounded-xl bg-[#18181b] hover:bg-[#222226] text-xs font-semibold text-[#f1f1ee] border border-[#28282a] transition-colors"
+          >
+            <span className="flex items-center gap-2">
+              <CreditCard className="w-4 h-4 text-[#2fb36a]" />
+              Ir a Caja
+            </span>
+            <span className="text-[10px] bg-[#2fb36a]/20 text-[#34d399] px-2 py-0.5 rounded-full font-bold">
+              POS
+            </span>
+          </Link>
+
+          <button
+            type="button"
+            onClick={handleLogout}
+            className="flex items-center gap-2.5 w-full px-3.5 py-2 rounded-xl text-xs font-medium text-[#a1a1aa] hover:text-[#f1f1ee] hover:bg-[#18181b] transition-colors cursor-pointer"
+          >
+            <LogOut className="w-4 h-4" />
+            <span>Cerrar sesión</span>
+          </button>
+        </div>
       </aside>
 
-      {/* 2. ÁREA PRINCIPAL (TOP HEADER + MAIN) */}
-      <div className="flex-1 flex flex-col min-w-0 bg-[#000000] pb-20 md:pb-10">
-        {/* Top Header */}
-        <header className="h-16 border-b border-[#242426] bg-[#000000] px-4 sm:px-8 flex items-center justify-between sticky top-0 z-10">
-          <div className="flex items-center gap-2 min-w-0">
-            <span className="font-semibold text-sm sm:text-base text-[#f1f1ee] truncate">
-              {greeting}
-            </span>
-            <span className="hidden sm:inline text-sm text-[#a1a1aa]">
-              · {formattedDate}
-            </span>
-          </div>
-
+      {/* Main Content Area */}
+      <div className="flex-1 flex flex-col min-w-0">
+        {/* Top Bar (Mobile + Desktop Quick Links) */}
+        <header className="h-16 px-4 sm:px-8 border-b border-[#242426] bg-[#111113] flex items-center justify-between sticky top-0 z-20">
           <div className="flex items-center gap-3">
             <button
               type="button"
-              onClick={() => setDarkMode((prev) => !prev)}
-              aria-label="Cambiar tema"
-              title="Cambiar tema"
-              className="w-9 h-9 rounded-xl border border-[#242426] bg-[#111113] hover:bg-[#18181b] text-[#a1a1aa] hover:text-[#f1f1ee] flex items-center justify-center transition-colors cursor-pointer"
+              onClick={() => setMobileOpen(true)}
+              className="md:hidden p-2 rounded-lg text-[#f1f1ee] hover:bg-[#18181b]"
+              aria-label="Abrir menú"
             >
-              {darkMode ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+              <Menu className="w-5 h-5" />
+            </button>
+            <div className="md:hidden flex items-center gap-2">
+              <div className="w-7 h-7 rounded-lg bg-[#bec8ff] flex items-center justify-center text-[#0c0c0c] font-bold text-xs">
+                T
+              </div>
+              <span className="font-bold text-sm text-[#f1f1ee]">toque™</span>
+            </div>
+            <div className="hidden md:flex items-center gap-2.5">
+              <span className="text-sm font-semibold text-[#f1f1ee]">
+                {business?.name || 'Café & Panadería La Esquina'}
+              </span>
+              <span className="text-[11px] font-semibold px-2.5 py-0.5 rounded-full bg-[#18181b] border border-[#28282a] text-[#bec8ff]">
+                Nivel: {roleBadgeLabel}
+              </span>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2.5">
+            {/* Botón Modo Oscuro / Claro (Solo icono, sin texto) */}
+            <button
+              type="button"
+              onClick={toggleTheme}
+              title={isDark ? 'Cambiar a modo claro' : 'Cambiar a modo oscuro'}
+              aria-label="Cambiar modo de color"
+              className="w-9 h-9 rounded-xl bg-[#18181b] border border-[#28282a] hover:border-[#bec8ff] text-[#f1f1ee] flex items-center justify-center transition-colors cursor-pointer"
+            >
+              {isDark ? (
+                <Sun className="w-4 h-4 text-[#bec8ff]" />
+              ) : (
+                <Moon className="w-4 h-4 text-[#0c0c0c]" />
+              )}
             </button>
 
             <Link
               to="/caja"
-              className="hidden sm:inline-flex border border-[#242426] bg-[#111113] hover:bg-[#18181b] text-[#bec8ff] text-xs font-semibold px-3.5 py-2 rounded-xl items-center gap-2 transition-colors"
+              className="md:hidden inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#bec8ff] text-[#0c0c0c] text-xs font-bold"
             >
               <CreditCard className="w-3.5 h-3.5" />
-              <span>Abrir Caja</span>
+              Caja
             </Link>
-
-            <Link
-              to={`/h/${primaryCartelCode}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="border border-[#242426] bg-[#111113] hover:bg-[#18181b] text-[#f1f1ee] text-xs font-medium px-3.5 py-2 rounded-xl flex items-center gap-2 transition-colors"
-            >
-              <span>Ver mi cartel ↗</span>
-            </Link>
-
-            <div className="hidden sm:block h-6 w-px bg-[#242426]" />
-
-            <div className="hidden sm:flex items-center gap-2.5">
-              <div className="w-8 h-8 rounded-full bg-[#18181b] border border-[#242426] text-[#f1f1ee] text-xs font-bold flex items-center justify-center">
-                {userInitial}
-              </div>
-              <div className="leading-tight">
-                <p className="text-xs font-semibold text-[#f1f1ee] max-w-[160px] truncate">
-                  {user?.email || 'comercio@toque.ar'}
-                </p>
-                <p className="text-[11px] text-[#a1a1aa]">{userRoleLabel}</p>
-              </div>
-            </div>
-
-            <button
-              type="button"
-              onClick={handleLogout}
-              title="Cerrar sesión"
-              aria-label="Cerrar sesión"
-              className="w-9 h-9 rounded-xl border border-[#242426] bg-[#111113] hover:bg-[#18181b] text-[#a1a1aa] hover:text-[#f1f1ee] flex items-center justify-center transition-colors cursor-pointer"
-            >
-              <LogOut className="w-4 h-4" />
-            </button>
           </div>
         </header>
 
-        {/* Contenido Principal */}
-        <main className="p-4 sm:p-6 lg:p-8 max-w-6xl w-full mx-auto bg-[#000000]">
+        {/* Mobile Drawer */}
+        {mobileOpen && (
+          <div className="fixed inset-0 z-50 md:hidden flex">
+            <div
+              className="fixed inset-0 bg-black/70"
+              onClick={() => setMobileOpen(false)}
+            />
+            <div className="relative w-72 max-w-[85vw] bg-[#111113] border-r border-[#242426] h-full flex flex-col z-10">
+              <div className="h-16 px-5 flex items-center justify-between border-b border-[#242426]">
+                <div className="flex items-center gap-2">
+                  <div className="w-7 h-7 rounded-lg bg-[#bec8ff] flex items-center justify-center text-[#0c0c0c] font-bold text-xs">
+                    T
+                  </div>
+                  <span className="font-bold text-base text-[#f1f1ee]">toque™</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={toggleTheme}
+                    aria-label="Cambiar modo de color"
+                    className="p-2 rounded-lg bg-[#18181b] border border-[#28282a] text-[#f1f1ee]"
+                  >
+                    {isDark ? (
+                      <Sun className="w-4 h-4 text-[#bec8ff]" />
+                    ) : (
+                      <Moon className="w-4 h-4 text-[#0c0c0c]" />
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setMobileOpen(false)}
+                    className="p-2 rounded-lg text-[#a1a1aa] hover:bg-[#18181b]"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+              </div>
+
+              <div className="p-4 border-b border-[#242426]">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-xs font-semibold text-[#f1f1ee] truncate">
+                    {business?.name || 'Café & Panadería La Esquina'}
+                  </p>
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-[#bec8ff]/15 text-[#bec8ff]">
+                    {roleBadgeLabel}
+                  </span>
+                </div>
+                <p className="text-[11px] text-[#a1a1aa]">{user?.name}</p>
+              </div>
+
+              <nav className="flex-1 p-3 space-y-1">
+                {visibleNavItems.map((item) => {
+                  const Icon = item.icon;
+                  return (
+                    <NavLink
+                      key={item.to}
+                      to={item.to}
+                      onClick={() => setMobileOpen(false)}
+                      className={({ isActive }) =>
+                        `flex items-center gap-3 px-3.5 py-3 rounded-xl text-sm font-medium ${
+                          isActive
+                            ? 'bg-[#bec8ff] text-[#0c0c0c] font-bold'
+                            : 'text-[#a1a1aa] hover:bg-[#18181b] hover:text-[#f1f1ee]'
+                        }`
+                      }
+                    >
+                      <Icon className="w-4 h-4" />
+                      <span>{item.label}</span>
+                    </NavLink>
+                  );
+                })}
+              </nav>
+
+              <div className="p-4 border-t border-[#242426] space-y-2">
+                <button
+                  type="button"
+                  onClick={handleLogout}
+                  className="flex items-center gap-2 w-full px-3.5 py-2.5 rounded-xl text-xs font-medium text-[#a1a1aa] hover:text-[#f1f1ee]"
+                >
+                  <LogOut className="w-4 h-4" />
+                  Cerrar sesión
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Page Body */}
+        <main className="flex-1 p-4 sm:p-8 max-w-6xl w-full mx-auto">
           <Outlet />
         </main>
       </div>
-
-      {/* 3. NAVEGACIÓN MÓVIL INFERIOR */}
-      <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-[#0c0c0c] border-t border-[#242426] z-30 px-2 py-1.5 flex items-center justify-around">
-        {serviceItems.slice(0, 4).map((item) => {
-          const Icon = item.icon;
-          const active = isItemActive(item);
-          return (
-            <NavLink
-              key={item.to}
-              to={item.to}
-              className={`flex flex-col items-center justify-center p-1.5 rounded-xl min-w-[56px] text-[10px] font-medium transition-colors ${
-                active ? 'text-[#bec8ff] font-semibold' : 'text-[#a1a1aa]'
-              }`}
-            >
-              <Icon className="w-4 h-4 mb-0.5" />
-              <span className="truncate max-w-[64px]">{item.label}</span>
-            </NavLink>
-          );
-        })}
-        <NavLink
-          to="/panel/equipo"
-          className={({ isActive }) =>
-            `flex flex-col items-center justify-center p-1.5 rounded-xl min-w-[56px] text-[10px] font-medium transition-colors ${
-              isActive ? 'text-[#bec8ff] font-semibold' : 'text-[#a1a1aa]'
-            }`
-          }
-        >
-          <Users className="w-4 h-4 mb-0.5" />
-          <span>Equipo</span>
-        </NavLink>
-        <NavLink
-          to="/caja"
-          className="flex flex-col items-center justify-center p-1.5 rounded-xl min-w-[56px] text-[10px] font-medium text-[#34d399]"
-        >
-          <CreditCard className="w-4 h-4 mb-0.5" />
-          <span>Caja</span>
-        </NavLink>
-      </nav>
     </div>
   );
 };

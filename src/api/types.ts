@@ -1,6 +1,7 @@
 /**
  * Toque — Smart Receipt & Post-Purchase Hub: Definición de Tipos
- * Estructuras de datos 100% reales con soporte RLS, Equipo, WalletWallet y Super Admin.
+ * Estructuras de datos 100% reales con soporte RLS, UUID v4 único, Equipo, WalletWallet,
+ * Red de Beneficios estilo Pasito y Bóveda del Consumidor ("Mi Toque").
  */
 
 export type CartelRole = 'resena' | 'caja';
@@ -61,6 +62,7 @@ export interface WalletPassResponse {
 
 export interface PartnerReferral {
   id: string;
+  uuid?: string;
   partnerCode: string;
   merchantName: string;
   merchantEmail: string;
@@ -79,6 +81,10 @@ export interface HubProduct {
   title: string;
   price?: number;
   url?: string;
+  imageUrl?: string;
+  barcode?: string;
+  universalCode?: string;
+  featuredInHub?: boolean;
   description?: string;
 }
 
@@ -106,10 +112,13 @@ export interface HubConfig {
   products: HubProduct[];
   details: HubDetails;
   showToqueFooter: boolean;
+  planPaid?: boolean;
+  networkEnabled?: boolean;
 }
 
 export interface Cartel {
   id: string;
+  uuid?: string;
   code: string;
   pin: string;
   businessId?: string;
@@ -127,6 +136,7 @@ export interface Cartel {
   createdAt: string;
   activatedAt?: string;
   lastScannedAt?: string;
+  batchId?: string;
 }
 
 export interface SaleItem {
@@ -136,11 +146,12 @@ export interface SaleItem {
   quantity: number;
 }
 
-export type PaymentMethod = 'mp_qr' | 'cash' | 'card_manual';
+export type PaymentMethod = 'mp_qr' | 'mercadopago' | 'cash' | 'card_manual' | 'card' | 'transfer';
 export type SaleStatus = 'pending' | 'paid' | 'cancelled' | 'expired';
 
 export interface Sale {
   id: string;
+  uuid?: string;
   businessId: string;
   cartelId: string;
   cartelCode?: string;
@@ -151,6 +162,7 @@ export interface Sale {
   items: SaleItem[];
   method: PaymentMethod;
   status: SaleStatus;
+  note?: string;
   createdAt: string;
   paidAt?: string;
   cashierName?: string;
@@ -161,6 +173,7 @@ export type ReceiptStatus = 'ready' | 'claimed' | 'expired' | 'cancelled';
 
 export interface Receipt {
   id: string;
+  uuid?: string;
   saleId: string;
   businessId: string;
   cartelCode: string;
@@ -199,6 +212,7 @@ export interface ClubConfig {
 
 export interface ClubMember {
   id: string;
+  uuid?: string;
   businessId?: string;
   name?: string;
   contact: string;
@@ -215,24 +229,79 @@ export interface ClubMember {
 
 export interface BusinessProfile {
   id: string;
+  uuid?: string;
   name: string;
   ownerName: string;
   email: string;
   ownerUid?: string;
   reviewUrl?: string;
+  planPaid?: boolean;
+  networkEnabled?: boolean;
   createdAt: string;
   scansCount?: number;
   reviewClicksCount?: number;
 }
 
+export type NetworkActivationFormat =
+  | 'cross_benefit'
+  | 'tap_challenge'
+  | 'map_pin'
+  | 'receipt_banner';
+
+export interface NetworkActivation {
+  id: string;
+  uuid?: string;
+  tenantId: string;
+  businessId?: string;
+  merchantName: string;
+  merchantCategory?: string;
+  distanceLabel?: string;
+  formatType: NetworkActivationFormat;
+  title: string;
+  discountText: string;
+  terms: string;
+  active: boolean;
+  createdAt?: string;
+}
+
+export type ConsumerAgeGroup = 'teen' | 'adult' | 'all';
+
+export interface ConsumerUser {
+  id: string;
+  uuid?: string;
+  emailOrPhone: string;
+  displayName: string;
+  ageGroup: ConsumerAgeGroup;
+  consentSaveReceipts: boolean;
+  consentMarketingNetwork: boolean;
+  createdAt: string;
+  syncedAt?: string;
+}
+
+export interface ConsumerReceipt {
+  id: string;
+  uuid?: string;
+  consumerId: string;
+  tenantId: string;
+  merchantName: string;
+  cartelCode?: string;
+  amountArs: number;
+  discountSavedArs: number;
+  category: string;
+  receiptNote: string;
+  createdAt: string;
+}
+
 export interface PublicHub {
   business: {
     id: string;
+    uuid?: string;
     name: string;
     logoUrl?: string;
   };
   cartel: {
     id: string;
+    uuid?: string;
     code: string;
     name: string;
     role: CartelRole;
@@ -244,18 +313,21 @@ export interface PublicHub {
   reviewUrl: string;
   blocks: HubBlockConfig[];
   receipt?: Receipt | null;
+  activeReceipt?: Receipt | null;
   club?: {
     config: ClubConfig;
     member?: ClubMember | null;
   } | null;
   config: HubConfig;
   smartHubConfig?: SmartHubConfig;
+  crossBenefits?: NetworkActivation[];
 }
 
 export type UserRole = 'owner' | 'manager' | 'cashier' | 'superadmin';
 
 export interface User {
   id: string;
+  uuid?: string;
   email: string;
   name: string;
   businessId: string;
@@ -267,6 +339,7 @@ export interface User {
 
 export interface TeamMember {
   id: string;
+  uuid?: string;
   businessId: string;
   name: string;
   email: string;
@@ -293,10 +366,14 @@ export interface DashboardSummary {
   totalReceiptsCount: number;
   claimedReceiptsCount: number;
   newClubMembersCount: number;
+  clubMembersCount: number;
   walletPassesCount: number;
   scansCount: number;
   reviewButtonClicks: number;
   teamMembersCount: number;
+  activeCartelesCount: number;
+  totalCartelesCount: number;
+  recentSales: Sale[];
 }
 
 export interface SuperAdminSummary {
@@ -322,4 +399,15 @@ export interface SuperAdminSummary {
   >;
   carteles: Cartel[];
   recentSales: Sale[];
+}
+
+export interface CartelBatch {
+  id: string;
+  uuid?: string;
+  name?: string;
+  prefix?: string;
+  count: number;
+  createdAt: string;
+  status?: 'pending' | 'printed' | 'delivered';
+  carteles?: Array<{ code: string; pin?: string; status?: string; shortUrl?: string }>;
 }

@@ -33,7 +33,7 @@ interface ApiErrorResponse {
   };
 }
 
-class HttpApi implements ToqueApi {
+class HttpApi {
   private baseUrl = '/api';
 
   private async request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {

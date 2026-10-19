@@ -2,10 +2,11 @@
   "entities": {
     "business": {
       "title": "Business",
-      "description": "Comercio registrado en Toque con configuración de Hub, Club y estado de pasarela.",
+      "description": "Comercio registrado en Toque con configuración de Hub, Club, UUID único y aislamiento por organización.",
       "type": "object",
       "properties": {
         "id": { "type": "string", "maxLength": 64 },
+        "uuid": { "type": "string", "maxLength": 64 },
         "name": { "type": "string", "maxLength": 100 },
         "ownerName": { "type": "string", "maxLength": 100 },
         "email": { "type": "string", "format": "email", "maxLength": 120 },
@@ -23,6 +24,7 @@
       "type": "object",
       "properties": {
         "id": { "type": "string", "maxLength": 64 },
+        "uuid": { "type": "string", "maxLength": 64 },
         "code": { "type": "string", "maxLength": 32 },
         "pin": { "type": "string", "maxLength": 16 },
         "businessId": { "type": "string", "maxLength": 64 },
@@ -47,6 +49,7 @@
       "type": "object",
       "properties": {
         "id": { "type": "string", "maxLength": 64 },
+        "uuid": { "type": "string", "maxLength": 64 },
         "businessId": { "type": "string", "maxLength": 64 },
         "cartelId": { "type": "string", "maxLength": 64 },
         "cartelCode": { "type": "string", "maxLength": 32 },
@@ -69,6 +72,7 @@
       "type": "object",
       "properties": {
         "id": { "type": "string", "maxLength": 64 },
+        "uuid": { "type": "string", "maxLength": 64 },
         "saleId": { "type": "string", "maxLength": 64 },
         "businessId": { "type": "string", "maxLength": 64 },
         "cartelCode": { "type": "string", "maxLength": 32 },
@@ -89,6 +93,7 @@
       "type": "object",
       "properties": {
         "id": { "type": "string", "maxLength": 64 },
+        "uuid": { "type": "string", "maxLength": 64 },
         "businessId": { "type": "string", "maxLength": 64 },
         "name": { "type": "string", "maxLength": 80 },
         "contact": { "type": "string", "maxLength": 100 },
@@ -105,10 +110,11 @@
     },
     "teamMember": {
       "title": "TeamMember",
-      "description": "Colaborador del comercio con rol y permisos RLS asignados.",
+      "description": "Colaborador del comercio con rol (Dueño, Encargado, Cajero) y permisos RLS asignados.",
       "type": "object",
       "properties": {
         "id": { "type": "string", "maxLength": 64 },
+        "uuid": { "type": "string", "maxLength": 64 },
         "businessId": { "type": "string", "maxLength": 64 },
         "name": { "type": "string", "maxLength": 80 },
         "email": { "type": "string", "format": "email", "maxLength": 120 },
@@ -120,6 +126,59 @@
         "addedByEmail": { "type": "string", "maxLength": 120 }
       },
       "required": ["id", "businessId", "name", "email", "role", "status", "addedAt"]
+    },
+    "networkActivation": {
+      "title": "NetworkActivation",
+      "description": "Formato de activación de comercio en la Red Toque estilo Pasito.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 64 },
+        "uuid": { "type": "string", "maxLength": 64 },
+        "tenantId": { "type": "string", "maxLength": 64 },
+        "businessId": { "type": "string", "maxLength": 64 },
+        "merchantName": { "type": "string", "maxLength": 100 },
+        "formatType": { "type": "string", "enum": ["cross_benefit", "tap_challenge", "map_pin", "receipt_banner"] },
+        "title": { "type": "string", "maxLength": 120 },
+        "discountText": { "type": "string", "maxLength": 120 },
+        "terms": { "type": "string", "maxLength": 300 },
+        "active": { "type": "boolean" },
+        "createdAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["id", "tenantId", "formatType", "title", "discountText", "active"]
+    },
+    "consumerUser": {
+      "title": "ConsumerUser",
+      "description": "Comprador registrado en Mi Billetera Toque con UUID único y consentimientos.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 64 },
+        "uuid": { "type": "string", "maxLength": 64 },
+        "emailOrPhone": { "type": "string", "maxLength": 120 },
+        "displayName": { "type": "string", "maxLength": 100 },
+        "ageGroup": { "type": "string", "enum": ["teen", "adult", "all"] },
+        "consentSaveReceipts": { "type": "boolean" },
+        "consentMarketingNetwork": { "type": "boolean" },
+        "createdAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["id", "emailOrPhone", "createdAt"]
+    },
+    "consumerReceipt": {
+      "title": "ConsumerReceipt",
+      "description": "Comprobante o visita guardada en la Bóveda del Consumidor (Mi Toque).",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 64 },
+        "uuid": { "type": "string", "maxLength": 64 },
+        "consumerId": { "type": "string", "maxLength": 64 },
+        "tenantId": { "type": "string", "maxLength": 64 },
+        "merchantName": { "type": "string", "maxLength": 100 },
+        "amountArs": { "type": "number" },
+        "discountSavedArs": { "type": "number" },
+        "category": { "type": "string", "maxLength": 64 },
+        "receiptNote": { "type": "string", "maxLength": 240 },
+        "createdAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["id", "consumerId", "merchantName", "createdAt"]
     }
   },
   "firestore": {
@@ -146,6 +205,18 @@
     "/team/{teamId}": {
       "schema": "teamMember",
       "description": "Colección de colaboradores y roles RLS por comercio."
+    },
+    "/network_activations/{activationId}": {
+      "schema": "networkActivation",
+      "description": "Formatos de activación en la Red Toque por comercio."
+    },
+    "/consumer_users/{consumerId}": {
+      "schema": "consumerUser",
+      "description": "Usuarios de la Bóveda del Consumidor (Mi Toque)."
+    },
+    "/consumer_receipts/{receiptId}": {
+      "schema": "consumerReceipt",
+      "description": "Comprobantes y garantías guardados por el comprador en Mi Toque."
     }
   }
 }

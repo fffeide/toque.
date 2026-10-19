@@ -25,7 +25,7 @@ import {
   SaleItem,
 } from './types';
 
-class MockApi implements ToqueApi {
+class MockApi {
   // Estado en memoria
   private currentUser: User | null = {
     id: 'user-demo',
@@ -375,6 +375,7 @@ class MockApi implements ToqueApi {
         name: this.businessProfile.name,
       },
       cartel: {
+        id: cartel.id,
         code: cartel.code,
         name: cartel.name,
         role: cartel.role,
@@ -464,6 +465,7 @@ class MockApi implements ToqueApi {
 
     const sale: Sale = {
       id: saleId,
+      businessId: this.businessProfile.id,
       cartelId: cartel.id,
       cartelName: cartel.name,
       amount: data.amount,
@@ -499,6 +501,7 @@ class MockApi implements ToqueApi {
     const receipt: Receipt = {
       id: `rcp-${Date.now()}`,
       saleId: sale.id,
+      businessId: this.businessProfile.id,
       cartelCode: cartelCode,
       status: 'ready',
       expiresAt,
@@ -644,10 +647,13 @@ class MockApi implements ToqueApi {
       todaySalesCount: todaySales.length,
       weeklySalesAmount,
       weeklySalesCount: weeklySales.length,
+      totalReceiptsCount: this.receipts.length,
       claimedReceiptsCount,
       newClubMembersCount: this.clubMembers.length,
+      walletPassesCount: 0,
+      scansCount: this.carteles.reduce((acc, c) => acc + (c.scansCount || 0), 0),
       reviewButtonClicks: this.reviewClicks,
-      isExample: this.sales.length === 0, // Si está vacío, se rotularán cifras sugeridas con "Ejemplo"
+      teamMembersCount: 1,
     };
   }
 

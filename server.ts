@@ -2,6 +2,7 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import crypto from 'node:crypto';
 import dotenv from 'dotenv';
 
 dotenv.config();
@@ -31,6 +32,11 @@ const MIME_TYPES: Record<string, string> = {
   '.txt': 'text/plain; charset=utf-8',
 };
 
+// Almacenamiento en memoria del servidor de previsualización (espejo de D1 para /api/consumer/sync y /api/network/activations)
+const memoryConsumerUsers = new Map<string, any>();
+const memoryConsumerReceipts = new Map<string, any[]>();
+const memoryNetworkActivations = new Map<string, any>();
+
 function readBody(req: http.IncomingMessage): Promise<string> {
   return new Promise((resolve, reject) => {
     let body = '';
@@ -48,14 +54,29 @@ function readBody(req: http.IncomingMessage): Promise<string> {
 
 async function startServer() {
   let vite: any = null;
-  const isProd = process.env.NODE_ENV === 'production' && fs.existsSync(path.join(DIST_DIR, 'index.html'));
+  let viteInitPromise: Promise<any> | null = null;
 
-  if (!isProd) {
-    const { createServer: createViteServer } = await import('vite');
-    vite = await createViteServer({
-      server: { middlewareMode: true, hmr: false },
-      appType: 'spa',
-    });
+  const getVite = () => {
+    if (vite) return Promise.resolve(vite);
+    if (!viteInitPromise) {
+      viteInitPromise = import('vite')
+        .then(({ createServer: createViteServer }) =>
+          createViteServer({
+            server: { middlewareMode: true, hmr: false },
+            appType: 'spa',
+          })
+        )
+        .then((v) => {
+          vite = v;
+          return v;
+        })
+        .catch(() => null);
+    }
+    return viteInitPromise;
+  };
+
+  if (!fs.existsSync(path.join(DIST_DIR, 'index.html'))) {
+    getVite();
   }
 
   const server = http.createServer(async (req, res) => {
@@ -71,7 +92,9 @@ async function startServer() {
 
     // 2. Estado de WalletWallet (NUNCA expone la API key al cliente)
     if (pathname === '/api/wallet/status' && req.method === 'GET') {
-      const hasKey = Boolean(process.env.WALLETWALLET_API_KEY && process.env.WALLETWALLET_API_KEY.trim().length > 0);
+      const hasKey = Boolean(
+        process.env.WALLETWALLET_API_KEY && process.env.WALLETWALLET_API_KEY.trim().length > 0
+      );
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
       res.end(
         JSON.stringify({
@@ -83,7 +106,88 @@ async function startServer() {
       return;
     }
 
-    // 3. Proxy seguro hacia https://api.walletwallet.dev (POST /api/wallet/pass y /api/wallet/create)
+    // 3. Sincronización Híbrida de Bóveda del Consumidor ("Mi Toque"): /api/consumer/sync
+    if (pathname === '/api/consumer/sync' && req.method === 'POST') {
+      try {
+        const raw = await readBody(req);
+        const body = raw ? JSON.parse(raw) : {};
+        const consumerId = body.user?.id || crypto.randomUUID();
+        const emailOrPhone = (body.user?.emailOrPhone || '').trim().toLowerCase();
+        const displayName = (body.user?.displayName || 'Comprador Toque').trim();
+        const ageGroup = body.user?.ageGroup || 'all';
+        const consentSaveReceipts = body.user?.consentSaveReceipts !== false;
+        const consentMarketingNetwork = body.user?.consentMarketingNetwork !== false;
+        const createdAt = body.user?.createdAt || new Date().toISOString();
+        const receipts = Array.isArray(body.receipts) ? body.receipts : [];
+
+        const userRecord = {
+          id: consumerId,
+          uuid: consumerId,
+          emailOrPhone,
+          displayName,
+          ageGroup,
+          consentSaveReceipts,
+          consentMarketingNetwork,
+          createdAt,
+          syncedAt: new Date().toISOString(),
+        };
+
+        memoryConsumerUsers.set(consumerId, userRecord);
+        if (emailOrPhone) {
+          memoryConsumerUsers.set(emailOrPhone, userRecord);
+        }
+        memoryConsumerReceipts.set(consumerId, receipts);
+
+        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(
+          JSON.stringify({
+            success: true,
+            consumerId,
+            recoveryCode: `TQ-${consumerId.slice(0, 8).toUpperCase()}`,
+            user: userRecord,
+            receiptsCount: receipts.length,
+          })
+        );
+        return;
+      } catch (err: any) {
+        res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ success: false, error: err?.message || 'Sync error' }));
+        return;
+      }
+    }
+
+    if (pathname === '/api/consumer/sync' && req.method === 'GET') {
+      const contact = (url.searchParams.get('contact') || '').trim().toLowerCase();
+      const userRecord = memoryConsumerUsers.get(contact);
+      if (userRecord) {
+        const receipts = memoryConsumerReceipts.get(userRecord.id) || [];
+        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ found: true, user: userRecord, receipts }));
+        return;
+      }
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ found: false }));
+      return;
+    }
+
+    // 4. Activaciones en Red Toque: /api/network/activations
+    if (pathname === '/api/network/activations' && req.method === 'POST') {
+      try {
+        const raw = await readBody(req);
+        const body = raw ? JSON.parse(raw) : {};
+        const id = body.id || `act-${Date.now()}`;
+        memoryNetworkActivations.set(id, body);
+        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ success: true, activation: body }));
+        return;
+      } catch (err: any) {
+        res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ success: false, error: err?.message }));
+        return;
+      }
+    }
+
+    // 5. Proxy seguro hacia https://api.walletwallet.dev (POST /api/wallet/pass y /api/wallet/create)
     if (
       (pathname === '/api/wallet/pass' || pathname === '/api/wallet/create') &&
       req.method === 'POST'
@@ -92,7 +196,7 @@ async function startServer() {
         const raw = await readBody(req);
         const body = raw ? JSON.parse(raw) : {};
         const businessName = (body.businessName || 'Comercio Toque').slice(0, 80);
-        const brandColor = body.brandColor || '#bec8ff';
+        const brandColor = body.brandColor || '#D95B26';
         const stamps = typeof body.stamps === 'number' ? body.stamps : 1;
         const stampsRequired = typeof body.stampsRequired === 'number' ? body.stampsRequired : 5;
         const rewardText = (body.rewardText || 'Beneficio exclusivo del Club').slice(0, 120);
@@ -108,8 +212,8 @@ async function startServer() {
             merchantName: businessName,
             organizationName: businessName,
             description: `Tarjeta Club ${businessName}`,
-            backgroundColor: '#0c0c0c',
-            labelColor: '#bec8ff',
+            backgroundColor: '#0A0A0A',
+            labelColor: '#D95B26',
             foregroundColor: '#f1f1ee',
             headerField: {
               key: 'stamps',
@@ -154,7 +258,10 @@ async function startServer() {
 
             if (walletRes.ok) {
               const passData: any = await walletRes.json();
-              const passId = passData.id || passData.passId || `ww-${code.toLowerCase()}-${Date.now().toString(36)}`;
+              const passId =
+                passData.id ||
+                passData.passId ||
+                `ww-${code.toLowerCase()}-${Date.now().toString(36)}`;
               res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
               res.end(
                 JSON.stringify({
@@ -220,7 +327,7 @@ async function startServer() {
       }
     }
 
-    // 4. Endpoint /api/telemetry/scan
+    // 6. Endpoint /api/telemetry/scan
     if (pathname === '/api/telemetry/scan' && req.method === 'POST') {
       try {
         await readBody(req);
@@ -234,17 +341,9 @@ async function startServer() {
       }
     }
 
-    // 5. En desarrollo, delegar a Vite middleware
-    if (vite) {
-      vite.middlewares(req, res, () => {
-        res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
-        res.end('Not Found');
-      });
-      return;
-    }
-
-    // 6. En producción, servir archivos estáticos de dist/
-    if (req.method === 'GET' || req.method === 'HEAD') {
+    // 7. Si existe dist/index.html compilado, servir archivos estáticos directamente
+    const indexPath = path.join(DIST_DIR, 'index.html');
+    if (fs.existsSync(indexPath) && (req.method === 'GET' || req.method === 'HEAD')) {
       const cleanPath = path.normalize(pathname).replace(/^(\.\.[\/\\])+/, '');
       const filePath = path.join(DIST_DIR, cleanPath);
 
@@ -263,27 +362,38 @@ async function startServer() {
         return;
       }
 
-      const indexPath = path.join(DIST_DIR, 'index.html');
-      if (fs.existsSync(indexPath)) {
-        res.writeHead(200, {
-          'Content-Type': 'text/html; charset=utf-8',
-          'Cache-Control': 'no-cache',
-        });
-        if (req.method === 'HEAD') {
-          res.end();
-        } else {
-          fs.createReadStream(indexPath).pipe(res);
-        }
-        return;
+      res.writeHead(200, {
+        'Content-Type': 'text/html; charset=utf-8',
+        'Cache-Control': 'no-cache',
+      });
+      if (req.method === 'HEAD') {
+        res.end();
+      } else {
+        fs.createReadStream(indexPath).pipe(res);
       }
+      return;
+    }
+
+    // 8. En desarrollo (cuando no hay dist/), delegar a Vite middleware
+    const v = await getVite();
+    if (v) {
+      v.middlewares(req, res, () => {
+        res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+        res.end('Not Found');
+      });
+      return;
     }
 
     res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
     res.end('Not Found');
   });
 
+  server.on('upgrade', (req, socket) => {
+    socket.destroy();
+  });
+
   server.listen(PORT, '0.0.0.0', () => {
-    console.log(`Servidor Toque activo en http://0.0.0.0:${PORT}`);
+    console.log(`Server running on http://0.0.0.0:${PORT}`);
   });
 }
 

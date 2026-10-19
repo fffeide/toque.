@@ -109,7 +109,7 @@ export const AccountSettingsView: React.FC = () => {
               className="block text-[11px] uppercase tracking-wider font-semibold text-[#8E8E93] mb-1.5"
               htmlFor="rUrl"
             >
-              Enlace oficial de Google Reviews
+              Enlace de Google Maps
             </label>
             <input
               id="rUrl"
@@ -120,7 +120,7 @@ export const AccountSettingsView: React.FC = () => {
               className="w-full px-3.5 py-2.5 rounded-xl border border-[#2A2A2A] bg-[#1A1A1A] text-xs text-white placeholder-[#8E8E93] focus:outline-none focus:border-[#bec8ff]"
             />
             <p className="text-[11px] text-[#8E8E93] mt-1">
-              Es el destino que se abre cuando un cliente presiona &ldquo;Dejar reseña en Google&rdquo;.
+              Es el destino que se abre cuando un cliente presiona el Botón de Google Maps.
             </p>
           </div>
 

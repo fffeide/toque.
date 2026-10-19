@@ -524,7 +524,7 @@ export const LandingView: React.FC = () => {
                 </h2>
 
                 <p className="text-sm text-[#c4c2c3] leading-relaxed">
-                  Sin imprimir ticket térmico ni pedir correos por teléfono. Con toque™, cada venta genera un comprobante no fiscal que vive 3 minutos en el cartel para que el cliente lo guarde en su galería o lo descargue en PDF.
+                  Sin imprimir ticket térmico ni pedir correos por teléfono. Con toque™, cada venta genera un comprobante no fiscal que vive 2 minutos en el cartel para que el cliente lo guarde en su galería o lo descargue en PDF.
                 </p>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 pt-2">
@@ -561,64 +561,70 @@ export const LandingView: React.FC = () => {
                 </div>
               </div>
 
-              {/* Columna derecha: tarjeta simulada del hub en teléfono */}
-              <div className="w-full max-w-xs shrink-0 rounded-[28px] p-5 bg-[#0c0c0c] border border-white/20 shadow-2xl text-[#f1f1ee] space-y-3.5">
-                <div className="flex items-center justify-between pb-3 border-b border-white/10">
+              {/* Columna derecha: tarjeta simulada del hub en teléfono (Fondo Blanco + Botones Negros) */}
+              <div className="w-full max-w-xs shrink-0 rounded-[28px] p-5 bg-[#ffffff] border border-black/15 shadow-2xl text-[#0c0c0c] space-y-3.5">
+                <div className="flex items-center justify-between pb-3 border-b border-black/10">
                   <div className="flex items-center gap-2.5">
-                    <span className="brand__mark" style={{ width: 24, height: 24, borderRadius: 6 }} aria-hidden="true" />
-                    <span className="text-xs font-semibold text-[#f1f1ee]">Café La Esquina</span>
+                    <span className="w-6 h-6 rounded-md bg-[#0c0c0c] text-[#bec8ff] font-bold text-xs flex items-center justify-center">
+                      C
+                    </span>
+                    <span className="text-xs font-bold text-[#0c0c0c]">Café La Esquina</span>
                   </div>
-                  <span className="text-[10px] font-mono text-[#9c9c98]">CAJA01</span>
+                  <span className="text-[10px] font-mono font-semibold text-[#0c0c0c] bg-[#f1f1ee] px-2 py-0.5 rounded-full border border-black/10">
+                    CAJA01
+                  </span>
                 </div>
 
                 {/* Recibo simulado */}
-                <div className="p-4 rounded-2xl bg-[#18181b] border border-white/10 space-y-2.5 text-xs">
+                <div className="p-4 rounded-2xl bg-[#f6f6f3] border border-black/10 space-y-2.5 text-xs">
                   <div className="flex items-center justify-between">
-                    <span className="text-[11px] font-medium text-[#2fb36a] flex items-center gap-1.5">
+                    <span className="text-[11px] font-semibold text-[#1f8a4c] flex items-center gap-1.5">
                       <span className="w-1.5 h-1.5 rounded-full bg-[#2fb36a]" />
                       Comprobante de compra
                     </span>
-                    <span className="text-[10px] text-[#9c9c98]">Recién cobrado</span>
+                    <span className="text-[10px] text-[#52525b]">Recién cobrado</span>
                   </div>
-                  <div className="flex justify-between items-center text-[#f1f1ee]/90">
+                  <div className="flex justify-between items-center text-[#0c0c0c]">
                     <span>Café + medialuna</span>
                     <span className="font-semibold tabular-nums">$3.800</span>
                   </div>
-                  <div className="pt-2 border-t border-white/10 flex justify-between font-semibold text-sm">
-                    <span>Total</span>
-                    <span className="tabular-nums text-[#bec8ff]">$3.800</span>
+                  <div className="pt-2 border-t border-black/10 flex justify-between items-center font-bold text-sm">
+                    <span className="text-[#0c0c0c]">Total</span>
+                    <span className="tabular-nums bg-[#0c0c0c] text-[#bec8ff] px-2 py-0.5 rounded-md font-mono">
+                      $3.800
+                    </span>
                   </div>
                   <div className="grid grid-cols-2 gap-1.5 pt-1">
-                    <span className="py-1.5 px-2 rounded-full bg-[#28282a] text-[10px] font-medium text-[#f1f1ee]/85 text-center">
+                    <span className="py-1.5 px-2 rounded-full bg-[#0c0c0c] text-[10px] font-semibold text-[#f1f1ee] text-center">
                       Guardar imagen
                     </span>
-                    <span className="py-1.5 px-2 rounded-full bg-[#28282a] text-[10px] font-medium text-[#f1f1ee]/85 text-center">
+                    <span className="py-1.5 px-2 rounded-full bg-[#0c0c0c] text-[10px] font-semibold text-[#f1f1ee] text-center">
                       Descargar PDF
                     </span>
                   </div>
-                  <p className="text-[10px] text-[#9c9c98] text-center">
+                  <p className="text-[10px] text-[#52525b] text-center">
                     Comprobante de compra. No es una factura.
                   </p>
                 </div>
 
-                {/* Botón de reseña */}
+                {/* Botón de reseña en negro con colores de la página */}
                 <div className="pt-0.5">
                   <Link
                     to="/h/CAJA01"
-                    className="w-full py-2.5 px-4 rounded-full bg-[#f1f1ee] text-[#0c0c0c] font-semibold text-xs flex items-center justify-center gap-2 shadow-sm hover:bg-white transition"
+                    className="w-full py-2.5 px-4 rounded-full bg-[#0c0c0c] text-[#f1f1ee] font-semibold text-xs flex items-center justify-center gap-2 shadow-sm hover:bg-[#222225] transition"
                   >
-                    <Star className="w-3.5 h-3.5 fill-[#0c0c0c]" />
+                    <Star className="w-3.5 h-3.5 fill-[#bec8ff] text-[#bec8ff]" />
                     <span>Dejar reseña en Google</span>
                   </Link>
                 </div>
 
                 {/* Club */}
-                <div className="p-3 rounded-2xl bg-[#18181b] border border-white/10 text-center space-y-1">
-                  <div className="flex items-center justify-center gap-1.5 text-[11px] font-semibold text-[#f1f1ee]">
-                    <Award className="w-3.5 h-3.5 text-[#bec8ff]" />
+                <div className="p-3 rounded-2xl bg-[#f6f6f3] border border-black/10 text-center space-y-1">
+                  <div className="flex items-center justify-center gap-1.5 text-[11px] font-bold text-[#0c0c0c]">
+                    <Award className="w-3.5 h-3.5 text-[#1f8a4c]" />
                     <span>Club La Esquina · 1 sello sumado</span>
                   </div>
-                  <p className="text-[10px] text-[#9c9c98]">
+                  <p className="text-[10px] text-[#52525b]">
                     Te faltan 4 sellos para tu café de regalo
                   </p>
                 </div>
@@ -949,10 +955,13 @@ export const LandingView: React.FC = () => {
                   <Link to="/h/CAJA01">Ver hub cliente (CAJA01)</Link>
                 </li>
                 <li>
-                  <Link to="/panel/conexiones">Conexiones de cobro</Link>
+                  <Link to="/toquecitos">Toquecitos (Billetera cliente)</Link>
                 </li>
                 <li>
-                  <Link to="/admin/lotes">Generador de lotes</Link>
+                  <Link to="/panel/equipo">Equipo y colaboradores</Link>
+                </li>
+                <li>
+                  <Link to="/admin">Super Admin global</Link>
                 </li>
                 <li>
                   <Link to="/registro">Crear cuenta gratis</Link>
