@@ -95,6 +95,8 @@ export interface ToqueApi {
     birthMonth?: number;
     adult?: boolean;
     marketingConsent: boolean;
+    age?: number;
+    isMinor?: boolean;
   }): Promise<{
     member: ClubMember;
     account: RecognizedClientAccount;
@@ -247,7 +249,7 @@ export interface ToqueApi {
 
   getPlanState(): Promise<PlanState>;
 
-  startTrial(planId?: 'mensual' | 'anual'): Promise<PlanState>;
+  startTrial(planId?: 'free' | 'mensual' | 'anual'): Promise<PlanState>;
 
   // Lista de Espera (Waitlist)
   joinWaitlist(data: {
@@ -332,6 +334,8 @@ export interface ToqueApi {
     name?: string;
     phone?: string;
     birthDate?: string;
+    age?: number;
+    isMinor?: boolean;
     consent: boolean;
   }): Promise<{ member: ClubMember; pointsAwarded: number; walletPass?: WalletPassResponse }>;
 
@@ -442,10 +446,22 @@ export interface ToqueApi {
 
   updateBusinessProfile(patch: Partial<BusinessProfile>): Promise<BusinessProfile>;
 
-  // Super Admin
+  // Super Admin & Equipo Toque (toque_admins)
   getSuperAdminSummary(): Promise<SuperAdminSummary>;
 
   getSuperAdminBusinessDetail(businessId: string): Promise<SuperAdminBusinessDetail>;
 
   listAllPlatformUsers(): Promise<PlatformUserRecord[]>;
+
+  listToqueAdmins(): Promise<import('./types').ToqueAdminStaff[]>;
+
+  addToqueAdmin(data: {
+    email: string;
+    name: string;
+    level?: import('./types').ToqueAdminLevel;
+    role?: import('./types').ToqueAdminLevel;
+  }): Promise<import('./types').ToqueAdminStaff>;
+
+  removeToqueAdmin(idOrEmail: string): Promise<void>;
 }
+

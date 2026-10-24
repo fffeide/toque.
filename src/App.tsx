@@ -90,11 +90,6 @@ const ClubLocalsView = lazy(() =>
 const ClubAuditView = lazy(() =>
   import('./features/panel/ClubAuditView').then((m) => ({ default: m.ClubAuditView }))
 );
-const BenefitNetworkView = lazy(() =>
-  import('./features/panel/NetworkActivationsView').then((m) => ({
-    default: m.NetworkActivationsView,
-  }))
-);
 const TeamView = lazy(() =>
   import('./features/panel/TeamView').then((m) => ({ default: m.TeamView }))
 );
@@ -106,31 +101,31 @@ const SuperAdminView = lazy(() =>
 );
 
 const PageLoader: React.FC = () => (
-  <div className="min-h-screen bg-[#000000] flex items-center justify-center p-6">
+  <div className="min-h-screen bg-[#0C0C0E] flex items-center justify-center p-6">
     <div className="max-w-sm w-full space-y-4">
-      <Skeleton className="h-10 w-44 mx-auto rounded-xl bg-[#111113]" />
-      <Skeleton className="h-44 w-full rounded-2xl bg-[#111113]" />
-      <Skeleton className="h-28 w-full rounded-2xl bg-[#111113]" />
+      <Skeleton className="h-10 w-44 mx-auto rounded-xl bg-[#141418]" />
+      <Skeleton className="h-44 w-full rounded-2xl bg-[#141418]" />
+      <Skeleton className="h-28 w-full rounded-2xl bg-[#141418]" />
     </div>
   </div>
 );
 
 const MaintenanceLockdownView: React.FC = () => (
-  <div className="min-h-screen bg-[#000000] text-[#f1f1ee] flex flex-col items-center justify-center p-6 text-center">
-    <div className="max-w-md w-full rounded-2xl bg-[#111113] border border-[#242426] p-8 space-y-4">
-      <p className="text-lg font-semibold text-[#f1f1ee]">
+  <div className="min-h-screen bg-[#0C0C0E] text-[#F4F4F6] flex flex-col items-center justify-center p-6 text-center">
+    <div className="max-w-md w-full rounded-2xl bg-[#141418] border border-[#282830] p-8 space-y-4">
+      <p className="text-lg font-semibold text-[#F4F4F6]">
         Estamos reforzando la seguridad. Volvemos pronto.
       </p>
-      <div className="pt-2 flex items-center justify-center gap-4 text-xs text-[#a1a1aa]">
-        <Link to="/" className="hover:text-[#f1f1ee] underline">
+      <div className="pt-2 flex items-center justify-center gap-4 text-xs text-[#9E9EA8]">
+        <Link to="/" className="hover:text-[#F4F4F6] underline">
           Inicio
         </Link>
         <span>·</span>
-        <Link to="/precios" className="hover:text-[#f1f1ee] underline">
+        <Link to="/precios" className="hover:text-[#F4F4F6] underline">
           Precios
         </Link>
         <span>·</span>
-        <Link to="/terminos" className="hover:text-[#f1f1ee] underline">
+        <Link to="/terminos" className="hover:text-[#F4F4F6] underline">
           Legales
         </Link>
       </div>
@@ -191,7 +186,7 @@ export const App: React.FC = () => {
                     {/* Comprobante Digital de Compra o Redirección Smart Hub */}
                     <Route path="/r/:id" element={<ReceiptDetailView />} />
 
-                    {/* Modo Caja — Accesible para Cajero, Encargado, Dueño y SuperAdmin */}
+                    {/* 2. Caja (POS) — Accesible para Cajero, Encargado, Dueño y SuperAdmin */}
                     <Route
                       path="/caja"
                       element={
@@ -201,7 +196,7 @@ export const App: React.FC = () => {
                       }
                     />
 
-                    {/* Panel del Comercio */}
+                    {/* Panel del Comercio (5 Secciones Limpias) */}
                     <Route
                       path="/panel"
                       element={
@@ -211,9 +206,76 @@ export const App: React.FC = () => {
                       }
                     >
                       <Route index element={<Navigate to="/panel/resumen" replace />} />
-                      <Route path="resumen" element={<DashboardSummaryView />} />
-                      <Route path="escanear" element={<ClubScannerView />} />
-                      <Route path="carteles" element={<CartelesManagementView />} />
+                      {/* 1. Resumen */}
+                      <Route
+                        path="resumen"
+                        element={
+                          <RoleRouteGuard allowedRoles={['owner', 'manager', 'superadmin']}>
+                            <DashboardSummaryView />
+                          </RoleRouteGuard>
+                        }
+                      />
+                      {/* 3. Tarjetas (Unifica editor de tarjeta, clientes, escáner pistola y avisos) */}
+                      <Route
+                        path="tarjetas"
+                        element={
+                          <RoleRouteGuard
+                            allowedRoles={['owner', 'manager', 'cashier', 'superadmin']}
+                          >
+                            <LoyaltyClubView />
+                          </RoleRouteGuard>
+                        }
+                      />
+                      <Route
+                        path="fidelidad"
+                        element={
+                          <RoleRouteGuard
+                            allowedRoles={['owner', 'manager', 'cashier', 'superadmin']}
+                          >
+                            <LoyaltyClubView />
+                          </RoleRouteGuard>
+                        }
+                      />
+                      <Route
+                        path="clientes"
+                        element={<Navigate to="/panel/tarjetas" replace />}
+                      />
+                      <Route path="club" element={<Navigate to="/panel/tarjetas" replace />} />
+                      <Route
+                        path="escanear"
+                        element={
+                          <RoleRouteGuard
+                            allowedRoles={['owner', 'manager', 'cashier', 'superadmin']}
+                          >
+                            <ClubScannerView />
+                          </RoleRouteGuard>
+                        }
+                      />
+                      <Route
+                        path="avisos"
+                        element={
+                          <RoleRouteGuard allowedRoles={['owner', 'manager', 'superadmin']}>
+                            <ClubNotificationsView />
+                          </RoleRouteGuard>
+                        }
+                      />
+                      {/* 4. Locales y Carteles (Unifica sucursales, carteles NFC/QR, Hub y Kit Imprimible) */}
+                      <Route
+                        path="locales"
+                        element={
+                          <RoleRouteGuard allowedRoles={['owner', 'manager', 'superadmin']}>
+                            <ClubLocalsView />
+                          </RoleRouteGuard>
+                        }
+                      />
+                      <Route
+                        path="carteles"
+                        element={
+                          <RoleRouteGuard allowedRoles={['owner', 'manager', 'superadmin']}>
+                            <CartelesManagementView />
+                          </RoleRouteGuard>
+                        }
+                      />
                       <Route
                         path="hub"
                         element={
@@ -239,46 +301,6 @@ export const App: React.FC = () => {
                         }
                       />
                       <Route
-                        path="fidelidad"
-                        element={
-                          <RoleRouteGuard allowedRoles={['owner', 'manager', 'superadmin']}>
-                            <LoyaltyClubView />
-                          </RoleRouteGuard>
-                        }
-                      />
-                      <Route
-                        path="clientes"
-                        element={
-                          <RoleRouteGuard allowedRoles={['owner', 'manager', 'superadmin']}>
-                            <LoyaltyClubView />
-                          </RoleRouteGuard>
-                        }
-                      />
-                      <Route
-                        path="club"
-                        element={
-                          <RoleRouteGuard allowedRoles={['owner', 'manager', 'superadmin']}>
-                            <LoyaltyClubView />
-                          </RoleRouteGuard>
-                        }
-                      />
-                      <Route
-                        path="avisos"
-                        element={
-                          <RoleRouteGuard allowedRoles={['owner', 'manager', 'superadmin']}>
-                            <ClubNotificationsView />
-                          </RoleRouteGuard>
-                        }
-                      />
-                      <Route
-                        path="locales"
-                        element={
-                          <RoleRouteGuard allowedRoles={['owner', 'manager', 'superadmin']}>
-                            <ClubLocalsView />
-                          </RoleRouteGuard>
-                        }
-                      />
-                      <Route
                         path="correcciones"
                         element={
                           <RoleRouteGuard allowedRoles={['owner', 'manager', 'superadmin']}>
@@ -286,16 +308,10 @@ export const App: React.FC = () => {
                           </RoleRouteGuard>
                         }
                       />
-                      {/* Suscripción ahora vive dentro de Mi Cuenta */}
-                      <Route path="suscripcion" element={<Navigate to="/panel/cuenta" replace />} />
-                      <Route
-                        path="red"
-                        element={
-                          <RoleRouteGuard allowedRoles={['owner', 'manager', 'superadmin']}>
-                            <BenefitNetworkView />
-                          </RoleRouteGuard>
-                        }
-                      />
+                      {/* Red de Beneficios eliminada: redirige a Resumen */}
+                      <Route path="red" element={<Navigate to="/panel/resumen" replace />} />
+
+                      {/* 5. Equipo y Cuenta (Unifica colaboradores, roles y Plan/Suscripción) */}
                       <Route
                         path="equipo"
                         element={
@@ -304,21 +320,22 @@ export const App: React.FC = () => {
                           </RoleRouteGuard>
                         }
                       />
+                      <Route path="suscripcion" element={<Navigate to="/panel/cuenta" replace />} />
                       <Route
                         path="cuenta"
                         element={
-                          <RoleRouteGuard allowedRoles={['owner', 'manager', 'cashier', 'superadmin']}>
+                          <RoleRouteGuard allowedRoles={['owner', 'manager', 'superadmin']}>
                             <AccountSettingsView />
                           </RoleRouteGuard>
                         }
                       />
                     </Route>
 
-                    {/* Super Admin Global */}
+                    {/* Super Admin Global: Estricto para fedeeeloiss@gmail.com y toque_admins */}
                     <Route
                       path="/admin"
                       element={
-                        <RoleRouteGuard allowedRoles={['superadmin', 'owner']}>
+                        <RoleRouteGuard allowedRoles={['superadmin']}>
                           <SuperAdminView />
                         </RoleRouteGuard>
                       }

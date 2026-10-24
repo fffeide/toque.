@@ -14,6 +14,8 @@ import { useAuth } from '../../lib/authContext';
 import { useTheme } from '../../lib/themeContext';
 import { Card } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
+import { BrandLogo } from '../../components/ui/Avatar';
+import { RealQrCode } from '../../components/ui/RealQrCode';
 import { useToast } from '../../components/ui/Toast';
 import { formatCurrency, formatDate } from '../../lib/formatters';
 import {
@@ -42,15 +44,16 @@ import {
   Eye,
   EyeOff,
   KeyRound,
+  Calculator,
 } from 'lucide-react';
 
 const QUICK_AMOUNTS = [1500, 2500, 3800, 5000, 8500, 12000];
 
 const DEFAULT_FALLBACK_CARTEL: Cartel = {
   id: 'cartel-caja-1',
-  code: 'CAJA01',
+  code: 'BURGER01',
   pin: '112233',
-  businessId: 'biz-toque-1',
+  businessId: 'la-burger',
   name: 'Caja Principal (Mostrador)',
   role: 'caja',
   status: 'active',
@@ -65,6 +68,49 @@ function getRoleRank(role?: string): number {
   return 1; // cashier
 }
 
+/**
+ * Evaluador aritmético seguro sin eval() para expresiones POS con +, - y *
+ * Ejemplo: "1500+2500*2" -> 6500
+ */
+function evaluatePosExpression(expr: string): number {
+  const sanitized = expr.replace(/,/g, '.').replace(/[^0-9+\-*.]/g, '');
+  if (!sanitized) return 0;
+
+  // Si termina en un operador (+, -, *, .), ignorar el operador final para el cálculo en vivo
+  const trimmed = sanitized.replace(/[+\-*.]+$/, '');
+  if (!trimmed) return 0;
+
+  // Separar por suma y resta respetando el signo
+  const addTerms = trimmed.split(/(?=[+-])/);
+  let total = 0;
+
+  for (const rawTerm of addTerms) {
+    if (!rawTerm) continue;
+    let sign = 1;
+    let term = rawTerm;
+    if (term.startsWith('+')) {
+      term = term.slice(1);
+    } else if (term.startsWith('-')) {
+      sign = -1;
+      term = term.slice(1);
+    }
+
+    const factors = term.split('*');
+    let product = 1;
+    for (const f of factors) {
+      const num = parseFloat(f);
+      if (Number.isNaN(num)) {
+        product *= 1;
+      } else {
+        product *= num;
+      }
+    }
+    total += sign * product;
+  }
+
+  return Math.max(0, Math.round(total));
+}
+
 export const CashierView: React.FC = () => {
   const { user, business, login } = useAuth();
   const { isDark, toggleTheme } = useTheme();
@@ -76,7 +122,8 @@ export const CashierView: React.FC = () => {
   const [selectedCartelId, setSelectedCartelId] = useState<string>(
     user?.assignedCartelId || DEFAULT_FALLBACK_CARTEL.id
   );
-  const [amountStr, setAmountStr] = useState<string>('0');
+  // Expresión matemática en vivo (ej: "1500+2500*2")
+  const [expressionStr, setExpressionStr] = useState<string>('0');
   const [method, setMethod] = useState<PaymentMethod>('mercadopago');
   const [allSales, setAllSales] = useState<Sale[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -107,7 +154,9 @@ export const CashierView: React.FC = () => {
 
   const selectedCartel =
     carteles.find((c) => c.id === selectedCartelId) || carteles[0] || DEFAULT_FALLBACK_CARTEL;
-  const amount = parseInt(amountStr, 10) || 0;
+
+  const amount = useMemo(() => evaluatePosExpression(expressionStr), [expressionStr]);
+  const hasMathOperators = /[+\-*]/.test(expressionStr);
 
   // Hidratación en paralelo en segundo plano sin bloquear la apertura de la Caja
   const loadInitialData = useCallback(() => {
@@ -230,14 +279,14 @@ export const CashierView: React.FC = () => {
   // Integrantes disponibles para cambio de cuenta (asegurando incluir al Dueño del comercio)
   const selectableAccounts = useMemo(() => {
     const list = [...teamMembers];
-    const ownerEmail = (business?.email || 'comercio@toque.ar').toLowerCase();
+    const ownerEmail = (business?.email || 'nombre@comercio.com').toLowerCase();
     const hasOwner = list.some(
       (m) => m.role === 'owner' || m.email.toLowerCase() === ownerEmail
     );
     if (!hasOwner) {
       list.unshift({
         id: 'team-owner-main',
-        businessId: business?.id || 'biz-toque-1',
+        businessId: business?.id || 'la-burger',
         name: business?.ownerName || 'Martín Gómez',
         email: ownerEmail,
         role: 'owner',
@@ -286,32 +335,57 @@ export const CashierView: React.FC = () => {
   }, [emittedReceipt]);
 
   const handleDigit = useCallback((digit: string) => {
-    setAmountStr((prev) => {
-      const next = prev === '0' ? digit : prev + digit;
-      if (next.length > 8) return prev;
-      return next;
+    setExpressionStr((prev) => {
+      if (prev === '0' && digit !== '.') return digit;
+      if (prev.length >= 28) return prev;
+      // Evitar múltiples puntos decimales en el mismo operando
+      if (digit === '.') {
+        const parts = prev.split(/[+\-*]/);
+        const currentOperand = parts[parts.length - 1] || '';
+        if (currentOperand.includes('.')) return prev;
+      }
+      return prev + digit;
     });
   }, []);
 
+  const handleOperator = useCallback((op: '+' | '-' | '*') => {
+    setExpressionStr((prev) => {
+      if (prev === '0' || !prev) return prev;
+      if (prev.length >= 28) return prev;
+      // Si ya termina en un operador, reemplazarlo por el nuevo
+      if (/[+\-*.]$/.test(prev)) {
+        return prev.slice(0, -1) + op;
+      }
+      return prev + op;
+    });
+  }, []);
+
+  const handleResolveEquals = useCallback(() => {
+    setExpressionStr((prev) => String(evaluatePosExpression(prev)));
+  }, []);
+
   const handleBackspace = useCallback(() => {
-    setAmountStr((prev) => (prev.length <= 1 ? '0' : prev.slice(0, -1)));
+    setExpressionStr((prev) => (prev.length <= 1 ? '0' : prev.slice(0, -1)));
   }, []);
 
   const handleClear = useCallback(() => {
-    setAmountStr('0');
+    setExpressionStr('0');
     setScannedItems([]);
   }, []);
 
   const handleQuickAmount = (val: number) => {
-    setScannedItems([]);
-    setAmountStr(String(val));
+    setExpressionStr((prev) => {
+      if (prev === '0') return String(val);
+      if (/[+\-*]$/.test(prev)) return prev + String(val);
+      return `${prev}+${val}`;
+    });
   };
 
   // Recalcular importe total cuando se escanean o modifican productos del lector
   const syncAmountWithItems = (items: SaleItem[]) => {
     setScannedItems(items);
     const total = items.reduce((sum, item) => sum + item.price * item.quantity, 0);
-    setAmountStr(String(Math.round(total)));
+    setExpressionStr(String(Math.round(total)));
   };
 
   const addProductToSale = useCallback(
@@ -336,7 +410,7 @@ export const CashierView: React.FC = () => {
           ];
         }
         const total = next.reduce((sum, item) => sum + item.price * item.quantity, 0);
-        setAmountStr(String(Math.round(total)));
+        setExpressionStr(String(Math.round(total)));
         return next;
       });
       showToast(`+1 ${product.title} (${formatCurrency(unitPrice)})`, 'success');
@@ -395,7 +469,7 @@ export const CashierView: React.FC = () => {
       if (res.receipt) {
         setEmittedReceipt(res.receipt);
       }
-      setAmountStr('0');
+      setExpressionStr('0');
       setScannedItems([]);
       showToast(
         `Comprobante ${res.receipt?.id || ''} activo en ${selectedCartel.code} por 2 minutos`,
@@ -408,7 +482,7 @@ export const CashierView: React.FC = () => {
     }
   }, [selectedCartel, amount, method, scannedItems, showToast]);
 
-  // Soporte completo para teclado numérico físico y estándar
+  // Soporte completo para teclado numérico físico y expresiones matemáticas (+, -, *, ., Enter)
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
@@ -427,15 +501,32 @@ export const CashierView: React.FC = () => {
       if (/^[0-9]$/.test(e.key)) {
         e.preventDefault();
         handleDigit(e.key);
+      } else if (e.key === '.' || e.key === ',') {
+        e.preventDefault();
+        handleDigit('.');
+      } else if (e.key === '+') {
+        e.preventDefault();
+        handleOperator('+');
+      } else if (e.key === '-') {
+        e.preventDefault();
+        handleOperator('-');
+      } else if (e.key === '*' || e.key.toLowerCase() === 'x') {
+        e.preventDefault();
+        handleOperator('*');
+      } else if (e.key === '=') {
+        e.preventDefault();
+        handleResolveEquals();
       } else if (e.key === 'Backspace' || e.key === 'Delete') {
         e.preventDefault();
         handleBackspace();
-      } else if (e.key === 'Escape') {
+      } else if (e.key === 'Escape' || e.key.toLowerCase() === 'c') {
         e.preventDefault();
         handleClear();
       } else if (e.key === 'Enter') {
         e.preventDefault();
-        if (amount > 0 && !isSubmitting) {
+        if (hasMathOperators) {
+          handleResolveEquals();
+        } else if (amount > 0 && !isSubmitting) {
           handleCreateSale();
         }
       }
@@ -445,9 +536,12 @@ export const CashierView: React.FC = () => {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [
     handleDigit,
+    handleOperator,
+    handleResolveEquals,
     handleBackspace,
     handleClear,
     handleCreateSale,
+    hasMathOperators,
     amount,
     isSubmitting,
     showCashierAccountModal,
@@ -458,7 +552,6 @@ export const CashierView: React.FC = () => {
     const currentRank = getRoleRank(user?.isSuperAdmin ? 'superadmin' : user?.role);
     const targetRank = getRoleRank(member.role);
 
-    // Si elige una cuenta de un cargo superior, requerir contraseña de registro
     if (targetRank > currentRank) {
       setPendingElevationMember(member);
       setElevationPassword('');
@@ -554,69 +647,67 @@ export const CashierView: React.FC = () => {
       : 'Cajero';
 
   return (
-    <div className="theme-panel min-h-screen bg-[#000000] text-[#f1f1ee] flex flex-col">
-      {/* Header de Caja (mantiene el mismo negro en modo claro y oscuro) */}
-      <header className="panel-chrome-dark h-16 px-4 sm:px-8 border-b border-[#242426] bg-[#111113] text-[#f1f1ee] flex items-center justify-between">
+    <div className="theme-panel min-h-screen bg-[#0C0C0E] text-[#F4F4F0] flex flex-col">
+      {/* Header de Caja Tactile Hardware */}
+      <header className="panel-chrome-dark h-16 px-4 sm:px-8 border-b border-[#282830] bg-[#141418] text-[#F4F4F0] flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <Link
-            to="/panel/resumen"
-            className="p-2 rounded-xl bg-[#18181b] hover:bg-[#222226] text-[#a1a1aa] hover:text-[#f1f1ee] border border-[#28282a] transition-colors flex items-center gap-1.5 text-xs font-medium"
-            title="Ir al Panel"
-          >
-            <ArrowLeft className="w-4 h-4" />
-            <span className="hidden sm:inline">Panel</span>
-          </Link>
+          {user?.role !== 'cashier' && (
+            <Link
+              to="/panel/resumen"
+              className="p-2 rounded-xl bg-[#1C1C22] hover:bg-[#24242C] text-[#A1A1AA] hover:text-[#F4F4F0] border border-[#282830] transition-colors flex items-center gap-1.5 text-xs font-medium"
+              title="Ir al Panel"
+            >
+              <ArrowLeft className="w-4 h-4" />
+              <span className="hidden sm:inline">Panel</span>
+            </Link>
+          )}
 
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-lg bg-[#bec8ff] flex items-center justify-center font-bold text-xs text-[#0c0c0c]">
-              POS
-            </div>
+          <div className="flex items-center gap-2.5">
+            <BrandLogo variant="isotipo" size="sm" />
             <div>
-              <h1 className="font-bold text-sm text-[#f1f1ee] leading-none">
-                Caja · {business?.name || 'Café & Panadería La Esquina'}
+              <h1 className="font-bold text-sm text-[#F4F4F0] leading-none">
+                Caja POS · {business?.name || 'La Burger'}
               </h1>
-              <span className="text-[11px] text-[#34d399] font-medium flex items-center gap-1 mt-0.5">
-                <span className="w-1.5 h-1.5 rounded-full bg-[#2fb36a]" />
+              <span className="text-[11px] text-[#2FB36A] font-medium flex items-center gap-1 mt-0.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-[#2FB36A]" />
                 {user?.name || 'Cajero'} ({currentRoleLabel})
               </span>
             </div>
           </div>
         </div>
 
-        {/* Selector de Cartel + Modo Oscuro/Claro (solo icono) + Cambiar/Crear cuenta */}
+        {/* Selector de Cartel + Modo Oscuro/Claro + Cambiar/Crear cuenta */}
         <div className="flex items-center gap-2.5">
-          <div className="flex items-center gap-2 bg-[#18181b] border border-[#28282a] rounded-xl px-3 py-1.5">
-            <QrCode className="w-4 h-4 text-[#bec8ff] shrink-0" />
+          <div className="flex items-center gap-2 bg-[#1C1C22] border border-[#282830] rounded-xl px-3 py-1.5">
+            <QrCode className="w-4 h-4 text-[#D95B26] shrink-0" />
             <select
               value={selectedCartel?.id || ''}
               onChange={(e) => setSelectedCartelId(e.target.value)}
               aria-label="Seleccionar cartel de caja"
-              className="bg-transparent text-xs font-bold text-[#f1f1ee] focus:outline-none cursor-pointer"
+              className="bg-transparent text-xs font-bold text-[#F4F4F0] focus:outline-none cursor-pointer"
             >
               {carteles.map((c) => (
-                <option key={c.id} value={c.id} className="bg-[#111113] text-[#f1f1ee]">
+                <option key={c.id} value={c.id} className="bg-[#141418] text-[#F4F4F0]">
                   {c.code} — {c.name}
                 </option>
               ))}
             </select>
           </div>
 
-          {/* Botón Modo Claro / Modo Oscuro: solo icono, sin texto */}
           <button
             type="button"
             onClick={toggleTheme}
             title={isDark ? 'Cambiar a modo claro' : 'Cambiar a modo oscuro'}
             aria-label="Cambiar modo de color"
-            className="w-9 h-9 rounded-xl bg-[#18181b] border border-[#28282a] hover:border-[#bec8ff] text-[#f1f1ee] flex items-center justify-center transition-colors cursor-pointer"
+            className="w-9 h-9 rounded-xl bg-[#1C1C22] border border-[#282830] hover:border-[#BEC8FF] text-[#F4F4F0] flex items-center justify-center transition-colors cursor-pointer"
           >
             {isDark ? (
-              <Sun className="w-4 h-4 text-[#bec8ff]" />
+              <Sun className="w-4 h-4 text-[#BEC8FF]" />
             ) : (
-              <Moon className="w-4 h-4 text-[#bec8ff]" />
+              <Moon className="w-4 h-4 text-[#BEC8FF]" />
             )}
           </button>
 
-          {/* Icono de cambiar/crear cuenta (con protección por contraseña para cargos superiores) */}
           <button
             type="button"
             onClick={() => {
@@ -626,7 +717,7 @@ export const CashierView: React.FC = () => {
             }}
             title="Cambiar o crear cuenta"
             aria-label="Cambiar o crear cuenta"
-            className="w-9 h-9 rounded-xl bg-[#18181b] border border-[#28282a] hover:border-[#bec8ff] text-[#bec8ff] flex items-center justify-center transition-colors cursor-pointer"
+            className="w-9 h-9 rounded-xl bg-[#1C1C22] border border-[#282830] hover:border-[#BEC8FF] text-[#BEC8FF] flex items-center justify-center transition-colors cursor-pointer"
           >
             <UserPlus className="w-4 h-4" />
           </button>
@@ -635,22 +726,37 @@ export const CashierView: React.FC = () => {
 
       {/* Cuerpo Principal */}
       <main className="flex-1 max-w-6xl w-full mx-auto p-4 sm:p-6 grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-        {/* Columna Izquierda: Teclado de Cobro (7 cols) */}
+        {/* Columna Izquierda: Teclado de Cobro con Calculadora de Expresiones (7 cols) */}
         <div className="lg:col-span-7 space-y-4">
           <Card className="stat-card p-5 sm:p-6 space-y-5">
-            {/* Visor de Importe */}
-            <div className="p-5 rounded-2xl bg-[#161619] border border-[#28282a] flex flex-col items-end justify-center stat-badge">
-              <div className="w-full flex items-center justify-between mb-1">
-                <span className="text-[11px] font-semibold text-[#a1a1aa] stat-detail">
-                  Cartel vinculado: <strong className="text-[#f1f1ee]">{selectedCartel?.code}</strong>
+            {/* Visor de Importe y Expresión Matemática */}
+            <div className="p-5 rounded-2xl bg-[#141418] border border-[#282830] flex flex-col items-end justify-center stat-badge">
+              <div className="w-full flex items-center justify-between mb-1.5">
+                <span className="text-[11px] font-semibold text-[#A1A1AA] stat-detail">
+                  Cartel vinculado: <strong className="text-[#F4F4F0]">{selectedCartel?.code}</strong>
                 </span>
-                <span className="text-[11px] font-mono text-[#34d399] stat-detail">
-                  Teclado numérico activo
+                <span className="text-[11px] font-mono text-[#2FB36A] flex items-center gap-1 stat-detail">
+                  <Calculator className="w-3.5 h-3.5" />
+                  Teclado físico activo (+, -, *, Enter)
                 </span>
               </div>
-              <div className="flex items-baseline gap-1.5">
-                <span className="text-2xl font-bold text-[#a1a1aa]">$</span>
-                <span className="text-4xl sm:text-5xl font-extrabold tracking-tight text-[#f1f1ee] font-mono tabular-nums">
+
+              {/* Visor de fórmula en vivo (ej: 1500 + 2500 * 2) */}
+              <div className="w-full text-right min-h-[20px]">
+                {hasMathOperators ? (
+                  <span className="text-xs sm:text-sm font-mono font-semibold text-[#BEC8FF] tracking-wide">
+                    {expressionStr.replace(/\+/g, ' + ').replace(/-/g, ' - ').replace(/\*/g, ' × ')} =
+                  </span>
+                ) : (
+                  <span className="text-[11px] font-mono text-[#A1A1AA]">
+                    Escribí montos o sumá con + / * en tu teclado
+                  </span>
+                )}
+              </div>
+
+              <div className="flex items-baseline gap-1.5 mt-0.5">
+                <span className="text-2xl font-bold text-[#D95B26]">$</span>
+                <span className="text-4xl sm:text-5xl font-extrabold tracking-tight text-[#F4F4F0] font-mono tabular-nums">
                   {amount.toLocaleString('es-AR')}
                 </span>
               </div>
@@ -658,46 +764,46 @@ export const CashierView: React.FC = () => {
 
             {/* Productos escaneados o elegidos en la venta actual */}
             {scannedItems.length > 0 && (
-              <div className="p-3.5 rounded-xl bg-[#161619] border border-[#28282a] space-y-2 stat-badge">
+              <div className="p-3.5 rounded-xl bg-[#141418] border border-[#282830] space-y-2 stat-badge">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-[#f1f1ee] flex items-center gap-1.5">
-                    <ShoppingBag className="w-3.5 h-3.5 text-[#bec8ff]" />
+                  <span className="text-xs font-bold text-[#F4F4F0] flex items-center gap-1.5">
+                    <ShoppingBag className="w-3.5 h-3.5 text-[#BEC8FF]" />
                     Productos en este cobro ({scannedItems.reduce((a, b) => a + b.quantity, 0)})
                   </span>
                   <button
                     type="button"
                     onClick={handleClear}
-                    className="text-[11px] text-[#a1a1aa] hover:text-red-400 cursor-pointer"
+                    className="text-[11px] text-[#A1A1AA] hover:text-red-400 cursor-pointer"
                   >
                     Vaciar
                   </button>
                 </div>
-                <div className="divide-y divide-[#242426] max-h-36 overflow-y-auto">
+                <div className="divide-y divide-[#282830] max-h-36 overflow-y-auto">
                   {scannedItems.map((item) => (
                     <div
                       key={item.id}
                       className="py-1.5 flex items-center justify-between gap-2 text-xs"
                     >
-                      <span className="text-[#f1f1ee] font-medium truncate">{item.name}</span>
+                      <span className="text-[#F4F4F0] font-medium truncate">{item.name}</span>
                       <div className="flex items-center gap-2 shrink-0">
                         <button
                           type="button"
                           onClick={() => handleChangeItemQty(item.id, -1)}
-                          className="w-6 h-6 rounded-md bg-[#111113] border border-[#28282a] flex items-center justify-center text-[#a1a1aa] hover:text-[#f1f1ee] cursor-pointer"
+                          className="w-6 h-6 rounded-md bg-[#1C1C22] border border-[#282830] flex items-center justify-center text-[#A1A1AA] hover:text-[#F4F4F0] cursor-pointer"
                         >
                           <Minus className="w-3 h-3" />
                         </button>
-                        <span className="font-mono font-bold text-[#f1f1ee] w-5 text-center">
+                        <span className="font-mono font-bold text-[#F4F4F0] w-5 text-center">
                           {item.quantity}
                         </span>
                         <button
                           type="button"
                           onClick={() => handleChangeItemQty(item.id, 1)}
-                          className="w-6 h-6 rounded-md bg-[#111113] border border-[#28282a] flex items-center justify-center text-[#a1a1aa] hover:text-[#f1f1ee] cursor-pointer"
+                          className="w-6 h-6 rounded-md bg-[#1C1C22] border border-[#282830] flex items-center justify-center text-[#A1A1AA] hover:text-[#F4F4F0] cursor-pointer"
                         >
                           <Plus className="w-3 h-3" />
                         </button>
-                        <span className="font-mono font-semibold text-[#bec8ff] w-20 text-right">
+                        <span className="font-mono font-semibold text-[#BEC8FF] w-20 text-right">
                           {formatCurrency(item.price * item.quantity)}
                         </span>
                       </div>
@@ -707,59 +813,110 @@ export const CashierView: React.FC = () => {
               </div>
             )}
 
-            {/* Importes Rápidos */}
+            {/* Importes Rápidos (suman al cálculo actual) */}
             <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
               {QUICK_AMOUNTS.map((val) => (
                 <button
                   key={val}
                   type="button"
                   onClick={() => handleQuickAmount(val)}
-                  className="py-2 px-2 rounded-xl bg-[#161619] hover:bg-[#222226] border border-[#28282a] text-xs font-mono font-semibold text-[#f1f1ee] transition-colors cursor-pointer stat-badge"
+                  className="py-2 px-2 rounded-xl bg-[#141418] hover:bg-[#1C1C22] border border-[#282830] text-xs font-mono font-semibold text-[#F4F4F0] transition-colors cursor-pointer stat-badge"
                 >
-                  ${val.toLocaleString('es-AR')}
+                  +${val.toLocaleString('es-AR')}
                 </button>
               ))}
             </div>
 
-            {/* Teclado Numérico Touch + Físico */}
-            <div className="grid grid-cols-3 gap-2.5">
-              {['1', '2', '3', '4', '5', '6', '7', '8', '9'].map((digit) => (
+            {/* Teclado Numérico + Operadores Matemáticos (+, -, ×, =) */}
+            <div className="grid grid-cols-4 gap-2.5">
+              {['7', '8', '9'].map((digit) => (
                 <button
                   key={digit}
                   type="button"
                   onClick={() => handleDigit(digit)}
-                  className="h-14 rounded-xl bg-[#161619] hover:bg-[#222226] active:bg-[#28282c] border border-[#28282a] text-xl font-bold font-mono text-[#f1f1ee] transition-colors cursor-pointer stat-badge"
+                  className="h-14 rounded-xl bg-[#141418] hover:bg-[#1C1C22] active:bg-[#24242C] border border-[#282830] text-xl font-bold font-mono text-[#F4F4F0] transition-colors cursor-pointer stat-badge"
                 >
                   {digit}
                 </button>
               ))}
               <button
                 type="button"
-                onClick={handleClear}
-                className="h-14 rounded-xl bg-[#161619] hover:bg-[#222226] border border-[#28282a] text-xs font-bold text-[#a1a1aa] hover:text-[#f1f1ee] transition-colors cursor-pointer stat-badge"
+                onClick={handleBackspace}
+                aria-label="Borrar último dígito"
+                className="h-14 rounded-xl bg-[#1C1C22] hover:bg-[#24242C] border border-[#282830] flex items-center justify-center text-[#A1A1AA] hover:text-[#F4F4F0] transition-colors cursor-pointer stat-badge"
               >
-                Borrar
+                <Delete className="w-5 h-5" />
+              </button>
+
+              {['4', '5', '6'].map((digit) => (
+                <button
+                  key={digit}
+                  type="button"
+                  onClick={() => handleDigit(digit)}
+                  className="h-14 rounded-xl bg-[#141418] hover:bg-[#1C1C22] active:bg-[#24242C] border border-[#282830] text-xl font-bold font-mono text-[#F4F4F0] transition-colors cursor-pointer stat-badge"
+                >
+                  {digit}
+                </button>
+              ))}
+              <button
+                type="button"
+                onClick={() => handleOperator('+')}
+                className="h-14 rounded-xl bg-[#1C1C22] hover:bg-[#D95B26]/20 border border-[#282830] text-xl font-bold font-mono text-[#D95B26] transition-colors cursor-pointer stat-badge"
+              >
+                +
+              </button>
+
+              {['1', '2', '3'].map((digit) => (
+                <button
+                  key={digit}
+                  type="button"
+                  onClick={() => handleDigit(digit)}
+                  className="h-14 rounded-xl bg-[#141418] hover:bg-[#1C1C22] active:bg-[#24242C] border border-[#282830] text-xl font-bold font-mono text-[#F4F4F0] transition-colors cursor-pointer stat-badge"
+                >
+                  {digit}
+                </button>
+              ))}
+              <button
+                type="button"
+                onClick={() => handleOperator('-')}
+                className="h-14 rounded-xl bg-[#1C1C22] hover:bg-[#BEC8FF]/20 border border-[#282830] text-xl font-bold font-mono text-[#BEC8FF] transition-colors cursor-pointer stat-badge"
+              >
+                −
+              </button>
+
+              <button
+                type="button"
+                onClick={handleClear}
+                className="h-14 rounded-xl bg-[#1C1C22] hover:bg-[#24242C] border border-[#282830] text-xs font-bold text-[#A1A1AA] hover:text-[#F4F4F0] transition-colors cursor-pointer stat-badge"
+              >
+                C / Esc
               </button>
               <button
                 type="button"
                 onClick={() => handleDigit('0')}
-                className="h-14 rounded-xl bg-[#161619] hover:bg-[#222226] border border-[#28282a] text-xl font-bold font-mono text-[#f1f1ee] transition-colors cursor-pointer stat-badge"
+                className="h-14 rounded-xl bg-[#141418] hover:bg-[#1C1C22] border border-[#282830] text-xl font-bold font-mono text-[#F4F4F0] transition-colors cursor-pointer stat-badge"
               >
                 0
               </button>
               <button
                 type="button"
-                onClick={handleBackspace}
-                aria-label="Borrar último dígito"
-                className="h-14 rounded-xl bg-[#161619] hover:bg-[#222226] border border-[#28282a] flex items-center justify-center text-[#a1a1aa] hover:text-[#f1f1ee] transition-colors cursor-pointer stat-badge"
+                onClick={() => handleOperator('*')}
+                className="h-14 rounded-xl bg-[#1C1C22] hover:bg-[#BEC8FF]/20 border border-[#282830] text-lg font-bold font-mono text-[#BEC8FF] transition-colors cursor-pointer stat-badge"
               >
-                <Delete className="w-5 h-5" />
+                ×
+              </button>
+              <button
+                type="button"
+                onClick={handleResolveEquals}
+                className="h-14 rounded-xl bg-[#2FB36A]/20 hover:bg-[#2FB36A]/30 border border-[#2FB36A]/50 text-xl font-bold font-mono text-[#2FB36A] transition-colors cursor-pointer stat-badge"
+              >
+                =
               </button>
             </div>
 
-            {/* Selección de método de pago: solo "Efectivo" - "Tarjeta" - "QR" */}
+            {/* Selección de método de pago: "Efectivo" - "Tarjeta" - "QR" */}
             <div>
-              <span className="block text-xs font-semibold text-[#a1a1aa] mb-2 stat-detail">
+              <span className="block text-xs font-semibold text-[#A1A1AA] mb-2 stat-detail">
                 Método de pago
               </span>
               <div className="grid grid-cols-3 gap-2.5">
@@ -768,13 +925,13 @@ export const CashierView: React.FC = () => {
                   onClick={() => setMethod('cash')}
                   className={`p-3 rounded-xl border text-left transition-all cursor-pointer flex flex-col justify-between gap-2 stat-badge ${
                     method === 'cash'
-                      ? 'bg-[#2fb36a]/15 border-[#2fb36a] text-[#f1f1ee]'
-                      : 'bg-[#161619] border-[#28282a] text-[#a1a1aa] hover:text-[#f1f1ee]'
+                      ? 'bg-[#2FB36A]/15 border-[#2FB36A] text-[#F4F4F0]'
+                      : 'bg-[#141418] border-[#282830] text-[#A1A1AA] hover:text-[#F4F4F0]'
                   }`}
                 >
                   <Banknote
                     className={`w-5 h-5 ${
-                      method === 'cash' ? 'text-[#34d399]' : 'text-[#a1a1aa]'
+                      method === 'cash' ? 'text-[#2FB36A]' : 'text-[#A1A1AA]'
                     }`}
                   />
                   <span className="text-xs font-bold block">Efectivo</span>
@@ -785,13 +942,13 @@ export const CashierView: React.FC = () => {
                   onClick={() => setMethod('card')}
                   className={`p-3 rounded-xl border text-left transition-all cursor-pointer flex flex-col justify-between gap-2 stat-badge ${
                     method === 'card'
-                      ? 'bg-[#bec8ff]/15 border-[#bec8ff] text-[#f1f1ee]'
-                      : 'bg-[#161619] border-[#28282a] text-[#a1a1aa] hover:text-[#f1f1ee]'
+                      ? 'bg-[#BEC8FF]/15 border-[#BEC8FF] text-[#F4F4F0]'
+                      : 'bg-[#141418] border-[#282830] text-[#A1A1AA] hover:text-[#F4F4F0]'
                   }`}
                 >
                   <CreditCard
                     className={`w-5 h-5 ${
-                      method === 'card' ? 'text-[#bec8ff]' : 'text-[#a1a1aa]'
+                      method === 'card' ? 'text-[#BEC8FF]' : 'text-[#A1A1AA]'
                     }`}
                   />
                   <span className="text-xs font-bold block">Tarjeta</span>
@@ -802,13 +959,13 @@ export const CashierView: React.FC = () => {
                   onClick={() => setMethod('mercadopago')}
                   className={`p-3 rounded-xl border text-left transition-all cursor-pointer flex flex-col justify-between gap-2 stat-badge ${
                     method === 'mercadopago'
-                      ? 'bg-[#bec8ff]/15 border-[#bec8ff] text-[#f1f1ee]'
-                      : 'bg-[#161619] border-[#28282a] text-[#a1a1aa] hover:text-[#f1f1ee]'
+                      ? 'bg-[#D95B26]/15 border-[#D95B26] text-[#F4F4F0]'
+                      : 'bg-[#141418] border-[#282830] text-[#A1A1AA] hover:text-[#F4F4F0]'
                   }`}
                 >
                   <QrCode
                     className={`w-5 h-5 ${
-                      method === 'mercadopago' ? 'text-[#bec8ff]' : 'text-[#a1a1aa]'
+                      method === 'mercadopago' ? 'text-[#D95B26]' : 'text-[#A1A1AA]'
                     }`}
                   />
                   <span className="text-xs font-bold block">QR</span>
@@ -829,12 +986,12 @@ export const CashierView: React.FC = () => {
             </Button>
           </Card>
 
-          {/* Comprobante recién emitido (Límite de 2 minutos hasta abrirse o siguiente pago) */}
+          {/* Comprobante recién emitido con QR Real Escaneable */}
           {emittedReceipt && activeSale && (
-            <Card className="stat-card p-5 border-[#2fb36a] space-y-4">
-              <div className="flex items-center justify-between gap-3">
+            <Card className="stat-card p-5 border-[#2FB36A] space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-xl bg-[#2fb36a]/15 text-[#34d399] flex items-center justify-center shrink-0">
+                  <div className="w-10 h-10 rounded-xl bg-[#2FB36A]/15 text-[#2FB36A] flex items-center justify-center shrink-0">
                     {emittedReceipt.status === 'ready' ? (
                       <CheckCircle2 className="w-5 h-5" />
                     ) : (
@@ -843,14 +1000,14 @@ export const CashierView: React.FC = () => {
                   </div>
                   <div>
                     <div className="flex items-center gap-2">
-                      <h3 className="font-bold text-sm text-[#f1f1ee]">
+                      <h3 className="font-bold text-sm text-[#F4F4F0]">
                         Comprobante #{emittedReceipt.id}
                       </h3>
-                      <span className="text-xs font-mono font-bold text-[#bec8ff]">
+                      <span className="text-xs font-mono font-bold text-[#BEC8FF]">
                         {formatCurrency(emittedReceipt.total)} ({methodBadgeLabel(emittedReceipt.method)})
                       </span>
                     </div>
-                    <p className="text-xs text-[#a1a1aa] stat-detail">
+                    <p className="text-xs text-[#A1A1AA] stat-detail">
                       {emittedReceipt.status === 'claimed'
                         ? 'Abierto por el cliente · Cerrado para nuevos escaneos'
                         : emittedReceipt.status === 'ready' && secondsLeft > 0
@@ -863,32 +1020,40 @@ export const CashierView: React.FC = () => {
                 </div>
 
                 {emittedReceipt.status === 'ready' && secondsLeft > 0 && (
-                  <Link
-                    to={`/r/${emittedReceipt.id}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="px-3 py-1.5 rounded-xl bg-[#18181b] border border-[#28282a] text-xs font-semibold text-[#bec8ff] hover:border-[#bec8ff] flex items-center gap-1.5 shrink-0"
-                  >
-                    <span>Abrir</span>
-                    <ExternalLink className="w-3.5 h-3.5" />
-                  </Link>
+                  <div className="flex items-center gap-3">
+                    <div className="bg-white p-1.5 rounded-xl border border-[#282830]">
+                      <RealQrCode
+                        value={`${window.location.origin}/r/${emittedReceipt.id}`}
+                        size={64}
+                      />
+                    </div>
+                    <Link
+                      to={`/r/${emittedReceipt.id}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="px-3 py-2 rounded-xl bg-[#1C1C22] border border-[#282830] text-xs font-semibold text-[#BEC8FF] hover:border-[#BEC8FF] flex items-center gap-1.5 shrink-0"
+                    >
+                      <span>Abrir</span>
+                      <ExternalLink className="w-3.5 h-3.5" />
+                    </Link>
+                  </div>
                 )}
               </div>
             </Card>
           )}
         </div>
 
-        {/* Columna Derecha: Lector para productos (arriba) + Ultimos cobros (abajo) (5 cols) */}
+        {/* Columna Derecha: Lector para productos (arriba) + Últimos cobros (abajo) (5 cols) */}
         <div className="lg:col-span-5 space-y-6">
           {/* 1. Lector para productos: muestra SOLO los 5 productos más vendidos + botón Catálogo */}
           <Card className="stat-card p-5 space-y-4">
             <div className="flex items-center justify-between">
               <div>
                 <div className="flex items-center gap-2">
-                  <Barcode className="w-4 h-4 text-[#2fb36a]" />
-                  <h2 className="font-bold text-sm text-[#f1f1ee]">Lector de productos</h2>
+                  <Barcode className="w-4 h-4 text-[#2FB36A]" />
+                  <h2 className="font-bold text-sm text-[#F4F4F0]">Lector de productos</h2>
                 </div>
-                <p className="text-[11px] text-[#a1a1aa] mt-0.5 stat-detail">
+                <p className="text-[11px] text-[#A1A1AA] mt-0.5 stat-detail">
                   Top 5 más vendidos · Tocá Catálogo para ver todo el menú
                 </p>
               </div>
@@ -898,7 +1063,7 @@ export const CashierView: React.FC = () => {
                   setCatalogSearch('');
                   setShowCatalogModal(true);
                 }}
-                className="px-3 py-1.5 rounded-xl bg-[#18181b] hover:bg-[#222226] border border-[#28282a] text-xs font-bold text-[#bec8ff] flex items-center gap-1.5 cursor-pointer transition-colors stat-badge"
+                className="px-3 py-1.5 rounded-xl bg-[#1C1C22] hover:bg-[#24242C] border border-[#282830] text-xs font-bold text-[#BEC8FF] flex items-center gap-1.5 cursor-pointer transition-colors stat-badge"
               >
                 <Coffee className="w-3.5 h-3.5" />
                 <span>Catálogo ({catalogProducts.length})</span>
@@ -906,14 +1071,14 @@ export const CashierView: React.FC = () => {
             </div>
 
             <form onSubmit={handleScanSubmit} className="flex gap-2">
-              <div className="flex-1 flex items-center gap-2 bg-[#161619] border border-[#28282a] rounded-xl px-3 py-2 focus-within:border-[#bec8ff] stat-badge">
-                <Barcode className="w-4 h-4 text-[#a1a1aa] shrink-0" />
+              <div className="flex-1 flex items-center gap-2 bg-[#141418] border border-[#282830] rounded-xl px-3 py-2 focus-within:border-[#BEC8FF] stat-badge">
+                <Barcode className="w-4 h-4 text-[#A1A1AA] shrink-0" />
                 <input
                   type="text"
                   placeholder="Código universal o nombre..."
                   value={barcodeInput}
                   onChange={(e) => setBarcodeInput(e.target.value)}
-                  className="w-full bg-transparent text-xs text-[#f1f1ee] placeholder-[#71717a] focus:outline-none"
+                  className="w-full bg-transparent text-xs text-[#F4F4F0] placeholder-[#71717A] focus:outline-none"
                 />
               </div>
               <Button type="submit" variant="secundario" size="sm">
@@ -928,33 +1093,33 @@ export const CashierView: React.FC = () => {
                     key={prod.id}
                     type="button"
                     onClick={() => addProductToSale(prod)}
-                    className="w-full p-2.5 rounded-xl bg-[#161619] hover:bg-[#222226] border border-[#242426] flex items-center justify-between gap-2 text-left transition-colors cursor-pointer stat-badge"
+                    className="w-full p-2.5 rounded-xl bg-[#141418] hover:bg-[#1C1C22] border border-[#282830] flex items-center justify-between gap-2 text-left transition-colors cursor-pointer stat-badge"
                   >
                     <div className="flex items-center gap-2.5 min-w-0">
-                      <span className="w-5 h-5 rounded-md bg-[#111113] border border-[#28282a] text-[10px] font-mono font-bold text-[#a1a1aa] flex items-center justify-center shrink-0">
+                      <span className="w-5 h-5 rounded-md bg-[#0C0C0E] border border-[#282830] text-[10px] font-mono font-bold text-[#A1A1AA] flex items-center justify-center shrink-0">
                         #{idx + 1}
                       </span>
                       {prod.imageUrl ? (
                         <img
                           src={prod.imageUrl}
                           alt={prod.title}
-                          className="w-8 h-8 rounded-lg object-cover border border-[#28282a] shrink-0"
+                          className="w-8 h-8 rounded-lg object-cover border border-[#282830] shrink-0"
                         />
                       ) : (
-                        <div className="w-8 h-8 rounded-lg bg-[#111113] border border-[#28282a] flex items-center justify-center text-[#a1a1aa] shrink-0">
+                        <div className="w-8 h-8 rounded-lg bg-[#0C0C0E] border border-[#282830] flex items-center justify-center text-[#A1A1AA] shrink-0">
                           <ShoppingBag className="w-3.5 h-3.5" />
                         </div>
                       )}
                       <div className="min-w-0">
-                        <p className="text-xs font-semibold text-[#f1f1ee] truncate">
+                        <p className="text-xs font-semibold text-[#F4F4F0] truncate">
                           {prod.title}
                         </p>
-                        <p className="text-[10px] font-mono text-[#a1a1aa] stat-detail">
+                        <p className="text-[10px] font-mono text-[#A1A1AA] stat-detail">
                           {prod.universalCode ? `Cód: ${prod.universalCode}` : 'Menú sin código'}
                         </p>
                       </div>
                     </div>
-                    <span className="text-xs font-mono font-bold text-[#bec8ff] shrink-0 stat-detail">
+                    <span className="text-xs font-mono font-bold text-[#BEC8FF] shrink-0 stat-detail">
                       {prod.price !== undefined ? formatCurrency(prod.price) : '$0'}
                     </span>
                   </button>
@@ -963,22 +1128,22 @@ export const CashierView: React.FC = () => {
             )}
           </Card>
 
-          {/* 2. Ultimos cobros: SOLO los 3 últimos cobros hechos por la cuenta activa */}
+          {/* 2. Últimos cobros: SOLO los 3 últimos cobros hechos por la cuenta activa */}
           <Card padding="none" className="stat-card overflow-hidden">
-            <div className="p-5 border-b border-[#242426] flex items-center justify-between">
+            <div className="p-5 border-b border-[#282830] flex items-center justify-between">
               <div>
                 <div className="flex items-center gap-2">
-                  <Clock className="w-4 h-4 text-[#bec8ff]" />
-                  <h2 className="font-bold text-sm text-[#f1f1ee]">Ultimos cobros</h2>
+                  <Clock className="w-4 h-4 text-[#BEC8FF]" />
+                  <h2 className="font-bold text-sm text-[#F4F4F0]">Últimos cobros</h2>
                 </div>
-                <p className="text-[11px] text-[#a1a1aa] mt-0.5 stat-detail">
+                <p className="text-[11px] text-[#A1A1AA] mt-0.5 stat-detail">
                   Últimos 3 cobros realizados por {user?.name || 'esta cuenta'}
                 </p>
               </div>
               <button
                 type="button"
                 onClick={loadInitialData}
-                className="text-xs text-[#a1a1aa] hover:text-[#f1f1ee] flex items-center gap-1 cursor-pointer"
+                className="text-xs text-[#A1A1AA] hover:text-[#F4F4F0] flex items-center gap-1 cursor-pointer"
                 title="Actualizar cobros"
               >
                 <RefreshCw className="w-3.5 h-3.5" />
@@ -987,32 +1152,32 @@ export const CashierView: React.FC = () => {
 
             {myLast3Sales.length === 0 ? (
               <div className="p-8 text-center space-y-2">
-                <Smartphone className="w-8 h-8 text-[#a1a1aa] mx-auto" />
-                <p className="text-xs font-semibold text-[#f1f1ee]">
+                <Smartphone className="w-8 h-8 text-[#A1A1AA] mx-auto" />
+                <p className="text-xs font-semibold text-[#F4F4F0]">
                   Sin cobros recientes en esta cuenta
                 </p>
-                <p className="text-[11px] text-[#a1a1aa] stat-detail">
+                <p className="text-[11px] text-[#A1A1AA] stat-detail">
                   Aquí verás únicamente los últimos 3 cobros emitidos por {user?.name || 'tu usuario'}.
                 </p>
               </div>
             ) : (
-              <div className="divide-y divide-[#242426]">
+              <div className="divide-y divide-[#282830]">
                 {myLast3Sales.map((s) => (
                   <div
                     key={s.id}
-                    className="p-4 flex items-center justify-between gap-3 hover:bg-[#161619] transition-colors"
+                    className="p-4 flex items-center justify-between gap-3 hover:bg-[#141418] transition-colors"
                   >
                     <div className="min-w-0">
                       <div className="flex items-center gap-2">
-                        <span className="font-mono font-bold text-sm text-[#f1f1ee]">
+                        <span className="font-mono font-bold text-sm text-[#F4F4F0]">
                           {formatCurrency(s.amount)}
                         </span>
-                        <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-[#18181b] border border-[#28282a] text-[#bec8ff] stat-badge">
+                        <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-[#1C1C22] border border-[#282830] text-[#BEC8FF] stat-badge">
                           {methodBadgeLabel(s.method)}
                         </span>
                       </div>
-                      <p className="text-[11px] text-[#a1a1aa] mt-0.5 stat-detail">
-                        {formatDate(s.createdAt)} · {s.cartelCode || 'CAJA01'}
+                      <p className="text-[11px] text-[#A1A1AA] mt-0.5 stat-detail">
+                        {formatDate(s.createdAt)} · {s.cartelCode || 'BURGER01'}
                       </p>
                     </div>
 
@@ -1021,7 +1186,7 @@ export const CashierView: React.FC = () => {
                         to={`/r/${s.receiptId}`}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="text-xs font-semibold text-[#bec8ff] hover:underline shrink-0 flex items-center gap-1 stat-detail"
+                        className="text-xs font-semibold text-[#BEC8FF] hover:underline shrink-0 flex items-center gap-1 stat-detail"
                       >
                         <span>Comprobante</span>
                         <ExternalLink className="w-3 h-3" />
@@ -1035,62 +1200,52 @@ export const CashierView: React.FC = () => {
         </div>
       </main>
 
-      {/* Modal: Catálogo Completo (enfocado en cafeterías, restaurantes y productos sin código universal) */}
+      {/* Modal: Catálogo Completo */}
       {showCatalogModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80">
-          <div className="w-full max-w-2xl rounded-2xl bg-[#111113] border border-[#242426] flex flex-col max-h-[88vh] overflow-hidden shadow-2xl">
-            {/* Header del Catálogo */}
-            <div className="p-5 border-b border-[#242426] flex items-center justify-between gap-3">
+          <div className="w-full max-w-2xl rounded-2xl bg-[#141418] border border-[#282830] flex flex-col max-h-[88vh] overflow-hidden shadow-2xl">
+            <div className="p-5 border-b border-[#282830] flex items-center justify-between gap-3">
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-[#bec8ff]/15 text-[#bec8ff] flex items-center justify-center shrink-0">
+                <div className="w-10 h-10 rounded-xl bg-[#BEC8FF]/15 text-[#BEC8FF] flex items-center justify-center shrink-0">
                   <Coffee className="w-5 h-5" />
                 </div>
                 <div>
-                  <h2 className="font-bold text-base text-[#f1f1ee]">
+                  <h2 className="font-bold text-base text-[#F4F4F0]">
                     Catálogo y Menú Completo
                   </h2>
-                  <p className="text-xs text-[#a1a1aa]">
+                  <p className="text-xs text-[#A1A1AA]">
                     Deslizá o buscá platos, cafés y productos con o sin código universal.
                   </p>
                 </div>
               </div>
 
               <div className="flex items-center gap-2">
-                {user?.role !== 'cashier' && (
-                  <Link
-                    to="/panel/productos"
-                    className="text-xs font-semibold text-[#bec8ff] hover:underline px-2.5 py-1.5 rounded-lg bg-[#18181b] border border-[#28282a]"
-                  >
-                    Administrar productos
-                  </Link>
-                )}
                 <button
                   type="button"
                   onClick={() => setShowCatalogModal(false)}
-                  className="p-2 rounded-lg text-[#a1a1aa] hover:text-[#f1f1ee] cursor-pointer"
+                  className="p-2 rounded-lg text-[#A1A1AA] hover:text-[#F4F4F0] cursor-pointer"
                 >
                   <X className="w-5 h-5" />
                 </button>
               </div>
             </div>
 
-            {/* Buscador del Catálogo */}
-            <div className="p-4 border-b border-[#242426] bg-[#141417]">
-              <div className="flex items-center gap-2.5 bg-[#18181b] border border-[#28282a] rounded-xl px-3.5 py-2.5 focus-within:border-[#bec8ff]">
-                <Search className="w-4 h-4 text-[#a1a1aa] shrink-0" />
+            <div className="p-4 border-b border-[#282830] bg-[#0C0C0E]">
+              <div className="flex items-center gap-2.5 bg-[#141418] border border-[#282830] rounded-xl px-3.5 py-2.5 focus-within:border-[#BEC8FF]">
+                <Search className="w-4 h-4 text-[#A1A1AA] shrink-0" />
                 <input
                   type="text"
                   autoFocus
-                  placeholder="Buscar café, plato, bebida o código universal..."
+                  placeholder="Buscar plato, bebida o código universal..."
                   value={catalogSearch}
                   onChange={(e) => setCatalogSearch(e.target.value)}
-                  className="w-full bg-transparent text-sm text-[#f1f1ee] placeholder-[#71717a] focus:outline-none"
+                  className="w-full bg-transparent text-sm text-[#F4F4F0] placeholder-[#71717A] focus:outline-none"
                 />
                 {catalogSearch && (
                   <button
                     type="button"
                     onClick={() => setCatalogSearch('')}
-                    className="text-xs text-[#a1a1aa] hover:text-[#f1f1ee] cursor-pointer"
+                    className="text-xs text-[#A1A1AA] hover:text-[#F4F4F0] cursor-pointer"
                   >
                     Limpiar
                   </button>
@@ -1098,16 +1253,12 @@ export const CashierView: React.FC = () => {
               </div>
             </div>
 
-            {/* Lista deslizable de todo el menú */}
             <div className="flex-1 overflow-y-auto p-4 space-y-2.5">
               {filteredCatalogProducts.length === 0 ? (
                 <div className="py-12 text-center space-y-2">
-                  <ShoppingBag className="w-8 h-8 text-[#a1a1aa] mx-auto" />
-                  <p className="text-sm font-semibold text-[#f1f1ee]">
+                  <ShoppingBag className="w-8 h-8 text-[#A1A1AA] mx-auto" />
+                  <p className="text-sm font-semibold text-[#F4F4F0]">
                     No encontramos productos con "{catalogSearch}"
-                  </p>
-                  <p className="text-xs text-[#a1a1aa]">
-                    Probá con otro nombre o agregá nuevos productos desde la sección Productos.
                   </p>
                 </div>
               ) : (
@@ -1120,8 +1271,8 @@ export const CashierView: React.FC = () => {
                         key={prod.id}
                         className={`p-3 rounded-xl border flex items-center justify-between gap-3 transition-colors ${
                           qty > 0
-                            ? 'bg-[#2fb36a]/10 border-[#2fb36a]'
-                            : 'bg-[#161619] border-[#28282a] hover:border-[#3a3a3e]'
+                            ? 'bg-[#2FB36A]/10 border-[#2FB36A]'
+                            : 'bg-[#1C1C22] border-[#282830] hover:border-[#3A3A44]'
                         }`}
                       >
                         <div
@@ -1132,27 +1283,27 @@ export const CashierView: React.FC = () => {
                             <img
                               src={prod.imageUrl}
                               alt={prod.title}
-                              className="w-11 h-11 rounded-xl object-cover border border-[#28282a] shrink-0"
+                              className="w-11 h-11 rounded-xl object-cover border border-[#282830] shrink-0"
                             />
                           ) : (
-                            <div className="w-11 h-11 rounded-xl bg-[#111113] border border-[#28282a] flex items-center justify-center text-[#bec8ff] shrink-0">
+                            <div className="w-11 h-11 rounded-xl bg-[#141418] border border-[#282830] flex items-center justify-center text-[#BEC8FF] shrink-0">
                               <Coffee className="w-5 h-5" />
                             </div>
                           )}
                           <div className="min-w-0">
-                            <p className="text-xs font-bold text-[#f1f1ee] truncate">
+                            <p className="text-xs font-bold text-[#F4F4F0] truncate">
                               {prod.title}
                             </p>
                             {prod.description && (
-                              <p className="text-[11px] text-[#a1a1aa] truncate">
+                              <p className="text-[11px] text-[#A1A1AA] truncate">
                                 {prod.description}
                               </p>
                             )}
                             <div className="flex items-center gap-2 mt-1">
-                              <span className="text-xs font-mono font-extrabold text-[#34d399]">
+                              <span className="text-xs font-mono font-extrabold text-[#2FB36A]">
                                 {prod.price !== undefined ? formatCurrency(prod.price) : '$0'}
                               </span>
-                              <span className="text-[10px] font-mono text-[#a1a1aa]">
+                              <span className="text-[10px] font-mono text-[#A1A1AA]">
                                 {prod.universalCode ? `Cód: ${prod.universalCode}` : 'Sin código'}
                               </span>
                             </div>
@@ -1164,17 +1315,17 @@ export const CashierView: React.FC = () => {
                             <button
                               type="button"
                               onClick={() => handleChangeItemQty(prod.id, -1)}
-                              className="w-7 h-7 rounded-lg bg-[#111113] border border-[#28282a] flex items-center justify-center text-[#f1f1ee] hover:border-[#bec8ff] cursor-pointer"
+                              className="w-7 h-7 rounded-lg bg-[#141418] border border-[#282830] flex items-center justify-center text-[#F4F4F0] hover:border-[#BEC8FF] cursor-pointer"
                             >
                               <Minus className="w-3.5 h-3.5" />
                             </button>
-                            <span className="w-5 text-center font-mono text-xs font-bold text-[#f1f1ee]">
+                            <span className="w-5 text-center font-mono text-xs font-bold text-[#F4F4F0]">
                               {qty}
                             </span>
                             <button
                               type="button"
                               onClick={() => addProductToSale(prod)}
-                              className="w-7 h-7 rounded-lg bg-[#2fb36a] text-[#0c0c0c] flex items-center justify-center font-bold cursor-pointer"
+                              className="w-7 h-7 rounded-lg bg-[#2FB36A] text-[#08120C] flex items-center justify-center font-bold cursor-pointer"
                             >
                               <Plus className="w-3.5 h-3.5" />
                             </button>
@@ -1183,7 +1334,7 @@ export const CashierView: React.FC = () => {
                           <button
                             type="button"
                             onClick={() => addProductToSale(prod)}
-                            className="px-3 py-1.5 rounded-xl bg-[#18181b] hover:bg-[#bec8ff] text-[#f1f1ee] hover:text-[#0c0c0c] border border-[#28282a] text-xs font-bold transition-colors shrink-0 cursor-pointer"
+                            className="px-3 py-1.5 rounded-xl bg-[#141418] hover:bg-[#BEC8FF] text-[#F4F4F0] hover:text-[#0C0C0E] border border-[#282830] text-xs font-bold transition-colors shrink-0 cursor-pointer"
                           >
                             + Sumar
                           </button>
@@ -1195,14 +1346,13 @@ export const CashierView: React.FC = () => {
               )}
             </div>
 
-            {/* Barra Inferior Fija con el Importe Debajo */}
-            <div className="p-4 border-t border-[#242426] bg-[#161619] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="p-4 border-t border-[#282830] bg-[#1C1C22] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div className="flex items-center justify-between sm:justify-start gap-4">
                 <div>
-                  <span className="text-[11px] font-semibold text-[#a1a1aa] block">
+                  <span className="text-[11px] font-semibold text-[#A1A1AA] block">
                     Importe acumulado ({scannedItems.reduce((a, b) => a + b.quantity, 0)} ítems)
                   </span>
-                  <span className="text-2xl font-extrabold font-mono text-[#f1f1ee] tabular-nums">
+                  <span className="text-2xl font-extrabold font-mono text-[#F4F4F0] tabular-nums">
                     {formatCurrency(amount)}
                   </span>
                 </div>
@@ -1210,7 +1360,7 @@ export const CashierView: React.FC = () => {
                   <button
                     type="button"
                     onClick={handleClear}
-                    className="text-xs font-semibold text-[#a1a1aa] hover:text-red-400 underline cursor-pointer"
+                    className="text-xs font-semibold text-[#A1A1AA] hover:text-red-400 underline cursor-pointer"
                   >
                     Vaciar pedido
                   </button>
@@ -1231,20 +1381,20 @@ export const CashierView: React.FC = () => {
         </div>
       )}
 
-      {/* Modal: Cambiar o crear cuenta (requiere contraseña al elegir un cargo superior) */}
+      {/* Modal: Cambiar o crear cuenta */}
       {showCashierAccountModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80">
-          <div className="w-full max-w-md rounded-2xl bg-[#111113] border border-[#242426] p-6 space-y-5 shadow-2xl">
+          <div className="w-full max-w-md rounded-2xl bg-[#141418] border border-[#282830] p-6 space-y-5 shadow-2xl">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2.5">
-                <div className="w-9 h-9 rounded-xl bg-[#bec8ff]/15 text-[#bec8ff] flex items-center justify-center">
+                <div className="w-9 h-9 rounded-xl bg-[#BEC8FF]/15 text-[#BEC8FF] flex items-center justify-center">
                   <UserPlus className="w-5 h-5" />
                 </div>
                 <div>
-                  <h2 className="font-bold text-base text-[#f1f1ee]">
+                  <h2 className="font-bold text-base text-[#F4F4F0]">
                     Cambiar o crear cuenta
                   </h2>
-                  <p className="text-xs text-[#a1a1aa]">
+                  <p className="text-xs text-[#A1A1AA]">
                     Seleccioná la cuenta activa o sumá un nuevo cajero.
                   </p>
                 </div>
@@ -1255,35 +1405,34 @@ export const CashierView: React.FC = () => {
                   setShowCashierAccountModal(false);
                   setPendingElevationMember(null);
                 }}
-                className="p-1.5 rounded-lg text-[#a1a1aa] hover:text-[#f1f1ee] cursor-pointer"
+                className="p-1.5 rounded-lg text-[#A1A1AA] hover:text-[#F4F4F0] cursor-pointer"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
-            {/* Si se seleccionó un cargo superior (Dueño / Encargado), pedir contraseña de registro */}
             {pendingElevationMember ? (
               <form
                 onSubmit={handleConfirmElevationPassword}
-                className="p-4 rounded-xl bg-[#161619] border border-[#bec8ff]/40 space-y-3.5"
+                className="p-4 rounded-xl bg-[#1C1C22] border border-[#BEC8FF]/40 space-y-3.5"
               >
                 <div className="flex items-start gap-2.5">
-                  <KeyRound className="w-4 h-4 text-[#bec8ff] shrink-0 mt-0.5" />
+                  <KeyRound className="w-4 h-4 text-[#BEC8FF] shrink-0 mt-0.5" />
                   <div>
-                    <p className="text-xs font-bold text-[#f1f1ee]">
+                    <p className="text-xs font-bold text-[#F4F4F0]">
                       Verificación de seguridad requerida
                     </p>
-                    <p className="text-[11px] text-[#a1a1aa] mt-0.5">
+                    <p className="text-[11px] text-[#A1A1AA] mt-0.5">
                       Para cambiar a{' '}
-                      <strong className="text-[#f1f1ee]">{pendingElevationMember.name}</strong> (
+                      <strong className="text-[#F4F4F0]">{pendingElevationMember.name}</strong> (
                       {pendingElevationMember.role === 'owner' ? 'Dueño' : 'Encargado'}), ingresá la
-                      contraseña con la que se registró la cuenta.
+                      contraseña o código de autorización.
                     </p>
                   </div>
                 </div>
 
                 <div className="relative">
-                  <Lock className="w-4 h-4 text-[#a1a1aa] absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  <Lock className="w-4 h-4 text-[#A1A1AA] absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
                   <input
                     type={showElevationPassword ? 'text' : 'password'}
                     required
@@ -1291,12 +1440,12 @@ export const CashierView: React.FC = () => {
                     placeholder="Contraseña de registro..."
                     value={elevationPassword}
                     onChange={(e) => setElevationPassword(e.target.value)}
-                    className="w-full pl-10 pr-10 py-2.5 rounded-xl bg-[#111113] border border-[#28282a] text-xs text-[#f1f1ee] focus:outline-none focus:border-[#bec8ff]"
+                    className="w-full pl-10 pr-10 py-2.5 rounded-xl bg-[#141418] border border-[#282830] text-xs text-[#F4F4F0] focus:outline-none focus:border-[#BEC8FF]"
                   />
                   <button
                     type="button"
                     onClick={() => setShowElevationPassword((prev) => !prev)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-[#a1a1aa] hover:text-[#f1f1ee] cursor-pointer"
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-[#A1A1AA] hover:text-[#F4F4F0] cursor-pointer"
                   >
                     {showElevationPassword ? (
                       <EyeOff className="w-4 h-4" />
@@ -1330,10 +1479,9 @@ export const CashierView: React.FC = () => {
               </form>
             ) : (
               <>
-                {/* Lista de cuentas del equipo */}
                 {selectableAccounts.length > 0 && (
                   <div className="space-y-2 max-h-56 overflow-y-auto">
-                    <p className="text-xs font-semibold text-[#a1a1aa]">Cuentas del comercio</p>
+                    <p className="text-xs font-semibold text-[#A1A1AA]">Cuentas del comercio</p>
                     {selectableAccounts.map((m) => {
                       const isCurrent =
                         user?.email && m.email.toLowerCase() === user.email.toLowerCase();
@@ -1354,20 +1502,20 @@ export const CashierView: React.FC = () => {
                           onClick={() => handleSelectAccount(m)}
                           className={`w-full p-3 rounded-xl border flex items-center justify-between text-left transition-colors cursor-pointer ${
                             isCurrent
-                              ? 'bg-[#2fb36a]/15 border-[#2fb36a] text-[#f1f1ee]'
-                              : 'bg-[#161619] border-[#28282a] text-[#f1f1ee] hover:border-[#bec8ff]'
+                              ? 'bg-[#2FB36A]/15 border-[#2FB36A] text-[#F4F4F0]'
+                              : 'bg-[#1C1C22] border-[#282830] text-[#F4F4F0] hover:border-[#BEC8FF]'
                           }`}
                         >
                           <div>
                             <p className="text-xs font-bold flex items-center gap-1.5">
                               <span>{m.name}</span>
                               {requiresPassword && (
-                                <Lock className="w-3 h-3 text-[#bec8ff]" />
+                                <Lock className="w-3 h-3 text-[#BEC8FF]" />
                               )}
                             </p>
-                            <p className="text-[11px] text-[#a1a1aa]">{roleLabel}</p>
+                            <p className="text-[11px] text-[#A1A1AA]">{roleLabel}</p>
                           </div>
-                          <span className="text-xs font-semibold text-[#bec8ff]">
+                          <span className="text-xs font-semibold text-[#BEC8FF]">
                             {isCurrent
                               ? 'Activo'
                               : requiresPassword
@@ -1380,12 +1528,11 @@ export const CashierView: React.FC = () => {
                   </div>
                 )}
 
-                {/* Crear nuevo cajero pidiendo solo Nombre y apellido */}
                 <form
                   onSubmit={handleCreateAndSwitchCashier}
-                  className="pt-4 border-t border-[#242426] space-y-3"
+                  className="pt-4 border-t border-[#282830] space-y-3"
                 >
-                  <label className="block text-xs font-semibold text-[#a1a1aa]">
+                  <label className="block text-xs font-semibold text-[#A1A1AA]">
                     Crear nuevo cajero (Nombre y apellido)
                   </label>
                   <div className="flex gap-2">
@@ -1395,7 +1542,7 @@ export const CashierView: React.FC = () => {
                       placeholder="Ej: Sofía López"
                       value={newCashierName}
                       onChange={(e) => setNewCashierName(e.target.value)}
-                      className="flex-1 bg-[#161619] border border-[#28282a] rounded-xl px-3.5 py-2.5 text-xs text-[#f1f1ee] focus:outline-none focus:border-[#bec8ff]"
+                      className="flex-1 bg-[#1C1C22] border border-[#282830] rounded-xl px-3.5 py-2.5 text-xs text-[#F4F4F0] focus:outline-none focus:border-[#BEC8FF]"
                     />
                     <Button
                       type="submit"

@@ -4,6 +4,11 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import crypto from 'node:crypto';
 import dotenv from 'dotenv';
+import {
+  renderWelcomeCardEmail,
+  renderRecoverCardEmail,
+  renderMerchantBroadcastEmail,
+} from './src/lib/emailTemplates';
 
 dotenv.config();
 
@@ -362,15 +367,261 @@ async function startServer() {
       return;
     }
 
-    // 5. Activaciones en Red Toque: /api/network/activations
-    if (pathname === '/api/network/activations' && req.method === 'POST') {
+    // 5. Endpoints Resend Oficiales con Plantillas Tactile Hardware:
+    //    - POST /api/club/join (y /api/club/welcome-email): Bienvenida 1ra visita (1/10 sellos)
+    //    - POST /api/club/recover: Recuperación con código OTP de 4 dígitos + Magic Link
+    //    - POST /api/club/broadcast: Avisos y beneficios a socios con consent === true (Pro / Trial)
+    if (
+      (pathname === '/api/club/join' || pathname === '/api/club/welcome-email') &&
+      req.method === 'POST'
+    ) {
       try {
         const raw = await readBody(req);
         const body = raw ? JSON.parse(raw) : {};
-        const id = body.id || `act-${Date.now()}`;
-        memoryNetworkActivations.set(id, body);
+        const email = String(body.email || '').trim().toLowerCase();
+        const customerName = String(body.customerName || body.name || 'Socio').trim();
+        const businessName = String(body.businessName || 'La Burger').trim();
+        const memberCode = String(body.memberCode || 'LB-1001').trim();
+        const localCode = String(body.localCode || 'BURGER01').trim();
+        const stamps = Number(body.stamps ?? 1);
+        const stampsRequired = Number(body.stampsRequired ?? 10);
+        const rewardText = String(
+          body.rewardText || body.reward || 'Beneficio exclusivo en tu visita #10'
+        ).trim();
+        const hubUrl = String(body.hubUrl || `${url.origin}/u/${localCode}`).trim();
+        const walletUrl = String(
+          body.walletUrl || `${url.origin}/u/${localCode}?wallet=open&code=${encodeURIComponent(memberCode)}`
+        ).trim();
+
+        const html = renderWelcomeCardEmail({
+          businessName,
+          customerName,
+          stamps,
+          stampsRequired,
+          rewardText,
+          memberCode,
+          hubUrl,
+          walletUrl,
+        });
+
+        const resendKey = process.env.RESEND_API_KEY?.trim();
+        const fromEmail = process.env.EMAIL_FROM?.trim() || 'Toque <onboarding@resend.dev>';
+        let emailSent = false;
+
+        if (resendKey && email && email.includes('@')) {
+          try {
+            const r = await fetch('https://api.resend.com/emails', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${resendKey}`,
+              },
+              body: JSON.stringify({
+                from: fromEmail,
+                to: [email],
+                subject: `¡Ya sos parte de ${businessName}! (${stamps}/${stampsRequired} sellos)`,
+                html,
+              }),
+            });
+            emailSent = r.ok;
+          } catch {
+            // fallback
+          }
+        }
+
         res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(JSON.stringify({ success: true, activation: body }));
+        res.end(
+          JSON.stringify({
+            success: true,
+            emailSent,
+            provider: resendKey ? 'resend' : 'preview',
+          })
+        );
+        return;
+      } catch (err: any) {
+        res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ success: false, error: err?.message }));
+        return;
+      }
+    }
+
+    if (pathname === '/api/club/recover' && req.method === 'POST') {
+      try {
+        const raw = await readBody(req);
+        const body = raw ? JSON.parse(raw) : {};
+        const cleanEmail = String(body.email || '').trim().toLowerCase();
+        const businessName = String(body.businessName || 'La Burger').trim();
+        const customerName = String(
+          body.customerName || cleanEmail.split('@')[0] || 'Socio'
+        ).trim();
+        const localCode = String(body.localCode || 'BURGER01').trim();
+        const currentStamps = Number(body.currentStamps ?? 1);
+        const stampsRequired = Number(body.stampsRequired ?? 10);
+
+        if (!cleanEmail || !cleanEmail.includes('@')) {
+          res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+          res.end(
+            JSON.stringify({ success: false, error: 'Ingresá un correo electrónico válido.' })
+          );
+          return;
+        }
+
+        // Generar código OTP corto de 4 dígitos para recuperación rápida
+        const otpCode = String(Math.floor(1000 + Math.random() * 9000));
+        const now = Date.now();
+        memoryOtps.set(cleanEmail, {
+          email: cleanEmail,
+          code: otpCode,
+          expiresAtMs: now + 10 * 60 * 1000,
+          resendAvailableAtMs: now + 30 * 1000,
+          attempts: 0,
+          maxAttempts: 5,
+          used: false,
+        });
+
+        const magicLinkUrl = `${url.origin}/u/${encodeURIComponent(
+          localCode
+        )}?recoverEmail=${encodeURIComponent(cleanEmail)}&otp=${encodeURIComponent(otpCode)}`;
+
+        const html = renderRecoverCardEmail({
+          businessName,
+          customerName,
+          otpCode,
+          magicLinkUrl,
+          currentStamps,
+          stampsRequired,
+        });
+
+        const resendKey = process.env.RESEND_API_KEY?.trim();
+        const fromEmail = process.env.EMAIL_FROM?.trim() || 'Toque <onboarding@resend.dev>';
+        let emailSent = false;
+
+        if (resendKey) {
+          try {
+            const r = await fetch('https://api.resend.com/emails', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${resendKey}`,
+              },
+              body: JSON.stringify({
+                from: fromEmail,
+                to: [cleanEmail],
+                subject: `${otpCode} · Recuperá tu tarjeta de ${businessName}`,
+                html,
+              }),
+            });
+            emailSent = r.ok;
+          } catch {
+            // fallback
+          }
+        }
+
+        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(
+          JSON.stringify({
+            success: true,
+            emailSent,
+            magicLinkUrl,
+            previewCode: emailSent ? undefined : otpCode,
+          })
+        );
+        return;
+      } catch (err: any) {
+        res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ success: false, error: err?.message }));
+        return;
+      }
+    }
+
+    if (pathname === '/api/club/broadcast' && req.method === 'POST') {
+      try {
+        const raw = await readBody(req);
+        const body = raw ? JSON.parse(raw) : {};
+        const planStatus = String(body.planStatus || 'trial').toLowerCase();
+        if (planStatus === 'free' || planStatus === 'expired') {
+          res.writeHead(403, { 'Content-Type': 'application/json; charset=utf-8' });
+          res.end(
+            JSON.stringify({
+              success: false,
+              error:
+                'El envío de avisos por email está disponible en el Plan Pro ($34.999) o durante el Trial activo de 14 días.',
+            })
+          );
+          return;
+        }
+
+        const rawRecipients: Array<string | { email: string; name?: string; consent?: boolean }> =
+          Array.isArray(body.recipients) ? body.recipients : [];
+        const headline = String(body.headline || body.subject || 'Novedad exclusiva del Club').trim();
+        const messageBody = String(body.messageBody || body.message || '').trim();
+        const businessName = String(body.businessName || 'La Burger').trim();
+        const localCode = String(body.localCode || 'BURGER01').trim();
+        const ctaLabel = String(body.ctaLabel || 'Ver mi tarjeta y beneficio').trim();
+        const ctaUrl = String(body.ctaUrl || `${url.origin}/u/${localCode}`).trim();
+
+        const resendKey = process.env.RESEND_API_KEY?.trim();
+        const fromEmail = process.env.EMAIL_FROM?.trim() || 'Toque <onboarding@resend.dev>';
+        let sentCount = 0;
+
+        const consentedRecipients = rawRecipients
+          .map((item) => {
+            if (typeof item === 'string') {
+              return { email: item.trim().toLowerCase(), name: 'Socio', consent: true };
+            }
+            return {
+              email: String(item.email || '').trim().toLowerCase(),
+              name: String(item.name || 'Socio').trim(),
+              consent: item.consent !== false,
+            };
+          })
+          .filter((r) => r.consent && r.email.includes('@'));
+
+        if (resendKey && consentedRecipients.length > 0 && messageBody) {
+          for (const rec of consentedRecipients.slice(0, 50)) {
+            const unsubscribeUrl = `${url.origin}/u/${localCode}?unsubscribe=${encodeURIComponent(
+              rec.email
+            )}`;
+            const html = renderMerchantBroadcastEmail({
+              businessName,
+              customerName: rec.name,
+              headline,
+              messageBody,
+              ctaLabel,
+              ctaUrl,
+              unsubscribeUrl,
+            });
+            try {
+              const r = await fetch('https://api.resend.com/emails', {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  Authorization: `Bearer ${resendKey}`,
+                },
+                body: JSON.stringify({
+                  from: fromEmail,
+                  to: [rec.email],
+                  subject: `${businessName}: ${headline}`,
+                  html,
+                }),
+              });
+              if (r.ok) sentCount++;
+            } catch {
+              // ignore individual error
+            }
+          }
+        } else {
+          sentCount = consentedRecipients.length;
+        }
+
+        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(
+          JSON.stringify({
+            success: true,
+            sentCount,
+            provider: resendKey ? 'resend' : 'queued',
+          })
+        );
         return;
       } catch (err: any) {
         res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
@@ -387,28 +638,45 @@ async function startServer() {
       try {
         const raw = await readBody(req);
         const body = raw ? JSON.parse(raw) : {};
-        const businessId = (body.businessId || 'musical-monroe').slice(0, 64);
-        const businessName = (body.businessName || 'Musical Monroe').slice(0, 80);
-        const brandColor = body.brandColor || '#1e1b4b';
-        const stamps = typeof body.stamps === 'number' ? body.stamps : 0;
-        const stampsRequired = typeof body.stampsRequired === 'number' ? body.stampsRequired : 10;
-        const rewardText = (body.rewardText || 'Beneficio exclusivo en instrumentos y accesorios').slice(0, 120);
-        const customerName = (body.customerName || 'Socio Toque').slice(0, 80);
+        const businessId = (body.businessId || 'la-burger').slice(0, 64);
+        const businessName = (body.title || body.businessName || 'La Burger').slice(0, 80);
+        const brandColor =
+          typeof (body.backgroundColor || body.brandColor) === 'string' &&
+          (body.backgroundColor || body.brandColor).startsWith('#')
+            ? body.backgroundColor || body.brandColor
+            : '#141418';
+        const stamps = typeof body.stamps === 'number' ? body.stamps : 1;
+        const stampsRequired =
+          typeof body.stampsRequired === 'number' ? body.stampsRequired : 10;
+        const rewardText = (
+          body.reward ||
+          body.rewardText ||
+          '1 Beneficio sin cargo al completar la tarjeta'
+        ).slice(0, 120);
+        const customerName = (body.memberName || body.customerName || 'Socio Toque').slice(0, 80);
         const customerContact = (body.customerContact || '').slice(0, 100);
-        const code = (body.code || 'MONROE01').toUpperCase().slice(0, 32);
-        const memberCode = (body.memberCode || `MM-${code}`).slice(0, 32);
+        const code = (body.code || 'BURGER01').toUpperCase().slice(0, 32);
+        const memberId = (body.memberId || `mem-${Date.now().toString(36)}`).slice(0, 64);
+        const memberCode = (body.barcodeValue || body.memberCode || `TQ-${code}`).slice(0, 32);
         const qrUrl = body.qrUrl || `${url.origin}/h/${code}`;
 
         const apiKey = process.env.WALLETWALLET_API_KEY?.trim();
 
         if (apiKey) {
           const payload = {
+            title: businessName,
+            memberName: customerName,
+            memberId,
+            stamps,
+            stampsRequired,
+            reward: rewardText,
+            backgroundColor: brandColor,
+            barcodeValue: memberCode,
             merchantName: businessName,
             organizationName: businessName,
             description: `Tarjeta de sellos de ${businessName}`,
-            backgroundColor: brandColor,
-            labelColor: '#bec8ff',
-            foregroundColor: '#f1f1ee',
+            labelColor: '#BEC8FF',
+            foregroundColor: '#F1F1EE',
             headerField: {
               key: 'stamps',
               label: 'SELLOS',
@@ -482,6 +750,15 @@ async function startServer() {
                     passData.url ||
                     `${url.origin}/h/${code}?wallet=google&passId=${encodeURIComponent(passId)}`,
                   qrUrl,
+                  fallbackWebPass: !(passData.applePassUrl || passData.pkpassUrl || passData.googlePassUrl || passData.saveUrl),
+                  barcodeValue: memberCode,
+                  title: businessName,
+                  memberName: customerName,
+                  memberId,
+                  stamps,
+                  stampsRequired,
+                  reward: rewardText,
+                  backgroundColor: brandColor,
                   totalPassesIssued: memoryWalletPasses.size,
                 })
               );
@@ -495,6 +772,7 @@ async function startServer() {
           }
         }
 
+        // Fallback Infalible: Pase Digital Web / Tarjeta Instalable con Código de Barras CODE128 y QR 100% reales
         const passId = `ww-${code.toLowerCase()}-${Date.now().toString(36)}`;
         memoryWalletPasses.set(passId, {
           passId,
@@ -502,7 +780,7 @@ async function startServer() {
           businessName,
           customerContact,
           createdAt: new Date().toISOString(),
-          provider: apiKey ? 'api.walletwallet.dev' : 'toque-wallet',
+          provider: 'toque-web-pass-fallback',
         });
 
         const queryParams = new URLSearchParams({
@@ -519,24 +797,31 @@ async function startServer() {
         res.end(
           JSON.stringify({
             success: true,
-            provider: apiKey ? 'api.walletwallet.dev' : 'toque-wallet',
+            provider: 'toque-web-pass-fallback',
             passId,
-            validationCode: `WW-${code}-${stamps}${stampsRequired}`,
+            validationCode: `TQ-${code}-${stamps}S`,
             appleWalletUrl: `${url.origin}/h/${code}?wallet=apple&${queryParams}`,
             googleWalletUrl: `${url.origin}/h/${code}?wallet=google&${queryParams}`,
             qrUrl,
+            fallbackWebPass: true,
+            barcodeValue: memberCode,
+            title: businessName,
+            memberName: customerName,
+            memberId,
+            stamps,
+            stampsRequired,
+            reward: rewardText,
+            backgroundColor: brandColor,
             totalPassesIssued: memoryWalletPasses.size,
           })
         );
         return;
       } catch (err: any) {
-        res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
         res.end(
           JSON.stringify({
-            error: {
-              code: 'WALLET_PASS_ERROR',
-              message: err?.message || 'Error al generar pase de billetera',
-            },
+            success: false,
+            error: err?.message || 'Error al generar pase de Wallet',
           })
         );
         return;

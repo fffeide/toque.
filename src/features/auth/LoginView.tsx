@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../../lib/authContext';
 import { useToast } from '../../components/ui/Toast';
+import { BrandLogo } from '../../components/ui/Avatar';
 import { Mail, KeyRound, ArrowRight, RefreshCw, ShieldCheck } from 'lucide-react';
 
 export const LoginView: React.FC = () => {
@@ -67,7 +68,7 @@ export const LoginView: React.FC = () => {
       if (user?.isSuperAdmin || user?.role === 'superadmin') {
         navigate('/admin');
       } else if (user?.role === 'cashier') {
-        navigate('/panel/escanear');
+        navigate('/panel/caja');
       } else {
         navigate('/panel/resumen');
       }
@@ -95,18 +96,15 @@ export const LoginView: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-[#000000] text-[#f1f1ee] flex flex-col justify-center py-12 px-4 sm:px-6 lg:px-8">
+    <div className="min-h-screen bg-[#0C0C0E] text-[#F4F4F0] flex flex-col justify-center py-12 px-4 sm:px-6 lg:px-8">
       <div className="sm:mx-auto sm:w-full sm:max-w-md text-center">
-        <Link to="/" className="inline-flex items-center gap-2.5">
-          <div className="w-10 h-10 rounded-xl bg-[#bec8ff] flex items-center justify-center text-[#0c0c0c] font-bold text-lg">
-            T
-          </div>
-          <span className="font-bold text-2xl tracking-tight text-[#f1f1ee]">toque™</span>
+        <Link to="/" className="inline-flex items-center justify-center">
+          <BrandLogo variant="full" size="md" />
         </Link>
-        <h1 className="mt-6 text-2xl font-extrabold text-[#f1f1ee]">
+        <h1 className="mt-6 text-2xl font-extrabold text-[#F4F4F0]">
           {step === 'email' ? 'Ingresá con tu correo' : 'Ingresá el código'}
         </h1>
-        <p className="mt-2 text-sm text-[#a1a1aa]">
+        <p className="mt-2 text-sm text-[#A1A1AA]">
           {step === 'email'
             ? 'Sin contraseñas. Te enviamos un código único de 6 dígitos por correo electrónico.'
             : `Enviamos un código de 6 números a ${email}. Vence en 10 minutos.`}
@@ -114,7 +112,7 @@ export const LoginView: React.FC = () => {
       </div>
 
       <div className="mt-8 sm:mx-auto sm:w-full sm:max-w-md space-y-5">
-        <div className="rounded-2xl bg-[#111113] border border-[#242426] p-6 sm:p-8 space-y-6">
+        <div className="rounded-2xl bg-[#141418] border border-[#282830] p-6 sm:p-8 space-y-6">
           {error && (
             <div
               role="alert"
@@ -129,20 +127,20 @@ export const LoginView: React.FC = () => {
               <div>
                 <label
                   htmlFor="login-email"
-                  className="block text-xs font-medium text-[#f1f1ee] mb-1.5"
+                  className="block text-xs font-medium text-[#F4F4F0] mb-1.5"
                 >
                   Tu correo electrónico
                 </label>
                 <div className="relative">
-                  <Mail className="w-4 h-4 text-[#a1a1aa] absolute left-3.5 top-1/2 -translate-y-1/2" />
+                  <Mail className="w-4 h-4 text-[#A1A1AA] absolute left-3.5 top-1/2 -translate-y-1/2" />
                   <input
                     id="login-email"
                     type="email"
                     required
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
-                    placeholder="hola@musicalmonroe.com.ar"
-                    className="w-full pl-10 pr-3.5 py-3 rounded-xl bg-[#18181b] border border-[#28282a] text-sm text-[#f1f1ee] placeholder-[#a1a1aa]/50 focus:outline-none focus:border-[#bec8ff]"
+                    placeholder="nombre@comercio.com"
+                    className="w-full pl-10 pr-3.5 py-3 rounded-xl bg-[#1C1C22] border border-[#282830] text-sm text-[#F4F4F0] placeholder-[#A1A1AA]/50 focus:outline-none focus:border-[#D95B26]"
                   />
                 </div>
               </div>

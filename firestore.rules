@@ -199,6 +199,26 @@ service cloud.firestore {
       allow delete: if isValidId(receiptId);
     }
 
+    function isSuperAdminUser() {
+      return request.auth != null && (
+        request.auth.token.email == 'fedeeeloiss@gmail.com' ||
+        exists(/databases/$(database)/documents/toque_admins/$(request.auth.token.email))
+      );
+    }
+
+    function isValidToqueAdmin(data) {
+      return data.email is string && data.email.size() >= 3 && data.email.size() <= 120
+        && data.name is string && data.name.size() >= 1 && data.name.size() <= 100
+        && data.level in ['admin', 'soporte', 'operaciones']
+        && data.createdAt is string;
+    }
+
+    match /toque_admins/{adminEmail} {
+      allow get, list: if true;
+      allow create, update: if isSuperAdminUser() && isValidToqueAdmin(incoming());
+      allow delete: if isSuperAdminUser() && adminEmail != 'fedeeeloiss@gmail.com';
+    }
+
     match /system/{docId} {
       allow get, list: if true;
     }
@@ -208,3 +228,4 @@ service cloud.firestore {
     }
   }
 }
+

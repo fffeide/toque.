@@ -26,14 +26,16 @@ export const ClubSubscriptionView: React.FC = () => {
     loadPlan();
   }, []);
 
-  const handleSelectPlan = async (planId: 'mensual' | 'anual') => {
+  const handleSelectPlan = async (planId: 'free' | 'mensual' | 'anual') => {
     setActivatingId(planId);
     setFeedback('');
     try {
       const updated = await api.startTrial(planId);
       setPlanState(updated);
       setFeedback(
-        `Plan ${planId === 'anual' ? 'Anual' : 'Mensual'} seleccionado (simulado en modo demostración).`
+        planId === 'free'
+          ? 'Plan Gratuito seleccionado.'
+          : `Plan ${planId === 'anual' ? 'Anual' : 'Mensual'} seleccionado (simulado en modo demostración).`
       );
     } finally {
       setActivatingId(null);

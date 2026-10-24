@@ -4,22 +4,32 @@
 @import "./styles/hero-landing.css";
 
 :root {
-  --bg-main: #000000;
-  --bg-sidebar: #0c0c0c;
-  --bg-card: #111113;
-  --bg-elevated: #18181b;
-  --border-card: #242426;
-  --border-hover: #343438;
-  --accent-primary: #bec8ff;
-  --accent-green: #2fb36a;
-  --paper: #f1f1ee;
-  --ink: #0c0c0c;
-  --text-primary: #f1f1ee;
-  --text-secondary: #9c9c98;
+  --brand-orange: #D95B26;
+  --brand-lavender: #BEC8FF;
+  --bg-canvas: #0C0C0E;
+  --surface: #141418;
+  --surface-elevated: #1C1C22;
+  --border-tech: #282830;
+  --accent-emerald: #2FB36A;
 
-  --font-display: 'Inter', system-ui, -apple-system, sans-serif;
+  --bg-main: #0C0C0E;
+  --bg-sidebar: #0C0C0E;
+  --bg-card: #141418;
+  --bg-elevated: #1C1C22;
+  --border-card: #282830;
+  --border-hover: #3A3A46;
+  --accent-primary: #D95B26;
+  --accent-secondary: #BEC8FF;
+  --accent-green: #2FB36A;
+  --paper: #F1F1EE;
+  --ink: #0C0C0E;
+  --text-primary: #F1F1EE;
+  --text-secondary: #A1A1AA;
+
+  --font-display: 'Sora', 'Inter', system-ui, -apple-system, sans-serif;
   --font-body: 'Inter', system-ui, -apple-system, sans-serif;
   --font-code: 'JetBrains Mono', monospace;
+  --font-receipt: 'BubbledotICG-FinePos', 'JetBrains Mono', 'Courier New', monospace;
 }
 
 html.large-text {
@@ -28,17 +38,19 @@ html.large-text {
 
 html.theme-light {
   --bg-main: #f2ede2;
-  --bg-sidebar: #111113;
+  --bg-sidebar: #141418;
   --bg-card: #faf7f0;
   --bg-elevated: #ebe5d8;
-  --border-card: #111113;
+  --border-card: #141418;
   --border-hover: #000000;
   --text-primary: #0c0c0c;
   --text-secondary: #1f1f22;
 }
 
 body {
-  background-color: var(--bg-main);
+  background-color: var(--bg-canvas);
+  background-image: radial-gradient(#242429 1px, transparent 1px);
+  background-size: 24px 24px;
   color: var(--text-primary);
   font-family: var(--font-body);
   margin: 0;
@@ -50,84 +62,51 @@ body {
 
 /* ==========================================================================
    MODO CLARO EN PANELES (.theme-panel)
-   - Barras de selección (aside) y barra superior (header con comercio + rol)
-     se mantienen en el MISMO NEGRO (#111113 / #18181b).
-   - El resto del panel usa un blanco beige muy claro (#f2ede2 / #faf7f0)
-     para no cansar la vista.
-   - Bordes de estadísticas y detalles en negro (#111113 / #0c0c0c).
    ========================================================================== */
 
 html.theme-light .theme-panel {
   background-color: #f2ede2 !important;
+  background-image: radial-gradient(#d8d0c1 1px, transparent 1px) !important;
+  background-size: 24px 24px !important;
   color: #0c0c0c !important;
 }
 
-/* 1. Mantener las barras de selección y cabecera (comercio + rol) en el mismo negro */
 html.theme-light .theme-panel .panel-chrome-dark {
-  background-color: #111113 !important;
-  border-color: #242426 !important;
+  background-color: #141418 !important;
+  border-color: #282830 !important;
   color: #f1f1ee !important;
 }
 
-html.theme-light .theme-panel .panel-chrome-dark .bg-\[\#111113\] {
-  background-color: #111113 !important;
-  color: #f1f1ee !important;
-}
-
-html.theme-light .theme-panel .panel-chrome-dark .bg-\[\#18181b\] {
-  background-color: #18181b !important;
-  border-color: #28282a !important;
-  color: #f1f1ee !important;
-}
-
-html.theme-light .theme-panel .panel-chrome-dark .border-\[\#242426\],
-html.theme-light .theme-panel .panel-chrome-dark .border-\[\#28282a\] {
-  border-color: #28282a !important;
-}
-
-html.theme-light .theme-panel .panel-chrome-dark .text-\[\#f1f1ee\] {
-  color: #f1f1ee !important;
-}
-
-html.theme-light .theme-panel .panel-chrome-dark .text-\[\#a1a1aa\] {
-  color: #a1a1aa !important;
-}
-
-html.theme-light .theme-panel .panel-chrome-dark .text-\[\#bec8ff\] {
-  color: #bec8ff !important;
-}
-
-html.theme-light .theme-panel .panel-chrome-dark .text-\[\#34d399\] {
-  color: #34d399 !important;
-}
-
-/* 2. Resto del contenido del panel (main): blanco beige suave con bordes y detalles en negro */
 html.theme-light .theme-panel main .bg-\[\#111113\],
+html.theme-light .theme-panel main .bg-\[\#141418\],
 html.theme-light .theme-panel main .bg-\[\#141414\],
 html.theme-light .theme-panel main .bg-\[\#141416\],
 html.theme-light .theme-panel main .stat-card {
   background-color: #faf7f0 !important;
-  border-color: #111113 !important;
+  border-color: #141418 !important;
   border-width: 1.5px !important;
   color: #0c0c0c !important;
 }
 
 html.theme-light .theme-panel main .bg-\[\#161619\],
 html.theme-light .theme-panel main .bg-\[\#18181b\],
+html.theme-light .theme-panel main .bg-\[\#1C1C22\],
 html.theme-light .theme-panel main .bg-\[\#1A1A1A\],
 html.theme-light .theme-panel main .stat-badge {
   background-color: #ebe5d8 !important;
-  border-color: #111113 !important;
+  border-color: #141418 !important;
   color: #0c0c0c !important;
 }
 
 html.theme-light .theme-panel main .text-\[\#f1f1ee\],
+html.theme-light .theme-panel main .text-\[\#F1F1EE\],
 html.theme-light .theme-panel main .text-white,
 html.theme-light .theme-panel main .stat-detail {
   color: #0c0c0c !important;
 }
 
 html.theme-light .theme-panel main .text-\[\#a1a1aa\],
+html.theme-light .theme-panel main .text-\[\#A1A1AA\],
 html.theme-light .theme-panel main .text-\[\#9c9c98\],
 html.theme-light .theme-panel main .text-\[\#8E8E93\],
 html.theme-light .theme-panel main .text-\[\#71717a\],
@@ -136,36 +115,11 @@ html.theme-light .theme-panel main .text-\[\#d4d4d8\] {
 }
 
 html.theme-light .theme-panel main .border-\[\#242426\],
+html.theme-light .theme-panel main .border-\[\#282830\],
 html.theme-light .theme-panel main .border-\[\#242424\],
 html.theme-light .theme-panel main .border-\[\#28282a\],
 html.theme-light .theme-panel main .border-\[\#2A2A2A\] {
-  border-color: #111113 !important;
-}
-
-html.theme-light .theme-panel main .divide-\[\#242426\] > :not([hidden]) ~ :not([hidden]),
-html.theme-light .theme-panel main .divide-\[\#242424\] > :not([hidden]) ~ :not([hidden]) {
-  border-color: #111113 !important;
-}
-
-html.theme-light .theme-panel main .text-\[\#bec8ff\],
-html.theme-light .theme-panel main .text-\[\#34d399\] {
-  color: #0c0c0c !important;
-}
-
-html.theme-light .theme-panel main .bg-\[\#bec8ff\] {
-  background-color: #111113 !important;
-  color: #faf7f0 !important;
-  border-color: #111113 !important;
-}
-
-html.theme-light .theme-panel main .bg-\[\#bec8ff\] span,
-html.theme-light .theme-panel main .bg-\[\#bec8ff\] svg {
-  color: #faf7f0 !important;
-}
-
-html.theme-light .theme-panel .bg-\[\#0c0c0c\].text-\[\#f1f1ee\] {
-  background-color: #0c0c0c !important;
-  color: #f1f1ee !important;
+  border-color: #141418 !important;
 }
 
 h1, h2, h3, .font-display {
@@ -178,8 +132,13 @@ h1, h2, h3, .font-display {
   font-variant-numeric: tabular-nums;
 }
 
+.font-receipt {
+  font-family: var(--font-receipt);
+  font-variant-numeric: tabular-nums;
+}
+
 *:focus-visible {
-  outline: 2px solid #bec8ff;
+  outline: 2px solid var(--brand-orange);
   outline-offset: 2px;
 }
 
@@ -190,7 +149,7 @@ h1, h2, h3, .font-display {
     opacity: 0;
   }
   70% {
-    transform: scale(1.08);
+    transform: scale(1.1);
     opacity: 1;
   }
   100% {
@@ -200,7 +159,7 @@ h1, h2, h3, .font-display {
 }
 
 .toquecito-pop {
-  animation: toquecitoPop 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  animation: toquecitoPop 0.38s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -222,6 +181,7 @@ h1, h2, h3, .font-display {
   }
   body {
     background: #ffffff !important;
+    background-image: none !important;
     color: #000000 !important;
   }
   aside,
@@ -233,10 +193,10 @@ h1, h2, h3, .font-display {
   }
 }
 
-/* Matte Dark Flat Card con colores de Home (/) */
+/* Tactile Hardware Surface Card */
 .toque-card {
-  background-color: var(--bg-card);
-  border: 1px solid var(--border-card);
+  background-color: var(--surface);
+  border: 1px solid var(--border-tech);
   border-radius: 1rem;
   box-shadow: none;
   backdrop-filter: none;
@@ -261,12 +221,12 @@ h1, h2, h3, .font-display {
   height: 6px;
 }
 ::-webkit-scrollbar-track {
-  background: var(--bg-main);
+  background: var(--bg-canvas);
 }
 ::-webkit-scrollbar-thumb {
-  background: #28282a;
+  background: #282830;
   border-radius: 9999px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #3a3a3d;
+  background: #3a3a46;
 }

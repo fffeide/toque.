@@ -44,6 +44,8 @@ import {
   NetworkActivationFormat,
   ConsumerUser,
   ConsumerReceipt,
+  ToqueAdminStaff,
+  ToqueAdminLevel,
 } from './types';
 import { TRIAL_DAYS } from '../config/pricing';
 
@@ -103,21 +105,45 @@ class MockApi implements ToqueApi {
   private receiptListeners: Map<string, Set<(receipt: Receipt | null) => void>> = new Map();
   private salesListeners: Set<(sales: Sale[]) => void> = new Set();
 
-  // Comercio activo por defecto: Musical Monroe (Lanzamiento Oficial)
+  // Lista de staff interno de Toque (toque_admins) autorizados para Super Admin
+  private toqueAdmins: import('./types').ToqueAdminStaff[] = [
+    {
+      id: 'toque-admin-root',
+      email: 'fedeeeloiss@gmail.com',
+      name: 'Fede (Root Super Admin)',
+      level: 'admin',
+      addedByEmail: 'system',
+      createdAt: new Date().toISOString(),
+      active: true,
+    },
+  ];
+
+  private isAuthorizedSuperAdmin(email: string): boolean {
+    const clean = (email || '').trim().toLowerCase();
+    if (clean === 'fedeeeloiss@gmail.com') return true;
+    return this.toqueAdmins.some(
+      (a) => a.active && a.email.trim().toLowerCase() === clean
+    );
+  }
+
+  // Comercio por defecto: ejemplo neutro La Burger
   private businessProfile: BusinessProfile = {
-    id: 'musical-monroe',
-    name: 'Musical Monroe',
-    ownerName: 'Musical Monroe',
-    email: 'hola@musicalmonroe.com.ar',
-    reviewUrl: 'https://maps.google.com/?q=Musical+Monroe+Buenos+Aires',
-    cardThemeColor: '#1e1b4b',
-    loyaltyTitle: 'Tarjeta de sellos de Musical Monroe',
-    loyaltyReward: 'Beneficio exclusivo en instrumentos y accesorios',
+    id: 'la-burger',
+    name: 'La Burger',
+    ownerName: 'Encargado General',
+    email: 'nombre@comercio.com',
+    reviewUrl: 'https://maps.google.com',
+    cardThemeColor: '#141418',
+    loyaltyTitle: 'Tarjeta de sellos de La Burger',
+    loyaltyReward: '1 Combo Burger sin cargo al completar 10 sellos',
     howToEarn: '1 sello por visita o compra',
     expirationPolicy: 'No vencen',
     stampsRequired: 10,
+    plan: 'pro',
+    billingCycle: 'annual',
+    trialEndsAt: new Date(Date.now() + TRIAL_DAYS * 86400000).toISOString(),
     planPaid: true,
-    networkEnabled: true,
+    networkEnabled: false,
     createdAt: new Date().toISOString(),
     scansCount: 0,
     reviewClicksCount: 0,
@@ -127,21 +153,24 @@ class MockApi implements ToqueApi {
   // Lista real de todos los comercios registrados en la plataforma
   private businesses: Map<string, BusinessProfile> = new Map([
     [
-      'musical-monroe',
+      'la-burger',
       {
-        id: 'musical-monroe',
-        name: 'Musical Monroe',
-        ownerName: 'Musical Monroe',
-        email: 'hola@musicalmonroe.com.ar',
-        reviewUrl: 'https://maps.google.com/?q=Musical+Monroe+Buenos+Aires',
-        cardThemeColor: '#1e1b4b',
-        loyaltyTitle: 'Tarjeta de sellos de Musical Monroe',
-        loyaltyReward: 'Beneficio exclusivo en instrumentos y accesorios',
+        id: 'la-burger',
+        name: 'La Burger',
+        ownerName: 'Encargado General',
+        email: 'nombre@comercio.com',
+        reviewUrl: 'https://maps.google.com',
+        cardThemeColor: '#141418',
+        loyaltyTitle: 'Tarjeta de sellos de La Burger',
+        loyaltyReward: '1 Combo Burger sin cargo al completar 10 sellos',
         howToEarn: '1 sello por visita o compra',
         expirationPolicy: 'No vencen',
         stampsRequired: 10,
+        plan: 'pro',
+        billingCycle: 'annual',
+        trialEndsAt: new Date(Date.now() + TRIAL_DAYS * 86400000).toISOString(),
         planPaid: true,
-        networkEnabled: true,
+        networkEnabled: false,
         createdAt: new Date().toISOString(),
         scansCount: 0,
         reviewClicksCount: 0,
@@ -157,11 +186,11 @@ class MockApi implements ToqueApi {
   // Locales reales (inician en 0 visitas/altas para reflejar únicamente actividad real)
   private locals: ClubLocal[] = [
     {
-      id: 'local-monroe-1',
-      businessId: 'musical-monroe',
-      code: 'MONROE01',
-      name: 'Casa Central Monroe',
-      address: 'Av. Monroe, CABA',
+      id: 'local-burger-1',
+      businessId: 'la-burger',
+      code: 'BURGER01',
+      name: 'Sucursal Central',
+      address: 'Av. Corrientes 1234',
       visitsCount: 0,
       newMembersCount: 0,
       returningCount: 0,
@@ -170,37 +199,37 @@ class MockApi implements ToqueApi {
     },
   ];
 
-  // Equipo real del comercio (sin cuentas de ejemplo falsas)
+  // Equipo real del comercio
   private teamMembers: TeamMember[] = [
     {
-      id: 'team-monroe-owner',
-      businessId: 'musical-monroe',
-      name: 'Musical Monroe',
-      email: 'hola@musicalmonroe.com.ar',
+      id: 'team-burger-owner',
+      businessId: 'la-burger',
+      name: 'Encargado General',
+      email: 'nombre@comercio.com',
       role: 'owner',
-      assignedCartelId: 'cartel-monroe-01',
-      assignedCartelCode: 'MONROE01',
-      assignedLocalIds: ['local-monroe-1'],
+      assignedCartelId: 'cartel-burger-01',
+      assignedCartelCode: 'BURGER01',
+      assignedLocalIds: ['local-burger-1'],
       status: 'active',
       addedAt: new Date().toISOString(),
     },
   ];
 
-  // Configuración de Tarjeta de Sellos por defecto para Musical Monroe
+  // Configuración de Tarjeta de Sellos por defecto
   private clubConfig: ClubConfig = {
-    name: 'Tarjeta de sellos de Musical Monroe',
-    clubName: 'Tarjeta de sellos de Musical Monroe',
-    loyaltyTitle: 'Tarjeta de sellos de Musical Monroe',
-    brandColor: '#1e1b4b',
-    cardThemeColor: '#1e1b4b',
+    name: 'Tarjeta de sellos de La Burger',
+    clubName: 'Tarjeta de sellos de La Burger',
+    loyaltyTitle: 'Tarjeta de sellos de La Burger',
+    brandColor: '#141418',
+    cardThemeColor: '#141418',
     logoUrl: '',
     targetStamps: 10,
     stampsRequired: 10,
-    rewardText: 'Beneficio exclusivo en instrumentos y accesorios',
-    loyaltyReward: 'Beneficio exclusivo en instrumentos y accesorios',
+    rewardText: '1 Combo Burger sin cargo al completar 10 sellos',
+    loyaltyReward: '1 Combo Burger sin cargo al completar 10 sellos',
     howToEarn: '1 sello por visita o compra',
     expirationPolicy: 'No vencen',
-    welcomeBenefitText: 'Beneficio exclusivo en instrumentos y accesorios',
+    welcomeBenefitText: '1 Combo Burger sin cargo al completar 10 sellos',
     pointsPerVisit: 1,
     enabled: true,
     mode: 'per_visit',
@@ -216,8 +245,8 @@ class MockApi implements ToqueApi {
     },
     rewards: [
       {
-        id: 'rew-monroe-1',
-        label: 'Beneficio exclusivo en instrumentos y accesorios',
+        id: 'rew-burger-1',
+        label: '1 Combo Burger sin cargo al completar 10 sellos',
         target: 10,
       },
     ],
@@ -240,15 +269,15 @@ class MockApi implements ToqueApi {
   private consumerUsers: Map<string, ConsumerUser> = new Map();
   private consumerReceipts: Map<string, ConsumerReceipt[]> = new Map();
 
-  // Registro inalterable de correcciones (inicia vacío, sin ejemplos falsos)
+  // Registro inalterable de correcciones
   private auditLogs: AuditLogEntry[] = [];
 
-  // Plantillas de avisos y límites para Musical Monroe
+  // Plantillas de avisos y límites
   private notificationTemplates: NotificationTemplate[] = [
     {
       id: 'tpl-birthday',
       type: 'birthday',
-      title: '¡Feliz cumpleaños de parte de Musical Monroe!',
+      title: '¡Feliz cumpleaños de parte de La Burger!',
       message:
         'Hoy es tu día. Pasá por el local esta semana y tenés un beneficio especial presentando tu tarjeta de sellos.',
       active: true,
@@ -258,7 +287,7 @@ class MockApi implements ToqueApi {
     {
       id: 'tpl-nearby',
       type: 'nearby',
-      title: 'Estás cerca de Musical Monroe',
+      title: 'Estás cerca de La Burger',
       message: 'Mostrá tu tarjeta en mostrador y sumá tu sello en tu visita.',
       active: true,
       scheduleInfo:
@@ -276,9 +305,12 @@ class MockApi implements ToqueApi {
 
   private planState: PlanState = {
     status: 'trial',
-    planId: 'mensual',
+    planId: 'anual',
+    tier: 'pro',
+    billingCycle: 'annual',
     daysRemaining: TRIAL_DAYS,
     trialStartedAt: new Date().toISOString(),
+    trialEndsAt: new Date(Date.now() + TRIAL_DAYS * 86400000).toISOString(),
     expiresAt: new Date(Date.now() + TRIAL_DAYS * 86400000).toISOString(),
     isSimulated: false,
   };
@@ -286,17 +318,17 @@ class MockApi implements ToqueApi {
   // Lista de espera real (inicia vacía)
   private waitlistEntries: WaitlistEntry[] = [];
 
-  // Cartel activo vinculado de Musical Monroe: MONROE01
+  // Cartel activo vinculado por defecto: BURGER01
   private carteles: Cartel[] = [
     {
-      id: 'cartel-monroe-01',
-      code: 'MONROE01',
+      id: 'cartel-burger-01',
+      code: 'BURGER01',
       pin: '102030',
-      businessId: 'musical-monroe',
-      name: 'Mostrador Musical Monroe',
+      businessId: 'la-burger',
+      name: 'Mostrador Principal',
       role: 'caja',
       status: 'active',
-      reviewUrl: 'https://maps.google.com/?q=Musical+Monroe+Buenos+Aires',
+      reviewUrl: 'https://maps.google.com',
       mode: 'smart_hub',
       tileColor: 'black',
       claimStatus: 'claimed',
@@ -317,21 +349,21 @@ class MockApi implements ToqueApi {
       { key: 'socials', enabled: true },
       { key: 'details', enabled: true },
     ],
-    accentColor: '#1e1b4b',
-    googleReviewUrl: 'https://maps.google.com/?q=Musical+Monroe+Buenos+Aires',
+    accentColor: '#D95B26',
+    googleReviewUrl: 'https://maps.google.com',
     socials: {
-      instagram: 'musicalmonroe',
+      instagram: 'laburger',
       whatsapp: '',
       web: '',
     },
     products: [],
     details: {
-      address: 'Av. Monroe, CABA',
-      hours: 'Lunes a Sábado de 10:00 a 19:30',
+      address: 'Av. Corrientes 1234',
+      hours: 'Lunes a Sábado de 11:00 a 23:30',
     },
     showToqueFooter: true,
     planPaid: true,
-    networkEnabled: true,
+    networkEnabled: false,
   };
 
   private sales: Sale[] = [];
@@ -344,12 +376,12 @@ class MockApi implements ToqueApi {
   private walletPassesIssuedTotal = 0;
 
   constructor() {
-    this.businessClubConfigs.set('musical-monroe', { ...this.clubConfig });
-    this.businessHubConfigs.set('musical-monroe', { ...this.hubConfig });
+    this.businessClubConfigs.set('la-burger', { ...this.clubConfig });
+    this.businessHubConfigs.set('la-burger', { ...this.hubConfig });
   }
 
   private getActiveBusinessId(): string {
-    return this.currentUser?.businessId || this.businessProfile.id || 'musical-monroe';
+    return this.currentUser?.businessId || this.businessProfile.id || 'la-burger';
   }
 
   private syncActiveBusinessStore(): void {
@@ -542,7 +574,7 @@ class MockApi implements ToqueApi {
     // Si es registro de nuevo comercio
     if (purpose === 'register_merchant' || extra?.businessName) {
       const reg = await this.register({
-        businessName: extra?.businessName || 'Musical Monroe',
+        businessName: extra?.businessName || 'La Burger',
         ownerName: extra?.ownerName || cleanEmail.split('@')[0],
         email: cleanEmail,
       });
@@ -554,11 +586,11 @@ class MockApi implements ToqueApi {
       (m) => m.email.toLowerCase() === cleanEmail && m.status === 'active'
     );
 
-    const isSuperAdmin =
-      cleanEmail === 'admin@toque.ar' || cleanEmail === 'superadmin@toque.com.ar';
+    // BLINDAJE SUPER ADMIN: Únicamente fedeeeloiss@gmail.com o correos dados de alta en toque_admins
+    const isSuperAdmin = this.isAuthorizedSuperAdmin(cleanEmail);
 
     if (teamMember || isSuperAdmin) {
-      const targetBizId = teamMember?.businessId || 'musical-monroe';
+      const targetBizId = teamMember?.businessId || 'la-burger';
       const biz = this.businesses.get(targetBizId);
       if (biz) {
         this.businessProfile = { ...biz };
@@ -569,13 +601,13 @@ class MockApi implements ToqueApi {
       }
 
       const user: User = {
-        id: teamMember ? `user-${teamMember.id}` : 'user-superadmin',
+        id: teamMember ? `user-${teamMember.id}` : 'user-superadmin-root',
         email: cleanEmail,
-        name: teamMember ? teamMember.name : 'Super Admin Toque',
+        name: teamMember ? teamMember.name : 'Fede (Super Admin Toque)',
         businessId: targetBizId,
         role: isSuperAdmin ? 'superadmin' : teamMember!.role,
-        assignedCartelId: teamMember?.assignedCartelId || 'cartel-monroe-01',
-        assignedCartelCode: teamMember?.assignedCartelCode || 'MONROE01',
+        assignedCartelId: teamMember?.assignedCartelId || 'cartel-burger-01',
+        assignedCartelCode: teamMember?.assignedCartelCode || 'BURGER01',
         assignedLocalIds:
           teamMember?.assignedLocalIds ||
           this.locals.filter((l) => l.businessId === targetBizId).map((l) => l.id),
@@ -595,6 +627,7 @@ class MockApi implements ToqueApi {
       assignedCartelId: this.carteles[0]?.id,
       assignedCartelCode: this.carteles[0]?.code,
       assignedLocalIds: this.locals.map((l) => l.id),
+      isSuperAdmin: false,
     };
     this.currentUser = newUser;
     return { verified: true, user: newUser };
@@ -606,7 +639,7 @@ class MockApi implements ToqueApi {
     email: string;
   }): Promise<{ user: User; token: string }> {
     const cleanEmail = data.email.trim().toLowerCase();
-    const cleanBizName = data.businessName.trim() || 'Musical Monroe';
+    const cleanBizName = data.businessName.trim() || 'La Burger';
     const cleanOwnerName = data.ownerName.trim() || cleanEmail.split('@')[0];
 
     const slug =
@@ -758,8 +791,7 @@ class MockApi implements ToqueApi {
     const teamMember = this.teamMembers.find(
       (m) => m.email.toLowerCase() === cleanEmail && m.status === 'active'
     );
-    const isSuperAdmin =
-      cleanEmail === 'admin@toque.ar' || cleanEmail === 'superadmin@toque.com.ar';
+    const isSuperAdmin = this.isAuthorizedSuperAdmin(cleanEmail);
     const user: User = {
       id: teamMember ? `user-${teamMember.id}` : `user-${Date.now().toString(36)}`,
       email: cleanEmail,
@@ -794,7 +826,7 @@ class MockApi implements ToqueApi {
     clubCfg: ClubConfig;
     hubCfg: HubConfig;
   } {
-    const clean = (codeOrSlug || 'MONROE01').trim();
+    const clean = (codeOrSlug || 'BURGER01').trim();
     const upper = clean.toUpperCase();
     const lower = clean.toLowerCase();
 
@@ -803,7 +835,7 @@ class MockApi implements ToqueApi {
     let local = this.locals.find((l) => l.code.toUpperCase() === upper);
     let business = cartel?.businessId ? this.businesses.get(cartel.businessId) : undefined;
 
-    // 2. Si no se encontró por código, buscar por businessId / slug (ej. musical-monroe)
+    // 2. Si no se encontró por código, buscar por businessId / slug (ej. la-burger)
     if (!business) {
       business =
         this.businesses.get(lower) ||
@@ -813,7 +845,7 @@ class MockApi implements ToqueApi {
     }
 
     if (!business) {
-      business = this.businesses.get('musical-monroe') || this.businessProfile;
+      business = this.businesses.get('la-burger') || this.businessProfile;
     }
 
     if (!cartel) {
@@ -851,7 +883,7 @@ class MockApi implements ToqueApi {
         clubCfg.loyaltyReward ||
         clubCfg.rewardText ||
         clubCfg.rewards[0]?.label ||
-        'Beneficio exclusivo en instrumentos y accesorios',
+        'Combo aniversario sin cargo en tu visita #10',
       howToEarn: clubCfg.howToEarn || '1 sello por visita o compra',
       expirationPolicy: clubCfg.expirationPolicy || 'No vencen',
       mode: clubCfg.mode || 'per_visit',
@@ -862,12 +894,28 @@ class MockApi implements ToqueApi {
     };
   }
 
+  private calculateAgeFromBirthDate(birthDate?: string): { age?: number; isMinor: boolean } {
+    if (!birthDate) return { age: undefined, isMinor: false };
+    const parsed = new Date(birthDate);
+    if (isNaN(parsed.getTime())) return { age: undefined, isMinor: false };
+    const today = new Date();
+    let age = today.getFullYear() - parsed.getFullYear();
+    const monthDiff = today.getMonth() - parsed.getMonth();
+    if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < parsed.getDate())) {
+      age -= 1;
+    }
+    const cleanAge = Math.max(0, age);
+    return { age: cleanAge, isMinor: cleanAge < 18 };
+  }
+
   async registerMember(data: {
     localCode?: string;
     name?: string;
     email: string;
     phone?: string;
     birthDate?: string;
+    age?: number;
+    isMinor?: boolean;
     birthDay?: number;
     birthMonth?: number;
     adult?: boolean;
@@ -877,28 +925,38 @@ class MockApi implements ToqueApi {
     account: RecognizedClientAccount;
     requiresOtp: boolean;
   }> {
-    if (data.adult === false) {
-      throw new Error(
-        'Para crear tu tarjeta con datos hace falta ser mayor de 18. Podés usarla sin datos.'
-      );
-    }
-
     const cleanEmail = (data.email || '').trim().toLowerCase();
     if (!cleanEmail || !cleanEmail.includes('@')) {
       throw new Error('Ingresá un correo electrónico válido.');
     }
 
     const derivedName = (data.name || '').trim() || cleanEmail.split('@')[0];
-    const pub = await this.getClubPublic(data.localCode || 'MONROE01');
+    const pub = await this.getClubPublic(data.localCode || 'BURGER01');
     const masked = maskEmailAddress(cleanEmail);
     const accountId = this.recognizedClient?.accountId || `acc-${Date.now().toString(36)}`;
+
+    const calc = this.calculateAgeFromBirthDate(data.birthDate);
+    const finalAge = data.age !== undefined ? data.age : calc.age;
+    const finalIsMinor = data.isMinor !== undefined ? data.isMinor : calc.isMinor;
+    // Si es menor de 18 años, adaptamos automáticamente permisos de privacidad/comunicaciones comerciales
+    const finalConsent = finalIsMinor ? false : Boolean(data.marketingConsent);
+
+    let parsedDay = data.birthDay;
+    let parsedMonth = data.birthMonth;
+    if (data.birthDate && (!parsedDay || !parsedMonth)) {
+      const parts = data.birthDate.split('-');
+      if (parts.length === 3) {
+        parsedMonth = parseInt(parts[1], 10);
+        parsedDay = parseInt(parts[2], 10);
+      }
+    }
 
     this.recognizedClient = {
       accountId,
       name: derivedName,
       email: cleanEmail,
-      birthDay: data.birthDay,
-      birthMonth: data.birthMonth,
+      birthDay: parsedDay,
+      birthMonth: parsedMonth,
     };
 
     let existing = this.clubMembers.find(
@@ -910,6 +968,8 @@ class MockApi implements ToqueApi {
     if (!existing) {
       const newId = `member-${Date.now().toString(36)}`;
       const memberCode = generateMemberCode(pub.businessName);
+      const nowIso = new Date().toISOString();
+
       existing = {
         id: newId,
         accountId,
@@ -922,44 +982,99 @@ class MockApi implements ToqueApi {
         email: cleanEmail,
         phone: data.phone?.trim() || '',
         birthDate: data.birthDate || '',
+        age: finalAge,
+        isMinor: finalIsMinor,
         contact: masked,
         maskedEmail: masked,
-        birthDay: data.birthDay,
-        birthMonth: data.birthMonth,
+        birthDay: parsedDay,
+        birthMonth: parsedMonth,
         anonymous: false,
-        marketingConsent: Boolean(data.marketingConsent),
-        points: 0,
-        stamps: 0,
+        marketingConsent: finalConsent,
+        points: 1,
+        stamps: 1, // Suma automáticamente su 1° sello al registrarse
         stampsRequired: pub.targetStamps,
         targetStamps: pub.targetStamps,
         rewardsRedeemed: 0,
-        joinedAt: new Date().toISOString(),
-        consent: Boolean(data.marketingConsent),
-        stampHistory: [],
+        joinedAt: nowIso,
+        lastVisitAt: nowIso,
+        lastStampedAt: nowIso,
+        consent: finalConsent,
+        stampHistory: [
+          {
+            id: `st-init-${Date.now().toString(36)}`,
+            memberId: newId,
+            localId: pub.localId,
+            localName: pub.localName,
+            count: 1,
+            source: 'self',
+            actorName: 'Alta en el Club (1° sello)',
+            createdAt: nowIso,
+          },
+        ],
       };
       this.memberRawEmails[newId] = cleanEmail;
       this.clubMembers.unshift(existing);
 
+      // Registrar cooldown de visita inicial (1 hora) para evitar que el auto-sello duplique inmediatamente
+      const hourSlot = Math.floor(Date.now() / 3600000);
+      this.selfStampDailyLog.add(`${newId}_${pub.localCode.toUpperCase()}_${hourSlot}`);
+
+      this.stampLogs.unshift({
+        id: `log-${Date.now().toString(36)}`,
+        businessId: pub.businessId,
+        memberId: newId,
+        memberCode,
+        memberName: derivedName,
+        memberEmail: masked,
+        memberPhone: data.phone?.trim() || '',
+        action: 'stamp_added',
+        stampsDelta: 1,
+        localName: pub.localName,
+        staffEmail: 'registro-hub@toque.com.ar',
+        createdAt: nowIso,
+      });
+
       const localObj = this.locals.find((l) => l.id === pub.localId);
       if (localObj) {
         localObj.newMembersCount += 1;
+        localObj.visitsCount += 1;
       }
       this.notifyHubListeners(pub.localCode);
       this.notifyHubListeners(pub.businessId);
+
+      // Enviar correo de bienvenida vía Resend (/api/club/join -> renderWelcomeCardEmail)
+      const origin = typeof window !== 'undefined' ? window.location.origin : '';
+      fetch('/api/club/join', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: cleanEmail,
+          customerName: derivedName,
+          name: derivedName,
+          businessName: pub.businessName,
+          localCode: pub.localCode,
+          memberCode,
+          stamps: 1,
+          stampsRequired: pub.targetStamps,
+          rewardText: pub.rewardText,
+          hubUrl: `${origin}/u/${pub.localCode}`,
+          walletUrl: `${origin}/u/${pub.localCode}?wallet=open&code=${encodeURIComponent(memberCode)}`,
+        }),
+      }).catch(() => {});
     }
 
     const account = await this.recognizeAccount(cleanEmail);
     return {
       member: existing,
       account,
-      requiresOtp: true,
+      requiresOtp: false,
     };
   }
 
   async createAnonymousCard(localCode: string): Promise<{ member: ClubMember }> {
-    const pub = await this.getClubPublic(localCode || 'MONROE01');
+    const pub = await this.getClubPublic(localCode || 'BURGER01');
     const randomCode = Math.floor(1000 + Math.random() * 9000);
-    const memberCode = `MM-${randomCode}`;
+    const memberCode = `LB-${randomCode}`;
     const member: ClubMember = {
       id: `anon-${Date.now().toString(36)}-${randomCode}`,
       accountId: `acc-anon-${randomCode}`,
@@ -1253,12 +1368,13 @@ class MockApi implements ToqueApi {
       throw new Error('No encontramos tu tarjeta.');
     }
 
-    const todayKey = new Date().toISOString().slice(0, 10);
-    const visitKey = `${member.id}_${pub.localCode.toUpperCase()}_${todayKey}`;
+    // Cooldown de 1 hora por visita para evitar recargas accidentales con F5
+    const hourSlot = Math.floor(Date.now() / 3600000);
+    const visitKey = `${member.id}_${pub.localCode.toUpperCase()}_${hourSlot}`;
 
     if (this.selfStampDailyLog.has(visitKey)) {
       throw new Error(
-        'Ya sumaste tu sello de hoy en este local. Se permite 1 visita por día en autoservicio.'
+        'Ya sumaste tu sello en esta visita. Podés volver a sumar en tu próxima visita al local.'
       );
     }
 
@@ -1816,18 +1932,66 @@ class MockApi implements ToqueApi {
   }
 
   async getPlanState(): Promise<PlanState> {
+    if (this.planState.status === 'trial' && this.planState.expiresAt) {
+      const remainingMs = new Date(this.planState.expiresAt).getTime() - Date.now();
+      const daysLeft = Math.ceil(remainingMs / 86400000);
+      if (daysLeft <= 0) {
+        // Fin del trial sin pago: pasa automáticamente a Plan Free sin borrar datos históricos
+        this.planState = {
+          status: 'free',
+          planId: 'free',
+          daysRemaining: 0,
+          trialStartedAt: this.planState.trialStartedAt,
+          expiresAt: this.planState.expiresAt,
+          isSimulated: false,
+        };
+        this.businessProfile.planPaid = false;
+        this.syncActiveBusinessStore();
+      } else {
+        this.planState.daysRemaining = daysLeft;
+      }
+    }
     return { ...this.planState };
   }
 
-  async startTrial(planId: 'mensual' | 'anual' = 'mensual'): Promise<PlanState> {
+  async startTrial(planId: 'free' | 'mensual' | 'anual' = 'anual'): Promise<PlanState> {
+    if (planId === 'free') {
+      this.planState = {
+        status: 'free',
+        planId: 'free',
+        daysRemaining: 0,
+        isSimulated: false,
+      };
+      this.businessProfile.planPaid = false;
+      this.syncActiveBusinessStore();
+      return { ...this.planState };
+    }
+
+    if (planId === 'mensual') {
+      // El plan mensual es Pro directo ($34.999/mes), el trial de 14 días es exclusivo del Plan Anual
+      this.planState = {
+        status: 'active',
+        planId: 'mensual',
+        daysRemaining: 30,
+        expiresAt: new Date(Date.now() + 30 * 86400000).toISOString(),
+        isSimulated: false,
+      };
+      this.businessProfile.planPaid = true;
+      this.syncActiveBusinessStore();
+      return { ...this.planState };
+    }
+
+    // Plan Anual incluye 14 días de prueba gratis con todas las funciones Pro desbloqueadas
     this.planState = {
-      status: 'active',
-      planId,
+      status: 'trial',
+      planId: 'anual',
       daysRemaining: TRIAL_DAYS,
       trialStartedAt: new Date().toISOString(),
       expiresAt: new Date(Date.now() + TRIAL_DAYS * 86400000).toISOString(),
       isSimulated: false,
     };
+    this.businessProfile.planPaid = true;
+    this.syncActiveBusinessStore();
     return { ...this.planState };
   }
 
@@ -1975,7 +2139,7 @@ class MockApi implements ToqueApi {
     reviewUrl?: string;
   }): Promise<Cartel> {
     const bizId = this.getActiveBusinessId();
-    const code = (data.code || `MONROE0${this.carteles.length + 1}`).toUpperCase();
+    const code = (data.code || `BURGER0${this.carteles.length + 1}`).toUpperCase();
     const created: Cartel = {
       id: `cartel-${Date.now().toString(36)}`,
       code,
@@ -2209,7 +2373,7 @@ class MockApi implements ToqueApi {
         loyaltyReward:
           clubCfg.loyaltyReward ||
           clubCfg.rewardText ||
-          'Beneficio exclusivo en instrumentos y accesorios',
+          'Combo aniversario sin cargo en tu visita #10',
         howToEarn: clubCfg.howToEarn || '1 sello por visita o compra',
         expirationPolicy: clubCfg.expirationPolicy || 'No vencen',
         stampsRequired: clubCfg.targetStamps || clubCfg.stampsRequired || 10,
@@ -2217,7 +2381,7 @@ class MockApi implements ToqueApi {
         offerDesc:
           clubCfg.loyaltyReward ||
           clubCfg.rewardText ||
-          'Beneficio exclusivo en instrumentos y accesorios',
+          'Combo aniversario sin cargo en tu visita #10',
         offerCta: 'Mostrá tu tarjeta en caja',
         socials: hubCfg.socials,
       },
@@ -2226,7 +2390,7 @@ class MockApi implements ToqueApi {
   }
 
   subscribeToCartelHub(code: string, onUpdate: (hub: PublicHub) => void): () => void {
-    const key = (code || 'MONROE01').trim();
+    const key = (code || 'BURGER01').trim();
     if (!this.hubListeners.has(key)) {
       this.hubListeners.set(key, new Set());
     }
@@ -2344,26 +2508,36 @@ class MockApi implements ToqueApi {
     points?: number;
   }): Promise<WalletPassResponse> {
     const { business, cartel, clubCfg } = this.resolveCartelAndBusiness(
-      data.cartelCode || 'MONROE01'
+      data.cartelCode || 'BURGER01'
     );
     const member = data.memberId
       ? this.clubMembers.find((m) => m.id === data.memberId)
       : undefined;
 
+    const memberCode = data.memberCode || member?.memberCode || generateMemberCode(business.name);
     const payload = {
       businessId: business.id,
       businessName: business.name,
+      title: clubCfg.loyaltyTitle || `Tarjeta de sellos de ${business.name}`,
+      memberName: data.customerName || member?.name || 'Socio',
+      memberId: member?.id || data.memberId || memberCode,
+      reward:
+        clubCfg.loyaltyReward ||
+        clubCfg.rewardText ||
+        'Combo aniversario sin cargo en tu visita #10',
+      backgroundColor: clubCfg.cardThemeColor || clubCfg.brandColor || '#1e1b4b',
+      barcodeValue: memberCode,
       brandColor: clubCfg.cardThemeColor || clubCfg.brandColor || '#1e1b4b',
       stamps: data.stamps ?? member?.stamps ?? 0,
       stampsRequired: clubCfg.targetStamps || 10,
       rewardText:
         clubCfg.loyaltyReward ||
         clubCfg.rewardText ||
-        'Beneficio exclusivo en instrumentos y accesorios',
+        'Combo aniversario sin cargo en tu visita #10',
       customerName: data.customerName || member?.name || 'Socio',
       customerContact: data.customerContact || data.contact || member?.maskedEmail || '',
       code: cartel.code,
-      memberCode: data.memberCode || member?.memberCode || generateMemberCode(business.name),
+      memberCode,
     };
 
     try {
@@ -2415,6 +2589,8 @@ class MockApi implements ToqueApi {
       provider: 'toque-wallet',
       passId,
       validationCode: payload.memberCode,
+      barcodeValue: payload.memberCode,
+      fallbackWebPass: true,
       appleWalletUrl: fallbackUrl,
       googleWalletUrl: fallbackUrl,
     };
@@ -2493,7 +2669,7 @@ class MockApi implements ToqueApi {
       id: `rcp-${Date.now()}`,
       saleId: sale.id,
       businessId: sale.businessId,
-      cartelCode: sale.cartelCode || 'MONROE01',
+      cartelCode: sale.cartelCode || 'BURGER01',
       status: 'ready',
       expiresAt: new Date(Date.now() + 120000).toISOString(),
       businessName: this.businessProfile.name,
@@ -2829,8 +3005,8 @@ class MockApi implements ToqueApi {
         roleLabel: m.anonymous ? 'Socio Anónimo' : 'Socio Club de Sellos',
         displayName: m.name || m.memberCode || 'Socio',
         emailOrContact: m.maskedEmail || m.contact,
-        businessId: m.businessId || 'musical-monroe',
-        businessName: biz?.name || 'Musical Monroe',
+        businessId: m.businessId || 'la-burger',
+        businessName: biz?.name || 'La Burger',
         stamps: m.stamps,
         rewardsRedeemed: m.rewardsRedeemed || 0,
         walletPassIssued: Boolean(m.passId),
@@ -2964,8 +3140,61 @@ class MockApi implements ToqueApi {
       carteles: [...this.carteles],
       recentSales: paidSales.slice(0, 25),
       allUsers,
+      toqueAdmins: [...this.toqueAdmins],
     };
+  }
+
+  async listToqueAdmins(): Promise<ToqueAdminStaff[]> {
+    return [...this.toqueAdmins];
+  }
+
+  async addToqueAdmin(data: {
+    email: string;
+    name: string;
+    level?: 'admin' | 'soporte' | 'operaciones';
+    role?: 'admin' | 'soporte' | 'operaciones';
+  }): Promise<ToqueAdminStaff> {
+    const callerEmail = (this.currentUser?.email || '').toLowerCase();
+    if (!this.isAuthorizedSuperAdmin(callerEmail)) {
+      throw new Error('Acceso denegado: Solo Super Admins de Toque pueden gestionar el Equipo Toque.');
+    }
+    const cleanEmail = (data.email || '').trim().toLowerCase();
+    if (!cleanEmail || !cleanEmail.includes('@')) {
+      throw new Error('Ingresá un correo electrónico válido.');
+    }
+    const targetLevel = data.level || data.role || 'soporte';
+    const existing = this.toqueAdmins.find((a) => a.email.toLowerCase() === cleanEmail);
+    if (existing) {
+      existing.name = data.name.trim() || existing.name;
+      existing.level = targetLevel;
+      existing.role = targetLevel;
+      return { ...existing };
+    }
+    const created: ToqueAdminStaff = {
+      id: `tqa-${Date.now().toString(36)}`,
+      email: cleanEmail,
+      name: data.name.trim() || cleanEmail.split('@')[0],
+      level: targetLevel,
+      role: targetLevel,
+      addedBy: callerEmail || 'fedeeeloiss@gmail.com',
+      createdAt: new Date().toISOString(),
+    };
+    this.toqueAdmins.push(created);
+    return created;
+  }
+
+  async removeToqueAdmin(email: string): Promise<void> {
+    const callerEmail = (this.currentUser?.email || '').toLowerCase();
+    if (!this.isAuthorizedSuperAdmin(callerEmail)) {
+      throw new Error('Acceso denegado: Solo Super Admins de Toque pueden gestionar el Equipo Toque.');
+    }
+    const cleanEmail = (email || '').trim().toLowerCase();
+    if (cleanEmail === 'fedeeeloiss@gmail.com') {
+      throw new Error('No se puede eliminar la cuenta raíz principal de Super Admin (fedeeeloiss@gmail.com).');
+    }
+    this.toqueAdmins = this.toqueAdmins.filter((a) => a.email.toLowerCase() !== cleanEmail);
   }
 }
 
 export const mockApi = new MockApi();
+

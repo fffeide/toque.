@@ -60,6 +60,15 @@ export interface WalletPassResponse {
   appleWalletUrl: string;
   googleWalletUrl: string;
   qrUrl?: string;
+  fallbackWebPass?: boolean;
+  barcodeValue?: string;
+  title?: string;
+  memberName?: string;
+  memberId?: string;
+  stamps?: number;
+  stampsRequired?: number;
+  reward?: string;
+  backgroundColor?: string;
 }
 
 export interface PartnerReferral {
@@ -282,6 +291,8 @@ export interface ClubMember {
   email?: string;
   phone?: string;
   birthDate?: string;
+  age?: number;
+  isMinor?: boolean;
   contact: string;
   maskedEmail?: string;
   birthDay?: number;
@@ -400,11 +411,14 @@ export interface SetupProgress {
 }
 
 export interface PlanState {
-  status: 'trial' | 'active' | 'expired';
-  planId: 'mensual' | 'anual';
+  status: 'trial' | 'active' | 'expired' | 'free';
+  planId: 'free' | 'mensual' | 'anual';
+  tier?: 'free' | 'pro';
+  billingCycle?: 'free' | 'monthly' | 'annual';
   daysRemaining: number;
-  trialStartedAt: string;
-  expiresAt: string;
+  trialStartedAt?: string;
+  trialEndsAt?: string;
+  expiresAt?: string;
   isSimulated: boolean;
 }
 
@@ -436,6 +450,9 @@ export interface BusinessProfile {
   howToEarn?: string;
   expirationPolicy?: string;
   stampsRequired?: number;
+  plan?: 'free' | 'pro';
+  billingCycle?: 'free' | 'monthly' | 'annual';
+  trialEndsAt?: string;
   planPaid?: boolean;
   networkEnabled?: boolean;
   createdAt: string;
@@ -651,6 +668,7 @@ export interface SuperAdminSummary {
   carteles: Cartel[];
   recentSales: Sale[];
   allUsers: PlatformUserRecord[];
+  toqueAdmins?: ToqueAdminStaff[];
 }
 
 export interface CartelBatch {
@@ -663,3 +681,20 @@ export interface CartelBatch {
   status?: 'pending' | 'printed' | 'delivered';
   carteles?: Array<{ code: string; pin?: string; status?: string; shortUrl?: string }>;
 }
+
+export type ToqueAdminLevel = 'admin' | 'soporte' | 'operaciones';
+
+export interface ToqueAdminStaff {
+  id: string;
+  email: string;
+  name: string;
+  level: ToqueAdminLevel;
+  role?: ToqueAdminLevel;
+  addedBy?: string;
+  addedByEmail?: string;
+  createdAt: string;
+  active?: boolean;
+}
+
+export type ToqueAdminMember = ToqueAdminStaff;
+

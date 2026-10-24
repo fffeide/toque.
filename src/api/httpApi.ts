@@ -410,7 +410,7 @@ class HttpApi implements ToqueApi {
     return this.request('/subscription/state');
   }
 
-  async startTrial(planId: 'mensual' | 'anual' = 'mensual'): Promise<PlanState> {
+  async startTrial(planId: 'free' | 'mensual' | 'anual' = 'anual'): Promise<PlanState> {
     return this.request('/subscription/start-trial', {
       method: 'POST',
       body: JSON.stringify({ planId }),
@@ -556,6 +556,8 @@ class HttpApi implements ToqueApi {
     name?: string;
     phone?: string;
     birthDate?: string;
+    age?: number;
+    isMinor?: boolean;
     consent: boolean;
   }): Promise<{ member: ClubMember; pointsAwarded: number; walletPass?: WalletPassResponse }> {
     return this.request('/club/join', {
@@ -758,6 +760,27 @@ class HttpApi implements ToqueApi {
 
   async listAllPlatformUsers(): Promise<PlatformUserRecord[]> {
     return this.request('/admin/users');
+  }
+
+  async listToqueAdmins(): Promise<import('./types').ToqueAdminStaff[]> {
+    return this.request('/admin/toque-team');
+  }
+
+  async addToqueAdmin(data: {
+    email: string;
+    name: string;
+    level: import('./types').ToqueAdminLevel;
+  }): Promise<import('./types').ToqueAdminStaff> {
+    return this.request('/admin/toque-team', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async removeToqueAdmin(idOrEmail: string): Promise<void> {
+    await this.request(`/admin/toque-team/${encodeURIComponent(idOrEmail)}`, {
+      method: 'DELETE',
+    });
   }
 }
 

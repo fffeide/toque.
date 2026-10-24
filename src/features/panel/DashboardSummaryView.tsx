@@ -28,10 +28,10 @@ import {
 type PeriodKey = '30d' | '3m' | '12m' | 'all';
 
 const THEME_PRESETS = [
-  { label: 'Índigo Monroe', color: '#1e1b4b' },
+  { label: 'Naranja Toque', color: '#D95B26' },
+  { label: 'Índigo Profundo', color: '#1e1b4b' },
   { label: 'Azul Noche', color: '#172554' },
   { label: 'Esmeralda Oscuro', color: '#064e3b' },
-  { label: 'Borgoña', color: '#4c0519' },
   { label: 'Grafito Mate', color: '#18181b' },
 ];
 
@@ -53,7 +53,7 @@ export const DashboardSummaryView: React.FC = () => {
   const [editReward, setEditReward] = useState('');
   const [editHowToEarn, setEditHowToEarn] = useState('');
   const [editExpiration, setEditExpiration] = useState('');
-  const [editColor, setEditColor] = useState('#1e1b4b');
+  const [editColor, setEditColor] = useState('#D95B26');
   const [savingCard, setSavingCard] = useState(false);
 
   const isCashier = user?.role === 'cashier';
@@ -73,11 +73,11 @@ export const DashboardSummaryView: React.FC = () => {
       setStampLogs(logs);
 
       setEditReward(
-        cfg.loyaltyReward || cfg.rewardText || 'Beneficio exclusivo en instrumentos y accesorios'
+        cfg.loyaltyReward || cfg.rewardText || 'Combo Burger + Bebida sin cargo'
       );
       setEditHowToEarn(cfg.howToEarn || '1 sello por visita o compra');
       setEditExpiration(cfg.expirationPolicy || 'No vencen');
-      setEditColor(cfg.cardThemeColor || cfg.brandColor || '#1e1b4b');
+      setEditColor(cfg.cardThemeColor || cfg.brandColor || '#D95B26');
     } catch (err: any) {
       showToast(err?.message || 'No pudimos cargar el panel', 'error');
     } finally {
@@ -97,7 +97,7 @@ export const DashboardSummaryView: React.FC = () => {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `sellos-y-premios-${business?.id || 'musical-monroe'}-${period}.csv`;
+      a.download = `sellos-y-premios-${business?.id || 'la-burger'}-${period}.csv`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
@@ -111,7 +111,7 @@ export const DashboardSummaryView: React.FC = () => {
   };
 
   const handleCopyPublicLink = async () => {
-    const slug = business?.id || 'musical-monroe';
+    const slug = business?.id || 'la-burger';
     const fullUrl = `${window.location.origin}/u/${slug}`;
     try {
       await navigator.clipboard.writeText(fullUrl);
@@ -146,13 +146,13 @@ export const DashboardSummaryView: React.FC = () => {
   if (loading) {
     return (
       <div className="space-y-6">
-        <Skeleton className="h-12 w-72 rounded-xl bg-[#111113]" />
+        <Skeleton className="h-12 w-72 rounded-xl bg-[#141418]" />
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           {[1, 2, 3, 4].map((n) => (
-            <Skeleton key={n} className="h-28 rounded-2xl bg-[#111113]" />
+            <Skeleton key={n} className="h-28 rounded-2xl bg-[#141418]" />
           ))}
         </div>
-        <Skeleton className="h-64 rounded-2xl bg-[#111113]" />
+        <Skeleton className="h-64 rounded-2xl bg-[#141418]" />
       </div>
     );
   }
@@ -160,31 +160,31 @@ export const DashboardSummaryView: React.FC = () => {
   if (isCashier) {
     return (
       <div className="space-y-6">
-        <div className="rounded-2xl bg-[#111113] border border-[#242426] p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div className="rounded-2xl bg-[#141418] border border-[#282830] p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
-            <h1 className="text-xl font-bold text-[#f1f1ee]">Hola, {user?.name}</h1>
-            <p className="text-xs text-[#a1a1aa] mt-1">
-              Desde Escanear podés sumar sellos y canjear premios de los socios.
+            <h1 className="text-xl font-bold text-[#F4F4F0]">Hola, {user?.name}</h1>
+            <p className="text-xs text-[#A1A1AA] mt-1">
+              Desde Caja POS podés cobrar con teclado y emitir comprobantes digitales.
             </p>
           </div>
           <Link
-            to="/panel/escanear"
-            className="inline-flex items-center gap-2 px-5 py-3 rounded-xl bg-[#2fb36a] text-[#08120c] font-bold text-sm"
+            to="/panel/caja"
+            className="inline-flex items-center gap-2 px-5 py-3 rounded-xl bg-[#2FB36A] text-[#08120c] font-bold text-sm"
           >
             <QrCode className="w-4 h-4" />
-            Ir a Escanear
+            Ir a Caja POS
           </Link>
         </div>
       </div>
     );
   }
 
-  const businessName = business?.name || 'Musical Monroe';
-  const cardBgColor = clubConfig?.cardThemeColor || clubConfig?.brandColor || '#1e1b4b';
+  const businessName = business?.name || 'La Burger';
+  const cardBgColor = clubConfig?.cardThemeColor || clubConfig?.brandColor || '#D95B26';
   const rewardText =
     clubConfig?.loyaltyReward ||
     clubConfig?.rewardText ||
-    'Beneficio exclusivo en instrumentos y accesorios';
+    'Combo Burger + Bebida sin cargo';
   const howToEarn = clubConfig?.howToEarn || '1 sello por visita o compra';
   const expirationPolicy = clubConfig?.expirationPolicy || 'No vencen';
 
@@ -573,7 +573,7 @@ export const DashboardSummaryView: React.FC = () => {
             </button>
 
             <Link
-              to={`/u/${business?.id || 'musical-monroe'}`}
+              to={`/u/${business?.id || 'la-burger'}`}
               className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-[#bec8ff]/15 hover:bg-[#bec8ff]/25 text-xs font-bold text-[#bec8ff] transition-colors ml-auto"
             >
               <span>Ver página pública</span>
