@@ -1,5 +1,5 @@
 /**
- * Toque — Contrato de API en Tiempo Real con RLS (ToqueApi)
+ * Toque — Contrato de API (ToqueApi)
  */
 
 import {
@@ -11,6 +11,18 @@ import {
   Receipt,
   ClubConfig,
   ClubMember,
+  ClubPublicInfo,
+  RecognizedClientAccount,
+  ClubLocal,
+  AuditLogEntry,
+  NotificationTemplate,
+  NotificationLimits,
+  SetupProgress,
+  PlanState,
+  ToquecitoItem,
+  WaitlistEntry,
+  WaitlistProduct,
+  OtpPurpose,
   MercadoPagoStatus,
   DashboardSummary,
   BusinessProfile,
@@ -28,24 +40,213 @@ import {
 } from './types';
 
 export interface ToqueApi {
-  // Autenticación y Sesión RLS
+  // Autenticación por Código de Verificación de 6 dígitos (OTP — Sin contraseñas)
+  requestOtp(
+    email: string,
+    purpose?: OtpPurpose
+  ): Promise<{
+    sent: boolean;
+    expiresInSeconds: number;
+    resendAvailableInSeconds: number;
+    demoHintCode?: string;
+  }>;
+
+  verifyOtp(
+    email: string,
+    code: string,
+    extra?: { businessName?: string; ownerName?: string }
+  ): Promise<{
+    verified: boolean;
+    user?: User;
+    account?: RecognizedClientAccount;
+  }>;
+
   register(data: {
     businessName: string;
     ownerName: string;
     email: string;
-    password?: string;
   }): Promise<{ user: User; token: string }>;
 
   login(credentials: {
     email: string;
-    password?: string;
-    isGoogle?: boolean;
-    requirePasswordVerification?: boolean;
+    code?: string;
   }): Promise<{ user: User; token: string }>;
 
   logout(): Promise<void>;
 
   getCurrentUser(): Promise<User | null>;
+
+  // Club — Alta Pública del Cliente y Reconocimiento de Cuenta
+  getClubPublic(localCode: string): Promise<ClubPublicInfo>;
+
+  registerMember(data: {
+    localCode?: string;
+    name: string;
+    email: string;
+    birthDay?: number;
+    birthMonth?: number;
+    adult: boolean;
+    marketingConsent: boolean;
+  }): Promise<{
+    member: ClubMember;
+    account: RecognizedClientAccount;
+    requiresOtp: boolean;
+  }>;
+
+  createAnonymousCard(localCode: string): Promise<{
+    member: ClubMember;
+  }>;
+
+  recognizeAccount(email?: string): Promise<RecognizedClientAccount>;
+
+  addCardToAccount(data: {
+    localCode: string;
+    marketingConsent: boolean;
+  }): Promise<{
+    member: ClubMember;
+    account: RecognizedClientAccount;
+  }>;
+
+  // Club — Suma de Sellos, Canje y Toquecitos
+  addStampByCashier(data: {
+    memberId?: string;
+    email?: string;
+    amount?: number;
+    localId?: string;
+    otpCode?: string;
+  }): Promise<{
+    member: ClubMember;
+    stampsAdded: number;
+    rewardReady: boolean;
+    toquecito: ToquecitoItem;
+  }>;
+
+  claimSelfStamp(data: {
+    localCode: string;
+    memberId: string;
+    rotatingToken?: string;
+  }): Promise<{
+    member: ClubMember;
+    stampsAdded: number;
+    rewardReady: boolean;
+    toquecito: ToquecitoItem;
+  }>;
+
+  getRotatingCode(localId: string): Promise<{
+    localId: string;
+    localCode: string;
+    token: string;
+    validForSeconds: number;
+    expiresAt: string;
+  }>;
+
+  redeemReward(memberId: string): Promise<{
+    member: ClubMember;
+    rewardsRedeemed: number;
+  }>;
+
+  listToquecitos(accountId?: string): Promise<ToquecitoItem[]>;
+
+  // Club — Correcciones (Solo lectura con motivo obligatorio >= 10 caracteres)
+  voidStamp(data: {
+    stampId: string;
+    memberId?: string;
+    reason: string;
+  }): Promise<{
+    member: ClubMember;
+    auditEntry: AuditLogEntry;
+  }>;
+
+  adjustBalance(data: {
+    memberId: string;
+    delta: number;
+    reason: string;
+  }): Promise<{
+    member: ClubMember;
+    auditEntry: AuditLogEntry;
+  }>;
+
+  listAuditLog(filters?: {
+    dateFrom?: string;
+    dateTo?: string;
+    actorName?: string;
+  }): Promise<AuditLogEntry[]>;
+
+  // Club — Clientes y Configuración
+  listMembers(filters?: {
+    search?: string;
+    localId?: string;
+  }): Promise<ClubMember[]>;
+
+  listClubMembers(): Promise<ClubMember[]>;
+
+  exportClubMembersCsv(): Promise<string>;
+
+  deleteClubMember(id: string): Promise<void>;
+
+  getClubConfig(): Promise<ClubConfig>;
+
+  updateClubConfig(patch: Partial<ClubConfig>): Promise<ClubConfig>;
+
+  // Locales del Comercio
+  listLocals(): Promise<ClubLocal[]>;
+
+  createLocal(data: {
+    name: string;
+    address: string;
+    lat?: number;
+    lng?: number;
+  }): Promise<ClubLocal>;
+
+  updateLocal(
+    id: string,
+    patch: Partial<Pick<ClubLocal, 'name' | 'address' | 'lat' | 'lng'>>
+  ): Promise<ClubLocal>;
+
+  // Avisos y Límites
+  listNotificationTemplates(): Promise<{
+    templates: NotificationTemplate[];
+    limits: NotificationLimits;
+    subscribedClientsCount: number;
+  }>;
+
+  updateTemplate(
+    id: string,
+    patch: Partial<Pick<NotificationTemplate, 'title' | 'message' | 'active'>>,
+    limitsPatch?: Partial<NotificationLimits>
+  ): Promise<{
+    templates: NotificationTemplate[];
+    limits: NotificationLimits;
+  }>;
+
+  scheduleNotification(data: {
+    title: string;
+    message: string;
+    scheduledFor: string;
+  }): Promise<NotificationTemplate>;
+
+  // Configuración Inicial y Suscripción
+  getSetupProgress(): Promise<SetupProgress>;
+
+  markCartelPrinted(): Promise<SetupProgress>;
+
+  getPlanState(): Promise<PlanState>;
+
+  startTrial(planId?: 'mensual' | 'anual'): Promise<PlanState>;
+
+  // Lista de Espera (Waitlist)
+  joinWaitlist(data: {
+    email: string;
+    product: WaitlistProduct;
+    consent: boolean;
+    honeypot?: string;
+  }): Promise<{
+    joined: boolean;
+    alreadyRegistered?: boolean;
+    entry: WaitlistEntry;
+  }>;
+
+  listWaitlist(): Promise<WaitlistEntry[]>;
 
   // Activación y Gestión de Carteles
   getActivationState(code: string): Promise<{
@@ -84,25 +285,18 @@ export interface ToqueApi {
     patch: Partial<Pick<Cartel, 'name' | 'role' | 'status' | 'mode' | 'reviewUrl'>>
   ): Promise<Cartel>;
 
-  // Hub del Negocio
+  // Hub y Recibos
   getHubConfig(): Promise<HubConfig>;
 
   updateHubConfig(patch: Partial<HubConfig>): Promise<HubConfig>;
 
-  // Hub Público del Cliente y Recibos en Tiempo Real
   getPublicHub(code: string): Promise<PublicHub>;
 
-  subscribeToCartelHub(
-    code: string,
-    onUpdate: (hub: PublicHub) => void
-  ): () => void;
+  subscribeToCartelHub(code: string, onUpdate: (hub: PublicHub) => void): () => void;
 
   getReceiptById(receiptId: string): Promise<Receipt | null>;
 
-  subscribeToReceipt(
-    receiptId: string,
-    onUpdate: (receipt: Receipt | null) => void
-  ): () => void;
+  subscribeToReceipt(receiptId: string, onUpdate: (receipt: Receipt | null) => void): () => void;
 
   claimReceipt(id: string): Promise<{ success: boolean; receipt: Receipt }>;
 
@@ -127,7 +321,7 @@ export interface ToqueApi {
     points?: number;
   }): Promise<WalletPassResponse>;
 
-  // Caja y Cobros en Tiempo Real
+  // Caja y Cobros
   createSale(data: {
     cartelId: string;
     amount: number;
@@ -152,18 +346,7 @@ export interface ToqueApi {
 
   subscribeToBusinessSales(onUpdate: (sales: Sale[]) => void): () => void;
 
-  // Club de Fidelidad
-  getClubConfig(): Promise<ClubConfig>;
-
-  updateClubConfig(patch: Partial<ClubConfig>): Promise<ClubConfig>;
-
-  listClubMembers(): Promise<ClubMember[]>;
-
-  exportClubMembersCsv(): Promise<string>;
-
-  deleteClubMember(id: string): Promise<void>;
-
-  // Equipo y Colaboradores (RLS)
+  // Equipo y Colaboradores
   listTeamMembers(): Promise<TeamMember[]>;
 
   addTeamMember(data: {
@@ -171,16 +354,19 @@ export interface ToqueApi {
     email?: string;
     role: 'owner' | 'manager' | 'cashier';
     assignedCartelId?: string;
+    assignedLocalIds?: string[];
   }): Promise<TeamMember>;
 
   updateTeamMember(
     id: string,
-    patch: Partial<Pick<TeamMember, 'name' | 'role' | 'assignedCartelId' | 'status'>>
+    patch: Partial<
+      Pick<TeamMember, 'name' | 'role' | 'assignedCartelId' | 'assignedLocalIds' | 'status'>
+    >
   ): Promise<TeamMember>;
 
   removeTeamMember(id: string): Promise<void>;
 
-  // Red Toque y Formatos de Activación (Estilo Pasito)
+  // Red y Consumidor
   listNetworkActivations(): Promise<NetworkActivation[]>;
 
   getPublicCrossBenefits(excludeBusinessId?: string): Promise<NetworkActivation[]>;
@@ -198,7 +384,6 @@ export interface ToqueApi {
     active: boolean
   ): Promise<NetworkActivation>;
 
-  // Bóveda del Consumidor ("Mi Toque") — Sincronización Híbrida localStorage + D1 + Firestore
   syncConsumerVault(payload: {
     user: ConsumerUser;
     receipts: ConsumerReceipt[];
@@ -216,21 +401,20 @@ export interface ToqueApi {
     receipts?: ConsumerReceipt[];
   }>;
 
-  // Mercado Pago
   getMercadoPagoStatus(): Promise<MercadoPagoStatus>;
 
   connectMercadoPago(): Promise<{ connected: boolean }>;
 
   disconnectMercadoPago(): Promise<{ connected: boolean }>;
 
-  // Resumen del Panel (Datos 100% Reales)
-  getDashboardSummary(): Promise<DashboardSummary>;
+  // Resumen del Panel
+  getDashboardSummary(period?: '30d' | '3m' | '12m' | 'all'): Promise<DashboardSummary>;
 
   // Perfil del Negocio
   getBusinessProfile(): Promise<BusinessProfile>;
 
   updateBusinessProfile(patch: Partial<BusinessProfile>): Promise<BusinessProfile>;
 
-  // Super Admin Global (Datos 100% Reales de toda la plataforma)
+  // Super Admin
   getSuperAdminSummary(): Promise<SuperAdminSummary>;
 }

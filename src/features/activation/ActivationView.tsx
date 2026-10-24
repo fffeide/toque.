@@ -61,11 +61,10 @@ export const ActivationView: React.FC = () => {
           businessName,
           ownerName: businessName,
           email,
-          password,
         });
         showToast('Cuenta creada. Ahora configurá tu cartel.', 'success');
       } else {
-        await login({ email, password });
+        await login({ email, code: password });
         showToast('Sesión iniciada. Ahora configurá tu cartel.', 'success');
       }
     } catch (err) {

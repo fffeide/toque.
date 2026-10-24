@@ -22,6 +22,10 @@
   --font-code: 'JetBrains Mono', monospace;
 }
 
+html.large-text {
+  font-size: 19px;
+}
+
 html.theme-light {
   --bg-main: #f2ede2;
   --bg-sidebar: #111113;
@@ -126,7 +130,8 @@ html.theme-light .theme-panel main .stat-detail {
 html.theme-light .theme-panel main .text-\[\#a1a1aa\],
 html.theme-light .theme-panel main .text-\[\#9c9c98\],
 html.theme-light .theme-panel main .text-\[\#8E8E93\],
-html.theme-light .theme-panel main .text-\[\#71717a\] {
+html.theme-light .theme-panel main .text-\[\#71717a\],
+html.theme-light .theme-panel main .text-\[\#d4d4d8\] {
   color: #1f1f22 !important;
 }
 
@@ -178,12 +183,53 @@ h1, h2, h3, .font-display {
   outline-offset: 2px;
 }
 
+/* Animación corta del Toquecito al sumar sello */
+@keyframes toquecitoPop {
+  0% {
+    transform: scale(0.6);
+    opacity: 0;
+  }
+  70% {
+    transform: scale(1.08);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+.toquecito-pop {
+  animation: toquecitoPop 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *, ::before, ::after {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
+  }
+  .toquecito-pop {
+    animation: none !important;
+  }
+}
+
+@media print {
+  @page {
+    size: A5 portrait;
+    margin: 8mm;
+  }
+  body {
+    background: #ffffff !important;
+    color: #000000 !important;
+  }
+  aside,
+  header,
+  nav,
+  .no-print,
+  .print\:hidden {
+    display: none !important;
   }
 }
 

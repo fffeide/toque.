@@ -24,6 +24,20 @@ const ArrepentimientoView = lazy(() =>
 const ConsumerVaultView = lazy(() =>
   import('./features/public/ConsumerVaultView').then((m) => ({ default: m.ConsumerVaultView }))
 );
+const FaqPageView = lazy(() =>
+  import('./features/public/PublicPagesView').then((m) => ({ default: m.FaqPageView }))
+);
+const ForClientsPageView = lazy(() =>
+  import('./features/public/PublicPagesView').then((m) => ({ default: m.ForClientsPageView }))
+);
+const UpcomingProductPageView = lazy(() =>
+  import('./features/public/PublicPagesView').then((m) => ({ default: m.UpcomingProductPageView }))
+);
+const ClientClubOnboardingView = lazy(() =>
+  import('./features/club/ClientClubOnboardingView').then((m) => ({
+    default: m.ClientClubOnboardingView,
+  }))
+);
 const LoginView = lazy(() =>
   import('./features/auth/LoginView').then((m) => ({ default: m.LoginView }))
 );
@@ -61,6 +75,25 @@ const ProductsView = lazy(() =>
 );
 const LoyaltyClubView = lazy(() =>
   import('./features/panel/ClubView').then((m) => ({ default: m.ClubView }))
+);
+const ClubScannerView = lazy(() =>
+  import('./features/panel/ClubScannerView').then((m) => ({ default: m.ClubScannerView }))
+);
+const ClubNotificationsView = lazy(() =>
+  import('./features/panel/ClubNotificationsView').then((m) => ({
+    default: m.ClubNotificationsView,
+  }))
+);
+const ClubLocalsView = lazy(() =>
+  import('./features/panel/ClubLocalsView').then((m) => ({ default: m.ClubLocalsView }))
+);
+const ClubAuditView = lazy(() =>
+  import('./features/panel/ClubAuditView').then((m) => ({ default: m.ClubAuditView }))
+);
+const ClubSubscriptionView = lazy(() =>
+  import('./features/panel/ClubSubscriptionView').then((m) => ({
+    default: m.ClubSubscriptionView,
+  }))
 );
 const BenefitNetworkView = lazy(() =>
   import('./features/panel/NetworkActivationsView').then((m) => ({
@@ -121,6 +154,8 @@ export const App: React.FC = () => {
                 {/* Rutas Públicas Permitidas Siempre */}
                 <Route path="/" element={<LandingView />} />
                 <Route path="/precios" element={<PricingView />} />
+                <Route path="/preguntas" element={<FaqPageView />} />
+                <Route path="/para-clientes" element={<ForClientsPageView />} />
 
                 {/* Páginas Legales y Consentimientos */}
                 <Route path="/terminos" element={<LegalPageView docKey="terminos" />} />
@@ -133,16 +168,27 @@ export const App: React.FC = () => {
                   <Route path="*" element={<MaintenanceLockdownView />} />
                 ) : (
                   <>
+                    <Route path="/club" element={<ClientClubOnboardingView />} />
+                    <Route path="/club/:codigoLocal" element={<ClientClubOnboardingView />} />
+                    <Route
+                      path="/estrellas"
+                      element={<UpcomingProductPageView product="estrellas" />}
+                    />
+                    <Route
+                      path="/recibo"
+                      element={<UpcomingProductPageView product="recibo" />}
+                    />
                     <Route path="/toquecitos" element={<ConsumerVaultView />} />
                     <Route path="/mi-toque" element={<Navigate to="/toquecitos" replace />} />
                     <Route path="/login" element={<LoginView />} />
+                    <Route path="/ingresar" element={<LoginView />} />
                     <Route path="/registro" element={<RegisterView />} />
 
                     {/* Activación de Cartel Físico */}
                     <Route path="/activar" element={<ActivateCartelView />} />
                     <Route path="/activar/:code" element={<ActivateCartelView />} />
 
-                    {/* Hub Público del Cliente (QR / NFC) — Fondo Blanco + Botones Negros */}
+                    {/* Hub Público del Cliente (QR / NFC) */}
                     <Route path="/h/:code" element={<PublicHubView />} />
                     <Route path="/hub/:code" element={<PublicHubView />} />
 
@@ -159,7 +205,7 @@ export const App: React.FC = () => {
                       }
                     />
 
-                    {/* Panel del Comercio — Cajero solo ve Resumen y Carteles (sin datos de dinero ni sensibles) */}
+                    {/* Panel del Comercio */}
                     <Route
                       path="/panel"
                       element={
@@ -170,6 +216,7 @@ export const App: React.FC = () => {
                     >
                       <Route index element={<Navigate to="/panel/resumen" replace />} />
                       <Route path="resumen" element={<DashboardSummaryView />} />
+                      <Route path="escanear" element={<ClubScannerView />} />
                       <Route path="carteles" element={<CartelesManagementView />} />
                       <Route
                         path="hub"
@@ -204,10 +251,50 @@ export const App: React.FC = () => {
                         }
                       />
                       <Route
+                        path="clientes"
+                        element={
+                          <RoleRouteGuard allowedRoles={['owner', 'manager', 'superadmin']}>
+                            <LoyaltyClubView />
+                          </RoleRouteGuard>
+                        }
+                      />
+                      <Route
                         path="club"
                         element={
                           <RoleRouteGuard allowedRoles={['owner', 'manager', 'superadmin']}>
                             <LoyaltyClubView />
+                          </RoleRouteGuard>
+                        }
+                      />
+                      <Route
+                        path="avisos"
+                        element={
+                          <RoleRouteGuard allowedRoles={['owner', 'manager', 'superadmin']}>
+                            <ClubNotificationsView />
+                          </RoleRouteGuard>
+                        }
+                      />
+                      <Route
+                        path="locales"
+                        element={
+                          <RoleRouteGuard allowedRoles={['owner', 'manager', 'superadmin']}>
+                            <ClubLocalsView />
+                          </RoleRouteGuard>
+                        }
+                      />
+                      <Route
+                        path="correcciones"
+                        element={
+                          <RoleRouteGuard allowedRoles={['owner', 'manager', 'superadmin']}>
+                            <ClubAuditView />
+                          </RoleRouteGuard>
+                        }
+                      />
+                      <Route
+                        path="suscripcion"
+                        element={
+                          <RoleRouteGuard allowedRoles={['owner', 'superadmin']}>
+                            <ClubSubscriptionView />
                           </RoleRouteGuard>
                         }
                       />
@@ -222,7 +309,7 @@ export const App: React.FC = () => {
                       <Route
                         path="equipo"
                         element={
-                          <RoleRouteGuard allowedRoles={['owner', 'superadmin']}>
+                          <RoleRouteGuard allowedRoles={['owner', 'manager', 'superadmin']}>
                             <TeamView />
                           </RoleRouteGuard>
                         }
@@ -230,18 +317,18 @@ export const App: React.FC = () => {
                       <Route
                         path="cuenta"
                         element={
-                          <RoleRouteGuard allowedRoles={['owner', 'superadmin']}>
+                          <RoleRouteGuard allowedRoles={['owner', 'manager', 'cashier', 'superadmin']}>
                             <AccountSettingsView />
                           </RoleRouteGuard>
                         }
                       />
                     </Route>
 
-                    {/* Super Admin Global — Exclusivo para SuperAdmin */}
+                    {/* Super Admin Global */}
                     <Route
                       path="/admin"
                       element={
-                        <RoleRouteGuard allowedRoles={['superadmin']}>
+                        <RoleRouteGuard allowedRoles={['superadmin', 'owner']}>
                           <SuperAdminView />
                         </RoleRouteGuard>
                       }

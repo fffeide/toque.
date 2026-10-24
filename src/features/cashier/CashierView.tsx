@@ -488,8 +488,7 @@ export const CashierView: React.FC = () => {
     try {
       await login({
         email: pendingElevationMember.email,
-        password: elevationPassword.trim(),
-        requirePasswordVerification: true,
+        code: elevationPassword.trim(),
       });
       const roleText =
         pendingElevationMember.role === 'owner'

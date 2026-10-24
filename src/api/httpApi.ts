@@ -1,9 +1,6 @@
 /**
- * Toque — Módulo Recibo: Cliente HTTP REST (httpApi)
- * Cumple estrictamente la Regla de Oro 1:
- * - Realiza peticiones a /api/...
- * - Envía credentials: 'include'
- * - Maneja errores estructurados con la forma { error: { code, message } }
+ * Toque — Cliente HTTP REST (httpApi)
+ * Realiza peticiones a /api/... con credentials: 'include' (sesión en cookie del servidor).
  */
 
 import { ToqueApi } from './ToqueApi';
@@ -16,24 +13,42 @@ import {
   Receipt,
   ClubConfig,
   ClubMember,
+  ClubPublicInfo,
+  RecognizedClientAccount,
+  ClubLocal,
+  AuditLogEntry,
+  NotificationTemplate,
+  NotificationLimits,
+  SetupProgress,
+  PlanState,
+  ToquecitoItem,
+  WaitlistEntry,
+  WaitlistProduct,
+  OtpPurpose,
   MercadoPagoStatus,
   DashboardSummary,
-  CartelBatch,
   BusinessProfile,
   CartelRole,
   HubMode,
   PaymentMethod,
   SaleItem,
+  TeamMember,
+  WalletPassResponse,
+  SuperAdminSummary,
+  NetworkActivation,
+  NetworkActivationFormat,
+  ConsumerUser,
+  ConsumerReceipt,
 } from './types';
 
 interface ApiErrorResponse {
   error?: {
-    code: string;
-    message: string;
-  };
+    code?: string;
+    message?: string;
+  } | string;
 }
 
-class HttpApi {
+class HttpApi implements ToqueApi {
   private baseUrl = '/api';
 
   private async request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
@@ -59,22 +74,51 @@ class HttpApi {
       try {
         errBody = await response.json();
       } catch {
-        // Fallback si no es JSON
+        // Fallback
       }
 
-      const errorMessage = errBody?.error?.message || `Error en la solicitud (${response.status})`;
+      const errorMessage =
+        typeof errBody?.error === 'string'
+          ? errBody.error
+          : errBody?.error?.message || `Error en la solicitud (${response.status})`;
       throw new Error(errorMessage);
     }
 
     return response.json();
   }
 
-  // Autenticación
+  // Autenticación OTP
+  async requestOtp(email: string, purpose: OtpPurpose = 'login') {
+    return this.request<{
+      sent: boolean;
+      expiresInSeconds: number;
+      resendAvailableInSeconds: number;
+      demoHintCode?: string;
+    }>('/auth/otp/request', {
+      method: 'POST',
+      body: JSON.stringify({ email, purpose }),
+    });
+  }
+
+  async verifyOtp(
+    email: string,
+    code: string,
+    extra?: { businessName?: string; ownerName?: string }
+  ) {
+    return this.request<{
+      verified: boolean;
+      user?: User;
+      account?: RecognizedClientAccount;
+    }>('/auth/otp/verify', {
+      method: 'POST',
+      body: JSON.stringify({ email, code, ...extra }),
+    });
+  }
+
   async register(data: {
     businessName: string;
     ownerName: string;
     email: string;
-    password?: string;
   }): Promise<{ user: User; token: string }> {
     return this.request('/auth/register', {
       method: 'POST',
@@ -84,8 +128,7 @@ class HttpApi {
 
   async login(credentials: {
     email: string;
-    password?: string;
-    isGoogle?: boolean;
+    code?: string;
   }): Promise<{ user: User; token: string }> {
     return this.request('/auth/login', {
       method: 'POST',
@@ -106,24 +149,301 @@ class HttpApi {
     }
   }
 
-  // Activación
-  async getActivationState(code: string): Promise<{
-    found: boolean;
-    status?: Cartel['status'];
-    requiresPin?: boolean;
-    cartel?: Partial<Cartel>;
-  }> {
-    return this.request(`/carteles/activation-state?code=${encodeURIComponent(code)}`);
+  // Club Público y Alta del Cliente
+  async getClubPublic(localCode: string): Promise<ClubPublicInfo> {
+    return this.request(`/club/public/${encodeURIComponent(localCode)}`);
+  }
+
+  async registerMember(data: {
+    localCode?: string;
+    name: string;
+    email: string;
+    birthDay?: number;
+    birthMonth?: number;
+    adult: boolean;
+    marketingConsent: boolean;
+  }) {
+    return this.request<{
+      member: ClubMember;
+      account: RecognizedClientAccount;
+      requiresOtp: boolean;
+    }>('/club/register-member', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async createAnonymousCard(localCode: string) {
+    return this.request<{ member: ClubMember }>('/club/anonymous-card', {
+      method: 'POST',
+      body: JSON.stringify({ localCode }),
+    });
+  }
+
+  async recognizeAccount(email?: string): Promise<RecognizedClientAccount> {
+    const q = email ? `?email=${encodeURIComponent(email)}` : '';
+    return this.request(`/club/recognize${q}`);
+  }
+
+  async addCardToAccount(data: { localCode: string; marketingConsent: boolean }) {
+    return this.request<{
+      member: ClubMember;
+      account: RecognizedClientAccount;
+    }>('/club/add-card', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  // Sellos, Canje y Toquecitos
+  async addStampByCashier(data: {
+    memberId?: string;
+    email?: string;
+    amount?: number;
+    localId?: string;
+    otpCode?: string;
+  }) {
+    return this.request<{
+      member: ClubMember;
+      stampsAdded: number;
+      rewardReady: boolean;
+      toquecito: ToquecitoItem;
+    }>('/club/stamps/cashier', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async claimSelfStamp(data: {
+    localCode: string;
+    memberId: string;
+    rotatingToken?: string;
+  }) {
+    return this.request<{
+      member: ClubMember;
+      stampsAdded: number;
+      rewardReady: boolean;
+      toquecito: ToquecitoItem;
+    }>('/club/stamps/self', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async getRotatingCode(localId: string) {
+    return this.request<{
+      localId: string;
+      localCode: string;
+      token: string;
+      validForSeconds: number;
+      expiresAt: string;
+    }>(`/club/locals/${encodeURIComponent(localId)}/rotating-code`);
+  }
+
+  async redeemReward(memberId: string) {
+    return this.request<{
+      member: ClubMember;
+      rewardsRedeemed: number;
+    }>(`/club/members/${encodeURIComponent(memberId)}/redeem`, {
+      method: 'POST',
+    });
+  }
+
+  async listToquecitos(accountId?: string): Promise<ToquecitoItem[]> {
+    const q = accountId ? `?accountId=${encodeURIComponent(accountId)}` : '';
+    return this.request(`/club/toquecitos${q}`);
+  }
+
+  // Correcciones
+  async voidStamp(data: { stampId: string; memberId?: string; reason: string }) {
+    return this.request<{
+      member: ClubMember;
+      auditEntry: AuditLogEntry;
+    }>('/club/audit/void-stamp', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async adjustBalance(data: { memberId: string; delta: number; reason: string }) {
+    return this.request<{
+      member: ClubMember;
+      auditEntry: AuditLogEntry;
+    }>('/club/audit/adjust-balance', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async listAuditLog(filters?: {
+    dateFrom?: string;
+    dateTo?: string;
+    actorName?: string;
+  }): Promise<AuditLogEntry[]> {
+    const params = new URLSearchParams();
+    if (filters?.dateFrom) params.set('dateFrom', filters.dateFrom);
+    if (filters?.dateTo) params.set('dateTo', filters.dateTo);
+    if (filters?.actorName) params.set('actorName', filters.actorName);
+    return this.request(`/club/audit?${params.toString()}`);
+  }
+
+  // Clientes y Configuración del Club
+  async listMembers(filters?: { search?: string; localId?: string }): Promise<ClubMember[]> {
+    const params = new URLSearchParams();
+    if (filters?.search) params.set('search', filters.search);
+    if (filters?.localId) params.set('localId', filters.localId);
+    return this.request(`/club/members?${params.toString()}`);
+  }
+
+  async listClubMembers(): Promise<ClubMember[]> {
+    return this.listMembers();
+  }
+
+  async exportClubMembersCsv(): Promise<string> {
+    return this.request('/club/members/export-csv');
+  }
+
+  async deleteClubMember(id: string): Promise<void> {
+    await this.request(`/club/members/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  }
+
+  async getClubConfig(): Promise<ClubConfig> {
+    return this.request('/club/config');
+  }
+
+  async updateClubConfig(patch: Partial<ClubConfig>): Promise<ClubConfig> {
+    return this.request('/club/config', {
+      method: 'PATCH',
+      body: JSON.stringify(patch),
+    });
+  }
+
+  // Locales
+  async listLocals(): Promise<ClubLocal[]> {
+    return this.request('/club/locals');
+  }
+
+  async createLocal(data: {
+    name: string;
+    address: string;
+    lat?: number;
+    lng?: number;
+  }): Promise<ClubLocal> {
+    return this.request('/club/locals', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateLocal(
+    id: string,
+    patch: Partial<Pick<ClubLocal, 'name' | 'address' | 'lat' | 'lng'>>
+  ): Promise<ClubLocal> {
+    return this.request(`/club/locals/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(patch),
+    });
+  }
+
+  // Avisos
+  async listNotificationTemplates() {
+    return this.request<{
+      templates: NotificationTemplate[];
+      limits: NotificationLimits;
+      subscribedClientsCount: number;
+    }>('/club/notifications/templates');
+  }
+
+  async updateTemplate(
+    id: string,
+    patch: Partial<Pick<NotificationTemplate, 'title' | 'message' | 'active'>>,
+    limitsPatch?: Partial<NotificationLimits>
+  ) {
+    return this.request<{
+      templates: NotificationTemplate[];
+      limits: NotificationLimits;
+    }>(`/club/notifications/templates/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ patch, limitsPatch }),
+    });
+  }
+
+  async scheduleNotification(data: {
+    title: string;
+    message: string;
+    scheduledFor: string;
+  }): Promise<NotificationTemplate> {
+    return this.request('/club/notifications/schedule', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  // Configuración Inicial y Suscripción
+  async getSetupProgress(): Promise<SetupProgress> {
+    return this.request('/club/setup-progress');
+  }
+
+  async markCartelPrinted(): Promise<SetupProgress> {
+    return this.request('/club/setup-progress/printed', { method: 'POST' });
+  }
+
+  async getPlanState(): Promise<PlanState> {
+    return this.request('/subscription/state');
+  }
+
+  async startTrial(planId: 'mensual' | 'anual' = 'mensual'): Promise<PlanState> {
+    return this.request('/subscription/start-trial', {
+      method: 'POST',
+      body: JSON.stringify({ planId }),
+    });
+  }
+
+  // Lista de Espera
+  async joinWaitlist(data: {
+    email: string;
+    product: WaitlistProduct;
+    consent: boolean;
+    honeypot?: string;
+  }) {
+    return this.request<{
+      joined: boolean;
+      alreadyRegistered?: boolean;
+      entry: WaitlistEntry;
+    }>('/waitlist', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async listWaitlist(): Promise<WaitlistEntry[]> {
+    return this.request('/admin/waitlist');
+  }
+
+  // Carteles, Hub, Caja, Equipo
+  async getActivationState(code: string) {
+    return this.request<{
+      found: boolean;
+      status?: Cartel['status'];
+      requiresPin?: boolean;
+      cartel?: Partial<Cartel>;
+    }>(`/carteles/activation-state?code=${encodeURIComponent(code)}`);
+  }
+
+  async getCartelByCode(code: string): Promise<Cartel | null> {
+    return this.request(`/carteles/by-code/${encodeURIComponent(code)}`);
   }
 
   async activateCartel(data: {
     code: string;
-    pin: string;
-    businessName: string;
-    reviewUrl: string;
-    cartelName: string;
+    pin?: string;
+    businessName?: string;
+    reviewUrl?: string;
+    googleReviewUrl?: string;
+    cartelName?: string;
+    name?: string;
     role: CartelRole;
-    mode: HubMode;
+    mode?: HubMode;
   }): Promise<{ success: boolean; cartel: Cartel }> {
     return this.request('/carteles/activate', {
       method: 'POST',
@@ -131,22 +451,33 @@ class HttpApi {
     });
   }
 
-  // Carteles
   async listCarteles(): Promise<Cartel[]> {
     return this.request('/carteles');
+  }
+
+  async createCartelForBusiness(data: {
+    name: string;
+    code?: string;
+    role: CartelRole;
+    mode?: HubMode;
+    reviewUrl?: string;
+  }): Promise<Cartel> {
+    return this.request('/carteles', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
   }
 
   async updateCartel(
     id: string,
     patch: Partial<Pick<Cartel, 'name' | 'role' | 'status' | 'mode' | 'reviewUrl'>>
   ): Promise<Cartel> {
-    return this.request(`/carteles/${id}`, {
+    return this.request(`/carteles/${encodeURIComponent(id)}`, {
       method: 'PATCH',
       body: JSON.stringify(patch),
     });
   }
 
-  // Hub del Negocio
   async getHubConfig(): Promise<HubConfig> {
     return this.request('/hub/config');
   }
@@ -158,13 +489,36 @@ class HttpApi {
     });
   }
 
-  // Hub Público del Cliente
   async getPublicHub(code: string): Promise<PublicHub> {
     return this.request(`/public/hub/${encodeURIComponent(code)}`);
   }
 
+  subscribeToCartelHub(code: string, onUpdate: (hub: PublicHub) => void): () => void {
+    this.getPublicHub(code).then(onUpdate).catch(() => {});
+    return () => {};
+  }
+
+  async getReceiptById(receiptId: string): Promise<Receipt | null> {
+    return this.request(`/receipts/${encodeURIComponent(receiptId)}`);
+  }
+
+  subscribeToReceipt(
+    receiptId: string,
+    onUpdate: (receipt: Receipt | null) => void
+  ): () => void {
+    this.getReceiptById(receiptId).then(onUpdate).catch(() => {});
+    return () => {};
+  }
+
   async claimReceipt(id: string): Promise<{ success: boolean; receipt: Receipt }> {
-    return this.request(`/receipts/${id}/claim`, { method: 'POST' });
+    return this.request(`/receipts/${encodeURIComponent(id)}/claim`, { method: 'POST' });
+  }
+
+  async recordHubEvent(code: string, eventType: 'scan' | 'review_click'): Promise<void> {
+    await this.request(`/public/hub/${encodeURIComponent(code)}/events`, {
+      method: 'POST',
+      body: JSON.stringify({ eventType }),
+    });
   }
 
   async joinClub(data: {
@@ -179,7 +533,25 @@ class HttpApi {
     });
   }
 
-  // Caja y Cobros
+  async getWalletStatus(): Promise<{ configured: boolean; provider: string }> {
+    return this.request('/wallet/status');
+  }
+
+  async createWalletPass(data: {
+    cartelCode?: string;
+    memberId?: string;
+    customerName?: string;
+    customerContact?: string;
+    contact?: string;
+    stamps?: number;
+    points?: number;
+  }): Promise<WalletPassResponse> {
+    return this.request('/wallet/pass', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
   async createSale(data: {
     cartelId: string;
     amount: number;
@@ -193,19 +565,21 @@ class HttpApi {
   }
 
   async getSale(id: string): Promise<Sale> {
-    return this.request(`/sales/${id}`);
+    return this.request(`/sales/${encodeURIComponent(id)}`);
   }
 
   async confirmManualSale(id: string): Promise<{ sale: Sale; receipt: Receipt }> {
-    return this.request(`/sales/${id}/confirm-manual`, { method: 'POST' });
+    return this.request(`/sales/${encodeURIComponent(id)}/confirm-manual`, { method: 'POST' });
   }
 
   async simulatePaymentApproved(id: string): Promise<{ sale: Sale; receipt: Receipt }> {
-    return this.request(`/sales/${id}/simulate-approval`, { method: 'POST' });
+    return this.request(`/sales/${encodeURIComponent(id)}/simulate-approval`, {
+      method: 'POST',
+    });
   }
 
   async cancelSale(id: string): Promise<Sale> {
-    return this.request(`/sales/${id}/cancel`, { method: 'POST' });
+    return this.request(`/sales/${encodeURIComponent(id)}/cancel`, { method: 'POST' });
   }
 
   async listSales(filters?: {
@@ -222,27 +596,99 @@ class HttpApi {
     return this.request(`/sales?${params.toString()}`);
   }
 
-  // Club de Fidelidad
-  async getClubConfig(): Promise<ClubConfig> {
-    return this.request('/club/config');
+  subscribeToBusinessSales(onUpdate: (sales: Sale[]) => void): () => void {
+    this.listSales().then(onUpdate).catch(() => {});
+    return () => {};
   }
 
-  async updateClubConfig(patch: Partial<ClubConfig>): Promise<ClubConfig> {
-    return this.request('/club/config', {
+  async listTeamMembers(): Promise<TeamMember[]> {
+    return this.request('/team');
+  }
+
+  async addTeamMember(data: {
+    name: string;
+    email?: string;
+    role: 'owner' | 'manager' | 'cashier';
+    assignedCartelId?: string;
+    assignedLocalIds?: string[];
+  }): Promise<TeamMember> {
+    return this.request('/team', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateTeamMember(
+    id: string,
+    patch: Partial<
+      Pick<TeamMember, 'name' | 'role' | 'assignedCartelId' | 'assignedLocalIds' | 'status'>
+    >
+  ): Promise<TeamMember> {
+    return this.request(`/team/${encodeURIComponent(id)}`, {
       method: 'PATCH',
       body: JSON.stringify(patch),
     });
   }
 
-  async listClubMembers(): Promise<ClubMember[]> {
-    return this.request('/club/members');
+  async removeTeamMember(id: string): Promise<void> {
+    await this.request(`/team/${encodeURIComponent(id)}`, { method: 'DELETE' });
   }
 
-  async deleteClubMember(id: string): Promise<void> {
-    await this.request(`/club/members/${id}`, { method: 'DELETE' });
+  async listNetworkActivations(): Promise<NetworkActivation[]> {
+    return this.request('/network/activations');
   }
 
-  // Mercado Pago
+  async getPublicCrossBenefits(): Promise<NetworkActivation[]> {
+    return this.request('/network/cross-benefits');
+  }
+
+  async saveNetworkActivation(data: {
+    formatType: NetworkActivationFormat;
+    title: string;
+    discountText: string;
+    terms: string;
+    active: boolean;
+  }): Promise<NetworkActivation> {
+    return this.request('/network/activations', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async toggleNetworkActivation(
+    formatType: NetworkActivationFormat,
+    active: boolean
+  ): Promise<NetworkActivation> {
+    return this.request(`/network/activations/${encodeURIComponent(formatType)}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ active }),
+    });
+  }
+
+  async syncConsumerVault(payload: {
+    user: ConsumerUser;
+    receipts: ConsumerReceipt[];
+  }) {
+    return this.request<{
+      success: boolean;
+      consumerId: string;
+      recoveryCode: string;
+      user: ConsumerUser;
+      receipts: ConsumerReceipt[];
+    }>('/consumer/sync', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async recoverConsumerVault(contactOrId: string) {
+    return this.request<{
+      found: boolean;
+      user?: ConsumerUser;
+      receipts?: ConsumerReceipt[];
+    }>(`/consumer/sync?contact=${encodeURIComponent(contactOrId)}`);
+  }
+
   async getMercadoPagoStatus(): Promise<MercadoPagoStatus> {
     return this.request('/integrations/mercadopago/status');
   }
@@ -255,24 +701,10 @@ class HttpApi {
     return this.request('/integrations/mercadopago/disconnect', { method: 'POST' });
   }
 
-  // Resumen del Panel
-  async getDashboardSummary(): Promise<DashboardSummary> {
-    return this.request('/dashboard/summary');
+  async getDashboardSummary(period: '30d' | '3m' | '12m' | 'all' = '30d'): Promise<DashboardSummary> {
+    return this.request(`/dashboard/summary?period=${encodeURIComponent(period)}`);
   }
 
-  // Lotes para Fabricante
-  async createCartelBatch(data: { count: number }): Promise<CartelBatch> {
-    return this.request('/admin/batches', {
-      method: 'POST',
-      body: JSON.stringify(data),
-    });
-  }
-
-  async listCartelBatch(): Promise<CartelBatch[]> {
-    return this.request('/admin/batches');
-  }
-
-  // Perfil del Negocio
   async getBusinessProfile(): Promise<BusinessProfile> {
     return this.request('/business/profile');
   }
@@ -284,15 +716,8 @@ class HttpApi {
     });
   }
 
-  async requestCartelFromManufacturer(data: {
-    quantity: number;
-    role: CartelRole;
-    notes?: string;
-  }): Promise<{ success: boolean; requestId: string }> {
-    return this.request('/carteles/request-from-manufacturer', {
-      method: 'POST',
-      body: JSON.stringify(data),
-    });
+  async getSuperAdminSummary(): Promise<SuperAdminSummary> {
+    return this.request('/admin/summary');
   }
 }
 

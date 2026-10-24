@@ -14,9 +14,9 @@ export function getHomePathForRole(role?: UserRole, isSuperAdmin?: boolean): str
     return '/admin';
   }
   if (role === 'cashier') {
-    return '/panel/resumen';
+    return '/panel/escanear';
   }
-  return '/panel';
+  return '/panel/resumen';
 }
 
 export const RoleRouteGuard: React.FC<RoleRouteGuardProps> = ({ allowedRoles, children }) => {
@@ -35,7 +35,7 @@ export const RoleRouteGuard: React.FC<RoleRouteGuardProps> = ({ allowedRoles, ch
   }
 
   if (!user) {
-    return <Navigate to="/login" state={{ from: location.pathname }} replace />;
+    return <Navigate to="/ingresar" state={{ from: location.pathname }} replace />;
   }
 
   const effectiveRole: UserRole = user.isSuperAdmin ? 'superadmin' : user.role;

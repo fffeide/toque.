@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { api, TeamMember, Cartel } from '../../api';
+import { ClubLocal } from '../../api/types';
 import { useAuth } from '../../lib/authContext';
 import { Card } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
@@ -22,24 +23,28 @@ export const TeamView: React.FC = () => {
   const { showToast } = useToast();
   const [members, setMembers] = useState<TeamMember[]>([]);
   const [carteles, setCarteles] = useState<Cartel[]>([]);
+  const [locals, setLocals] = useState<ClubLocal[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
-  // Modal de nuevo colaborador (Solo pide Nombre y Apellido; por defecto todas las cajas)
   const [showAddModal, setShowAddModal] = useState(false);
   const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
   const [role, setRole] = useState<'cashier' | 'manager' | 'owner'>('cashier');
   const [assignedCartelId, setAssignedCartelId] = useState<string>('');
+  const [selectedLocalIds, setSelectedLocalIds] = useState<string[]>([]);
   const [isSaving, setIsSaving] = useState(false);
 
   const loadData = async () => {
     setIsLoading(true);
     try {
-      const [teamList, cartelesList] = await Promise.all([
+      const [teamList, cartelesList, localsList] = await Promise.all([
         api.listTeamMembers(),
         api.listCarteles(),
+        api.listLocals(),
       ]);
       setMembers(teamList);
       setCarteles(cartelesList);
+      setLocals(localsList);
     } catch {
       showToast('No se pudo cargar el equipo', 'error');
     } finally {
@@ -50,6 +55,12 @@ export const TeamView: React.FC = () => {
   useEffect(() => {
     loadData();
   }, []);
+
+  const toggleLocalSelection = (localId: string) => {
+    setSelectedLocalIds((prev) =>
+      prev.includes(localId) ? prev.filter((id) => id !== localId) : [...prev, localId]
+    );
+  };
 
   const handleAddMember = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -62,13 +73,16 @@ export const TeamView: React.FC = () => {
     try {
       const created = await api.addTeamMember({
         name: name.trim(),
+        email: email.trim() ? email.trim().toLowerCase() : undefined,
         role,
         assignedCartelId: assignedCartelId || undefined,
+        assignedLocalIds: selectedLocalIds.length > 0 ? selectedLocalIds : locals.map((l) => l.id),
       });
       setMembers((prev) => [...prev, created]);
       showToast(`${created.name} sumado al equipo`, 'success');
       setShowAddModal(false);
       setName('');
+      setEmail('');
       setRole('cashier');
       setAssignedCartelId('');
     } catch (err: any) {
@@ -135,7 +149,7 @@ export const TeamView: React.FC = () => {
             Equipo del comercio
           </h1>
           <p className="text-xs text-[#a1a1aa] mt-0.5">
-            Sumá cajeros o encargados y definí el nivel de acceso de cada integrante.
+            Sumá cajeros o encargados por mail y definí el nivel de acceso y locales de cada integrante.
           </p>
         </div>
 
@@ -145,8 +159,10 @@ export const TeamView: React.FC = () => {
           icon={<UserPlus className="w-4 h-4" />}
           onClick={() => {
             setName('');
+            setEmail('');
             setRole('cashier');
             setAssignedCartelId('');
+            setSelectedLocalIds(locals.map((l) => l.id));
             setShowAddModal(true);
           }}
         >
@@ -154,7 +170,7 @@ export const TeamView: React.FC = () => {
         </Button>
       </div>
 
-      {/* Explicación rápida de roles (sin mayúsculas innecesarias) */}
+      {/* Explicación rápida de roles */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <div className="p-4 rounded-xl bg-[#111113] border border-[#242426] flex items-start gap-3">
           <div className="w-8 h-8 rounded-lg bg-[#bec8ff]/15 text-[#bec8ff] flex items-center justify-center shrink-0">
@@ -163,7 +179,7 @@ export const TeamView: React.FC = () => {
           <div>
             <p className="text-xs font-bold text-[#f1f1ee]">Dueño</p>
             <p className="text-xs text-[#a1a1aa] mt-0.5">
-              Acceso total al panel, métricas, productos, carteles, equipo y caja.
+              Acceso total al panel, métricas, productos, carteles, club, correcciones, equipo y caja.
             </p>
           </div>
         </div>
@@ -175,7 +191,7 @@ export const TeamView: React.FC = () => {
           <div>
             <p className="text-xs font-bold text-[#f1f1ee]">Encargado</p>
             <p className="text-xs text-[#a1a1aa] mt-0.5">
-              Gestiona el resumen, carteles, productos, club y opera la caja.
+              Gestiona el resumen, carteles, club, avisos, correcciones con motivo y opera la caja.
             </p>
           </div>
         </div>
@@ -187,7 +203,7 @@ export const TeamView: React.FC = () => {
           <div>
             <p className="text-xs font-bold text-[#f1f1ee]">Cajero</p>
             <p className="text-xs text-[#a1a1aa] mt-0.5">
-              Opera la caja y ve el resumen y los carteles existentes sin datos de dinero.
+              Opera la caja y suma sellos / canjea premios en Escanear sin poder anular ni borrar.
             </p>
           </div>
         </div>
@@ -200,7 +216,7 @@ export const TeamView: React.FC = () => {
             Integrantes activos ({members.length})
           </h2>
           <span className="text-xs text-[#a1a1aa]">
-            Sincronización en tiempo real con Caja
+            Sincronización en tiempo real con Caja y Club
           </span>
         </div>
 
@@ -244,12 +260,11 @@ export const TeamView: React.FC = () => {
                       </span>
                     </div>
                     <p className="text-xs text-[#a1a1aa] mt-0.5">
-                      Alta: {formatDate(member.addedAt)}
+                      {member.email} · Alta: {formatDate(member.addedAt)}
                     </p>
                   </div>
                 </div>
 
-                {/* Controles de rol y caja asignada (El dueño no puede cambiar su propio rol ni qué cajas administra) */}
                 <div className="flex flex-wrap items-center gap-3">
                   {isSelfOwner ? (
                     <div className="flex items-center gap-2">
@@ -258,12 +273,11 @@ export const TeamView: React.FC = () => {
                       </span>
                       <span className="px-3 py-1.5 rounded-xl bg-[#161619] border border-[#28282a] text-xs font-semibold text-[#a1a1aa] flex items-center gap-1.5">
                         <QrCode className="w-3.5 h-3.5 text-[#bec8ff]" />
-                        Todas las cajas
+                        Todos los locales y cajas
                       </span>
                     </div>
                   ) : (
                     <>
-                      {/* Selector de Rol */}
                       <select
                         value={member.role}
                         onChange={(e) =>
@@ -280,7 +294,6 @@ export const TeamView: React.FC = () => {
                         <option value="owner">Dueño</option>
                       </select>
 
-                      {/* Selector de Cartel / Caja asignada */}
                       <div className="flex items-center gap-1.5 bg-[#161619] border border-[#28282a] rounded-xl px-3 py-1.5">
                         <QrCode className="w-3.5 h-3.5 text-[#bec8ff]" />
                         <select
@@ -329,7 +342,7 @@ export const TeamView: React.FC = () => {
                 <div>
                   <h2 className="font-bold text-base text-[#f1f1ee]">Sumar al equipo</h2>
                   <p className="text-xs text-[#a1a1aa]">
-                    Ingresá nombre y apellido. Por defecto tendrá habilitadas todas las cajas.
+                    Ingresá nombre, mail y asignale su rol y locales.
                   </p>
                 </div>
               </div>
@@ -353,6 +366,19 @@ export const TeamView: React.FC = () => {
                   placeholder="Ej: Lucas Martínez"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
+                  className="w-full bg-[#161619] border border-[#28282a] rounded-xl px-3.5 py-2.5 text-sm text-[#f1f1ee] focus:outline-none focus:border-[#bec8ff]"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-[#a1a1aa] mb-1.5">
+                  Mail de acceso (para recibir código de 6 dígitos)
+                </label>
+                <input
+                  type="email"
+                  placeholder="Ej: lucas@comercio.ar"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
                   className="w-full bg-[#161619] border border-[#28282a] rounded-xl px-3.5 py-2.5 text-sm text-[#f1f1ee] focus:outline-none focus:border-[#bec8ff]"
                 />
               </div>
@@ -393,6 +419,32 @@ export const TeamView: React.FC = () => {
                   </select>
                 </div>
               </div>
+
+              {locals.length > 0 && (
+                <div>
+                  <span className="block text-xs font-semibold text-[#a1a1aa] mb-1.5">
+                    Locales habilitados
+                  </span>
+                  <div className="space-y-1.5">
+                    {locals.map((loc) => (
+                      <label
+                        key={loc.id}
+                        className="flex items-center gap-2 text-xs text-[#f1f1ee] cursor-pointer"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={selectedLocalIds.includes(loc.id)}
+                          onChange={() => toggleLocalSelection(loc.id)}
+                          className="rounded border-[#28282a]"
+                        />
+                        <span>
+                          {loc.name} ({loc.code})
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               <div className="flex gap-2.5 pt-2">
                 <Button

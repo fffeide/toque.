@@ -1,7 +1,7 @@
 /**
- * Toque — Smart Receipt & Post-Purchase Hub: Definición de Tipos
- * Estructuras de datos 100% reales con soporte RLS, UUID v4 único, Equipo, WalletWallet,
- * Red de Beneficios estilo Pasito y Bóveda del Consumidor ("Mi Toque").
+ * Toque — Definición de Tipos (ToqueApi)
+ * Incluye Toque Club (tarjeta de sellos), Locales, Correcciones, Avisos, Suscripción,
+ * Verificación por código de 6 dígitos (OTP) y Lista de espera.
  */
 
 export type CartelRole = 'resena' | 'caja';
@@ -199,9 +199,20 @@ export interface ClubReward {
 export interface ClubConfig {
   name: string;
   clubName?: string;
+  brandColor?: string;
+  logoUrl?: string;
+  targetStamps?: number;
+  rewardText?: string;
   welcomeBenefitText?: string;
   pointsPerVisit?: number;
   enabled?: boolean;
+  mode?: ClubRuleType;
+  amountPerStamp?: number;
+  maxStampsPerVisit?: number;
+  expirationMonths?: number | null;
+  allowCashierScan?: boolean;
+  allowSelfScan?: boolean;
+  rotatingQrEnabled?: boolean;
   rule: {
     type: ClubRuleType;
     value: number;
@@ -210,14 +221,51 @@ export interface ClubConfig {
   active: boolean;
 }
 
+export interface ClubStampEntry {
+  id: string;
+  memberId: string;
+  localId: string;
+  localName: string;
+  count: number;
+  source: 'cashier' | 'self' | 'adjustment';
+  amountArs?: number;
+  actorName: string;
+  createdAt: string;
+  voided?: boolean;
+  voidReason?: string;
+}
+
+export interface ToquecitoItem {
+  id: string;
+  accountId: string;
+  businessId: string;
+  businessName: string;
+  initial: string;
+  brandColor: string;
+  createdAt: string;
+  isSample?: boolean;
+}
+
 export interface ClubMember {
   id: string;
   uuid?: string;
+  accountId?: string;
   businessId?: string;
+  localId?: string;
+  localCode?: string;
+  localName?: string;
   name?: string;
   contact: string;
+  maskedEmail?: string;
+  birthDay?: number;
+  birthMonth?: number;
+  anonymous?: boolean;
+  marketingConsent?: boolean;
   points: number;
-  stamps?: number;
+  stamps: number;
+  targetStamps?: number;
+  rewardsRedeemed?: number;
+  lastVisitAt?: string;
   passId?: string;
   passUrl?: string;
   walletPassUrl?: string;
@@ -225,7 +273,122 @@ export interface ClubMember {
   googleWalletUrl?: string;
   joinedAt: string;
   consent: true;
+  isSample?: boolean;
+  stampHistory?: ClubStampEntry[];
 }
+
+export interface ClubPublicInfo {
+  businessId: string;
+  businessName: string;
+  localId: string;
+  localCode: string;
+  localName: string;
+  localAddress?: string;
+  programName: string;
+  brandColor: string;
+  logoUrl?: string;
+  targetStamps: number;
+  rewardText: string;
+  mode: ClubRuleType;
+  amountPerStamp?: number;
+  maxStampsPerVisit?: number;
+  allowSelfScan: boolean;
+  allowCashierScan: boolean;
+  isSample?: boolean;
+}
+
+export interface RecognizedClientAccount {
+  recognized: boolean;
+  accountId?: string;
+  name?: string;
+  email?: string;
+  maskedEmail?: string;
+  birthDay?: number;
+  birthMonth?: number;
+  cards?: ClubMember[];
+  toquecitosCount?: number;
+}
+
+export interface ClubLocal {
+  id: string;
+  businessId: string;
+  code: string;
+  name: string;
+  address: string;
+  lat?: number;
+  lng?: number;
+  visitsCount: number;
+  newMembersCount: number;
+  returningCount: number;
+  rewardsRedeemedCount: number;
+  createdAt: string;
+  isSample?: boolean;
+}
+
+export interface AuditLogEntry {
+  id: string;
+  businessId: string;
+  actionType: 'void_stamp' | 'void_reward' | 'adjust_balance';
+  actionLabel: string;
+  memberId: string;
+  memberName: string;
+  delta: number;
+  reason: string;
+  actorName: string;
+  actorRole: string;
+  createdAt: string;
+  isSample?: boolean;
+}
+
+export interface NotificationTemplate {
+  id: string;
+  type: 'birthday' | 'nearby' | 'custom';
+  title: string;
+  message: string;
+  active: boolean;
+  scheduleInfo: string;
+  scheduledFor?: string;
+  benefitDaysValid?: number;
+}
+
+export interface NotificationLimits {
+  maxPerClientDays: number;
+  quietHoursStart: string;
+  quietHoursEnd: string;
+}
+
+export interface SetupProgress {
+  step1Brand: boolean;
+  step2Reward: boolean;
+  step3Local: boolean;
+  step4Printed: boolean;
+  completedCount: number;
+  totalSteps: number;
+  percent: number;
+}
+
+export interface PlanState {
+  status: 'trial' | 'active' | 'expired';
+  planId: 'mensual' | 'anual';
+  daysRemaining: number;
+  trialStartedAt: string;
+  expiresAt: string;
+  isSimulated: boolean;
+}
+
+export type WaitlistProduct = 'estrellas' | 'recibo' | 'toquecitos';
+
+export interface WaitlistEntry {
+  id: string;
+  email: string;
+  product: WaitlistProduct;
+  consent: boolean;
+  createdAt: string;
+  unsubscribeToken: string;
+  isSample?: boolean;
+}
+
+export type OtpPurpose = 'login' | 'register_merchant' | 'register_client' | 'cashier_confirm';
 
 export interface BusinessProfile {
   id: string;
@@ -334,6 +497,7 @@ export interface User {
   role: UserRole;
   assignedCartelId?: string;
   assignedCartelCode?: string;
+  assignedLocalIds?: string[];
   isSuperAdmin?: boolean;
 }
 
@@ -346,9 +510,11 @@ export interface TeamMember {
   role: 'owner' | 'manager' | 'cashier';
   assignedCartelId?: string;
   assignedCartelCode?: string;
+  assignedLocalIds?: string[];
   status: 'active' | 'revoked';
   addedAt: string;
   addedByEmail?: string;
+  isSample?: boolean;
 }
 
 export interface MercadoPagoStatus {
@@ -378,6 +544,10 @@ export interface DashboardSummary {
   activeCartelesCount: number;
   totalCartelesCount: number;
   recentSales: Sale[];
+  // Métricas de Club por período
+  visitsCount?: number;
+  returningMembersCount?: number;
+  rewardsRedeemedCount?: number;
 }
 
 export interface SuperAdminSummary {

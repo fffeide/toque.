@@ -3,6 +3,7 @@ import { NavLink, Outlet, useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../../lib/authContext';
 import { useTheme } from '../../lib/themeContext';
 import { UserRole } from '../../api/types';
+import { ClubSetupWizard } from '../../features/panel/ClubSetupWizard';
 import {
   LayoutDashboard,
   QrCode,
@@ -19,6 +20,10 @@ import {
   Sun,
   Moon,
   ShoppingBag,
+  Bell,
+  Store,
+  ShieldAlert,
+  Type,
 } from 'lucide-react';
 
 interface NavItem {
@@ -35,6 +40,36 @@ const ALL_NAV_ITEMS: NavItem[] = [
     label: 'Resumen',
     icon: LayoutDashboard,
     roles: ['owner', 'manager', 'cashier', 'superadmin'],
+  },
+  {
+    to: '/panel/escanear',
+    label: 'Escanear Club',
+    icon: QrCode,
+    roles: ['owner', 'manager', 'cashier', 'superadmin'],
+  },
+  {
+    to: '/panel/fidelidad',
+    label: 'Club Fidelidad',
+    icon: Award,
+    roles: ['owner', 'manager', 'superadmin'],
+  },
+  {
+    to: '/panel/avisos',
+    label: 'Avisos Club',
+    icon: Bell,
+    roles: ['owner', 'manager', 'superadmin'],
+  },
+  {
+    to: '/panel/locales',
+    label: 'Locales y Cartel',
+    icon: Store,
+    roles: ['owner', 'manager', 'superadmin'],
+  },
+  {
+    to: '/panel/correcciones',
+    label: 'Correcciones',
+    icon: ShieldAlert,
+    roles: ['owner', 'manager', 'superadmin'],
   },
   {
     to: '/panel/carteles',
@@ -55,12 +90,6 @@ const ALL_NAV_ITEMS: NavItem[] = [
     roles: ['owner', 'manager', 'superadmin'],
   },
   {
-    to: '/panel/fidelidad',
-    label: 'Club Fidelidad',
-    icon: Award,
-    roles: ['owner', 'manager', 'superadmin'],
-  },
-  {
     to: '/panel/red',
     label: 'Red de Beneficios',
     icon: Sparkles,
@@ -71,6 +100,12 @@ const ALL_NAV_ITEMS: NavItem[] = [
     to: '/panel/equipo',
     label: 'Equipo',
     icon: Users,
+    roles: ['owner', 'manager', 'superadmin'],
+  },
+  {
+    to: '/panel/suscripcion',
+    label: 'Suscripción',
+    icon: CreditCard,
     roles: ['owner', 'superadmin'],
   },
   {
@@ -83,7 +118,7 @@ const ALL_NAV_ITEMS: NavItem[] = [
 
 export const PanelLayout: React.FC = () => {
   const { user, business, logout } = useAuth();
-  const { isDark, toggleTheme } = useTheme();
+  const { isDark, toggleTheme, largeText, toggleLargeText } = useTheme();
   const navigate = useNavigate();
   const [mobileOpen, setMobileOpen] = useState(false);
 
@@ -152,7 +187,7 @@ export const PanelLayout: React.FC = () => {
         </div>
 
         {/* Navigation Links */}
-        <nav className="flex-1 p-3 space-y-1">
+        <nav className="flex-1 p-3 space-y-1 overflow-y-auto">
           {visibleNavItems.map((item) => {
             const Icon = item.icon;
             const displayLabel =
@@ -250,7 +285,22 @@ export const PanelLayout: React.FC = () => {
           </div>
 
           <div className="flex items-center gap-2.5">
-            {/* Botón Modo Oscuro / Claro (Solo icono, sin texto) */}
+            <button
+              type="button"
+              onClick={toggleLargeText}
+              aria-pressed={largeText}
+              title="Cambiar tamaño de letra"
+              className={`h-9 px-3 rounded-xl border text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer ${
+                largeText
+                  ? 'bg-[#bec8ff] text-[#0c0c0c] border-[#bec8ff]'
+                  : 'bg-[#18181b] text-[#f1f1ee] border-[#28282a] hover:border-[#bec8ff]'
+              }`}
+            >
+              <Type className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Letra más grande</span>
+            </button>
+
+            {/* Botón Modo Oscuro / Claro */}
             <button
               type="button"
               onClick={toggleTheme}
@@ -325,7 +375,7 @@ export const PanelLayout: React.FC = () => {
                 <p className="text-[11px] text-[#a1a1aa]">{user?.name}</p>
               </div>
 
-              <nav className="flex-1 p-3 space-y-1">
+              <nav className="flex-1 p-3 space-y-1 overflow-y-auto">
                 {visibleNavItems.map((item) => {
                   const Icon = item.icon;
                   const displayLabel =
@@ -368,6 +418,7 @@ export const PanelLayout: React.FC = () => {
 
         {/* Page Body */}
         <main className="flex-1 p-4 sm:p-8 max-w-6xl w-full mx-auto">
+          {currentRole !== 'cashier' && <ClubSetupWizard />}
           <Outlet />
         </main>
       </div>

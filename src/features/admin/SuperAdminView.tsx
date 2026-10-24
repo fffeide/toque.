@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { api, SuperAdminSummary } from '../../api';
+import { WaitlistEntry } from '../../api/types';
 import { useAuth } from '../../lib/authContext';
 import { useTheme } from '../../lib/themeContext';
 import { Card } from '../../components/ui/Card';
@@ -21,6 +22,8 @@ import {
   Sun,
   Moon,
   LogOut,
+  Clock,
+  Download,
 } from 'lucide-react';
 
 export const SuperAdminView: React.FC = () => {
@@ -28,13 +31,18 @@ export const SuperAdminView: React.FC = () => {
   const { isDark, toggleTheme } = useTheme();
   const navigate = useNavigate();
   const [summary, setSummary] = useState<SuperAdminSummary | null>(null);
+  const [waitlist, setWaitlist] = useState<WaitlistEntry[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
   const loadGlobalMetrics = async () => {
     setIsLoading(true);
     try {
-      const data = await api.getSuperAdminSummary();
+      const [data, waitlistData] = await Promise.all([
+        api.getSuperAdminSummary(),
+        api.listWaitlist(),
+      ]);
       setSummary(data);
+      setWaitlist(waitlistData);
     } catch {
       // ignore
     } finally {
@@ -49,6 +57,25 @@ export const SuperAdminView: React.FC = () => {
   const handleLogout = async () => {
     await logout();
     navigate('/login');
+  };
+
+  const handleExportWaitlistCsv = () => {
+    const headers = ['Fecha', 'Email', 'Producto', 'Consentimiento', 'Ejemplo'];
+    const rows = waitlist.map((w) => [
+      new Date(w.createdAt).toLocaleString('es-AR'),
+      w.email,
+      w.product,
+      w.consent ? 'Si' : 'No',
+      w.isSample ? 'Ejemplo' : 'Real',
+    ]);
+    const csv = [headers.join(','), ...rows.map((r) => r.join(','))].join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `lista-de-espera-toque-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
   };
 
   if (isLoading || !summary) {
@@ -76,7 +103,7 @@ export const SuperAdminView: React.FC = () => {
       accent: 'text-[#bec8ff] bg-[#bec8ff]/15',
     },
     {
-      label: 'Volumen Real Facturado',
+      label: 'Volumen Facturado',
       value: formatCurrency(summary.totalSalesAmount),
       sub: `${summary.totalSalesCount} cobros pagados en caja`,
       icon: Zap,
@@ -90,13 +117,19 @@ export const SuperAdminView: React.FC = () => {
       accent: 'text-[#bec8ff] bg-[#bec8ff]/15',
     },
     {
-      label: 'Socios Club & WalletWallet',
+      label: 'Socios Club & Wallet',
       value: summary.totalClubMembers.toString(),
       sub: `${summary.walletPassesIssued} pases Wallet emitidos`,
       icon: Wallet,
       accent: 'text-[#34d399] bg-[#2fb36a]/15',
     },
   ];
+
+  const countByProduct = {
+    estrellas: waitlist.filter((w) => w.product === 'estrellas').length,
+    recibo: waitlist.filter((w) => w.product === 'recibo').length,
+    toquecitos: waitlist.filter((w) => w.product === 'toquecitos').length,
+  };
 
   return (
     <div className="theme-panel min-h-screen bg-[#000000] text-[#f1f1ee]">
@@ -121,7 +154,7 @@ export const SuperAdminView: React.FC = () => {
                 </span>
               </div>
               <p className="text-xs text-[#a1a1aa]">
-                Monitoreo general de comercios adheridos, carteles activos y operaciones en vivo.
+                Monitoreo general de comercios adheridos, carteles activos, lista de espera y operaciones.
               </p>
             </div>
           </div>
@@ -183,6 +216,61 @@ export const SuperAdminView: React.FC = () => {
           })}
         </div>
 
+        {/* Lista de espera de próximos productos */}
+        <Card padding="none" className="overflow-hidden">
+          <div className="p-5 border-b border-[#242426] flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <Clock className="w-4 h-4 text-[#bec8ff]" />
+              <h2 className="font-bold text-base text-[#f1f1ee]">
+                Lista de espera ({waitlist.length})
+              </h2>
+            </div>
+            <div className="flex items-center gap-3 text-xs text-[#a1a1aa]">
+              <span>Estrellas: <strong className="text-[#f1f1ee]">{countByProduct.estrellas}</strong></span>
+              <span>·</span>
+              <span>Recibo: <strong className="text-[#f1f1ee]">{countByProduct.recibo}</strong></span>
+              <span>·</span>
+              <span>Toquecitos: <strong className="text-[#f1f1ee]">{countByProduct.toquecitos}</strong></span>
+              <Button variant="secundario" size="sm" onClick={handleExportWaitlistCsv} icon={<Download className="w-3.5 h-3.5" />}>
+                Exportar CSV
+              </Button>
+            </div>
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse text-xs">
+              <thead>
+                <tr className="border-b border-[#242426] bg-[#18181b] text-[#a1a1aa] font-semibold uppercase text-[11px] tracking-wider">
+                  <th className="py-3 px-4">Fecha</th>
+                  <th className="py-3 px-4">Correo</th>
+                  <th className="py-3 px-4">Producto</th>
+                  <th className="py-3 px-4 text-right">Origen</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-[#242426]">
+                {waitlist.map((entry) => (
+                  <tr key={entry.id} className="hover:bg-[#18181b] transition-colors">
+                    <td className="py-3 px-4 text-[#a1a1aa]">{formatDate(entry.createdAt)}</td>
+                    <td className="py-3 px-4 font-mono font-bold text-[#f1f1ee]">{entry.email}</td>
+                    <td className="py-3 px-4 uppercase font-semibold text-[#bec8ff]">{entry.product}</td>
+                    <td className="py-3 px-4 text-right">
+                      {entry.isSample ? (
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-[#bec8ff]/15 text-[#bec8ff]">
+                          Ejemplo
+                        </span>
+                      ) : (
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-[#2fb36a]/20 text-[#34d399]">
+                          Web
+                        </span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+
         {/* Tabla de Comercios Registrados */}
         <Card padding="none" className="overflow-hidden">
           <div className="p-5 border-b border-[#242426] flex items-center justify-between">
@@ -207,7 +295,7 @@ export const SuperAdminView: React.FC = () => {
                   <th className="py-3 px-4 text-center">Carteles</th>
                   <th className="py-3 px-4 text-center">Equipo</th>
                   <th className="py-3 px-4 text-center">Socios Club</th>
-                  <th className="py-3 px-4 text-right">Ventas Reales</th>
+                  <th className="py-3 px-4 text-right">Ventas</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-[#242426]">
@@ -242,9 +330,8 @@ export const SuperAdminView: React.FC = () => {
           </div>
         </Card>
 
-        {/* Grilla inferior: Carteles Registrados y Últimos Cobros Reales */}
+        {/* Grilla inferior: Carteles Registrados y Últimos Cobros */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Carteles registrados */}
           <Card className="p-5 space-y-4">
             <div className="flex items-center justify-between pb-3 border-b border-[#242426]">
               <div className="flex items-center gap-2">
@@ -276,7 +363,7 @@ export const SuperAdminView: React.FC = () => {
                       </span>
                     </div>
                     <p className="text-[11px] text-[#a1a1aa] mt-1">
-                      Escaneos reales: <strong className="text-[#f1f1ee]">{c.scansCount || 0}</strong> · Clics reseña:{' '}
+                      Escaneos: <strong className="text-[#f1f1ee]">{c.scansCount || 0}</strong> · Clics reseña:{' '}
                       <strong className="text-[#f1f1ee]">{c.reviewClicksCount || 0}</strong>
                     </p>
                   </div>
@@ -295,20 +382,19 @@ export const SuperAdminView: React.FC = () => {
             </div>
           </Card>
 
-          {/* Últimos cobros reales */}
           <Card className="p-5 space-y-4">
             <div className="flex items-center justify-between pb-3 border-b border-[#242426]">
               <div className="flex items-center gap-2">
                 <Award className="w-4 h-4 text-[#34d399]" />
                 <h3 className="font-bold text-base text-[#f1f1ee]">
-                  Actividad de Cobros en Tiempo Real ({summary.recentSales.length})
+                  Actividad de Cobros ({summary.recentSales.length})
                 </h3>
               </div>
             </div>
 
             {summary.recentSales.length === 0 ? (
               <div className="py-12 text-center text-xs text-[#a1a1aa]">
-                Todavía no se emitieron cobros en la plataforma. Todos los indicadores muestran únicamente actividad real.
+                Todavía no se emitieron cobros en la plataforma.
               </div>
             ) : (
               <div className="space-y-2.5 max-h-96 overflow-y-auto pr-1">

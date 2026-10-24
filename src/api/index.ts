@@ -1,12 +1,16 @@
 /**
  * Toque — Selector de API
- * Conecta toda la aplicación con Cloud Firestore en tiempo real + RLS.
+ * Regla de Oro 1: Todo pasa por ToqueApi (mockApi en memoria o httpApi hacia el servidor).
+ * Sin Firebase, sin Firestore y sin localStorage como base de datos.
  */
 
 import { ToqueApi } from './ToqueApi';
-import { firestoreApi } from './firestoreApi';
+import { mockApi } from './mockApi';
+import { httpApi } from './httpApi';
 
 export * from './types';
 export * from './ToqueApi';
 
-export const api: ToqueApi = firestoreApi;
+const useHttp = import.meta.env.VITE_USE_HTTP_API === 'true';
+
+export const api: ToqueApi = useHttp ? httpApi : mockApi;

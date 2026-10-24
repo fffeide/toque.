@@ -7,36 +7,25 @@ interface ThemeContextValue {
   isDark: boolean;
   toggleTheme: () => void;
   setTheme: (mode: ThemeMode) => void;
+  largeText: boolean;
+  toggleLargeText: () => void;
 }
-
-const THEME_STORAGE_KEY = 'toque_theme_mode';
 
 const ThemeContext = createContext<ThemeContextValue>({
   theme: 'dark',
   isDark: true,
   toggleTheme: () => {},
   setTheme: () => {},
+  largeText: false,
+  toggleLargeText: () => {},
 });
 
 export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [theme, setThemeState] = useState<ThemeMode>(() => {
-    try {
-      const saved = localStorage.getItem(THEME_STORAGE_KEY);
-      if (saved === 'light' || saved === 'dark') {
-        return saved;
-      }
-    } catch {
-      // ignore
-    }
-    return 'dark';
-  });
+  // Recordado en memoria durante la visita
+  const [theme, setThemeState] = useState<ThemeMode>('dark');
+  const [largeText, setLargeText] = useState<boolean>(false);
 
   useEffect(() => {
-    try {
-      localStorage.setItem(THEME_STORAGE_KEY, theme);
-    } catch {
-      // ignore
-    }
     const root = document.documentElement;
     if (theme === 'light') {
       root.classList.add('theme-light');
@@ -47,8 +36,21 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }
   }, [theme]);
 
+  useEffect(() => {
+    const root = document.documentElement;
+    if (largeText) {
+      root.classList.add('large-text');
+    } else {
+      root.classList.remove('large-text');
+    }
+  }, [largeText]);
+
   const toggleTheme = () => {
     setThemeState((prev) => (prev === 'dark' ? 'light' : 'dark'));
+  };
+
+  const toggleLargeText = () => {
+    setLargeText((prev) => !prev);
   };
 
   return (
@@ -58,6 +60,8 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         isDark: theme === 'dark',
         toggleTheme,
         setTheme: setThemeState,
+        largeText,
+        toggleLargeText,
       }}
     >
       {children}

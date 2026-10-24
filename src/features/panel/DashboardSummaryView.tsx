@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { api, DashboardSummary } from '../../api';
+import { ClubConfig, ClubLocal, ClubMember } from '../../api/types';
 import { useAuth } from '../../lib/authContext';
 import { Card } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
@@ -17,6 +18,11 @@ import {
   RefreshCw,
   CheckCircle2,
   Calendar,
+  Store,
+  Edit3,
+  Printer,
+  Copy,
+  Check,
 } from 'lucide-react';
 
 const DAY_FILTER_OPTIONS = [
@@ -25,21 +31,34 @@ const DAY_FILTER_OPTIONS = [
   { label: '7 días', value: 7 },
   { label: '15 días', value: 15 },
   { label: '30 días', value: 30 },
+  { label: '3 meses', value: 90 },
+  { label: '12 meses', value: 365 },
 ];
 
 export const DashboardSummaryView: React.FC = () => {
   const { user } = useAuth();
   const isCashier = user?.role === 'cashier';
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
+  const [clubConfig, setClubConfig] = useState<ClubConfig | null>(null);
+  const [locals, setLocals] = useState<ClubLocal[]>([]);
+  const [members, setMembers] = useState<ClubMember[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  // Por defecto se muestran solo los cobros del día (1 día). El dueño puede elegir la cantidad de días.
   const [selectedDays, setSelectedDays] = useState<number>(1);
+  const [copiedCode, setCopiedCode] = useState<string | null>(null);
 
   const loadSummary = async () => {
     setIsLoading(true);
     try {
-      const data = await api.getDashboardSummary();
+      const [data, cfg, locs, mems] = await Promise.all([
+        api.getDashboardSummary(),
+        api.getClubConfig(),
+        api.listLocals(),
+        api.listMembers(),
+      ]);
       setSummary(data);
+      setClubConfig(cfg);
+      setLocals(locs);
+      setMembers(mems);
     } catch {
       // ignore
     } finally {
@@ -76,6 +95,17 @@ export const DashboardSummaryView: React.FC = () => {
     );
   }, [recentSales, isCashier, selectedDays]);
 
+  const handleCopyLocalLink = async (code: string) => {
+    const url = `${window.location.origin}/club/${code}`;
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopiedCode(code);
+      setTimeout(() => setCopiedCode(null), 2000);
+    } catch {
+      // ignore
+    }
+  };
+
   if (isLoading || !summary) {
     return (
       <div className="space-y-6">
@@ -101,7 +131,7 @@ export const DashboardSummaryView: React.FC = () => {
   const scansCount = summary.scansCount ?? 0;
   const activeCartelesCount = summary.activeCartelesCount ?? 0;
   const totalCartelesCount = summary.totalCartelesCount ?? 0;
-  const clubMembersCount = summary.clubMembersCount ?? summary.newClubMembersCount ?? 0;
+  const clubMembersCount = members.length || summary.clubMembersCount || 0;
   const walletPassesCount = summary.walletPassesCount ?? 0;
 
   const kpis = isCashier
@@ -160,11 +190,15 @@ export const DashboardSummaryView: React.FC = () => {
         {
           label: 'Socios en el Club',
           value: clubMembersCount.toString(),
-          sub: `${walletPassesCount} pases Wallet emitidos`,
+          sub: `${walletPassesCount} pases Wallet · Ejemplo`,
           icon: Award,
           accent: 'text-[#34d399] bg-[#2fb36a]/15 border border-[#2fb36a]/30 stat-badge',
         },
       ];
+
+  const displayProgramName = clubConfig?.name || clubConfig?.clubName || 'Café & Panadería La Esquina';
+  const displayTarget = clubConfig?.targetStamps || 10;
+  const displayReward = clubConfig?.rewardText || clubConfig?.welcomeBenefitText || 'Un café grande sin cargo';
 
   return (
     <div className="space-y-8">
@@ -175,7 +209,7 @@ export const DashboardSummaryView: React.FC = () => {
           <p className="text-xs text-[#a1a1aa] mt-0.5">
             {isCashier
               ? 'Operaciones de hoy en general y tus estadísticas operativas en mostrador.'
-              : 'Métricas reales en tiempo real de tus cajas, carteles y club de fidelidad.'}
+              : 'Métricas en tiempo real de tus cajas, carteles y club de fidelidad.'}
           </p>
         </div>
 
@@ -188,6 +222,11 @@ export const DashboardSummaryView: React.FC = () => {
           >
             Actualizar
           </Button>
+          <Link to="/panel/escanear">
+            <Button variant="secundario" size="sm" icon={<QrCode className="w-4 h-4" />}>
+              Escanear Club
+            </Button>
+          </Link>
           <Link to="/caja">
             <Button variant="ultramar" size="sm" icon={<CreditCard className="w-4 h-4" />}>
               Abrir Caja
@@ -274,6 +313,121 @@ export const DashboardSummaryView: React.FC = () => {
             >
               Gestionar →
             </Link>
+          </Card>
+        </div>
+      )}
+
+      {/* Bloque Club: Tu tarjeta + Tus locales (solo dueño y encargado) */}
+      {!isCashier && (
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
+          <Card className="stat-card lg:col-span-5 p-5 flex flex-col justify-between gap-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-sm font-bold text-[#f1f1ee]">Tu tarjeta del Club</h2>
+                <p className="text-xs text-[#a1a1aa] stat-detail">Vista previa en el celular</p>
+              </div>
+              <Link to="/panel/fidelidad?tab=config">
+                <Button variant="secundario" size="sm" icon={<Edit3 className="w-3.5 h-3.5" />}>
+                  Editar
+                </Button>
+              </Link>
+            </div>
+
+            <div
+              className="rounded-xl p-4 text-white border border-[#28282a] space-y-3"
+              style={{ backgroundColor: clubConfig?.brandColor || '#3A3FE0' }}
+            >
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="font-bold text-sm">{displayProgramName}</p>
+                  <p className="text-[11px] opacity-90">Premio: {displayReward}</p>
+                </div>
+                <span className="px-2 py-0.5 rounded-md bg-black/25 text-[11px] font-bold">
+                  3 / {displayTarget} sellos
+                </span>
+              </div>
+              <div className="grid grid-cols-5 gap-1.5">
+                {Array.from({ length: displayTarget }).map((_, idx) => (
+                  <div
+                    key={idx}
+                    className={`h-7 rounded-lg border border-white/40 flex items-center justify-center text-[10px] font-bold ${
+                      idx < 3 ? 'bg-white text-[#0c0c0c]' : 'bg-black/20 text-white/75'
+                    }`}
+                  >
+                    {idx < 3 ? '★' : idx + 1}
+                  </div>
+                ))}
+              </div>
+            </div>
+          </Card>
+
+          <Card className="stat-card lg:col-span-7 p-5 space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-sm font-bold text-[#f1f1ee]">
+                  Tus locales ({locals.length})
+                </h2>
+                <p className="text-xs text-[#a1a1aa] stat-detail">
+                  Métricas por local y acceso rápido al Cartel QR
+                </p>
+              </div>
+              <Link to="/panel/locales">
+                <Button variant="secundario" size="sm" icon={<Store className="w-3.5 h-3.5" />}>
+                  Ver locales
+                </Button>
+              </Link>
+            </div>
+
+            <div className="space-y-2.5">
+              {locals.map((loc) => (
+                <div
+                  key={loc.id}
+                  className="p-3.5 rounded-xl bg-[#18181b] border border-[#28282a] flex flex-col sm:flex-row sm:items-center justify-between gap-3 stat-badge"
+                >
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-bold text-[#f1f1ee]">{loc.name}</span>
+                      <span className="text-[11px] font-mono text-[#bec8ff]">{loc.code}</span>
+                      {loc.isSample && (
+                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-[#bec8ff]/15 text-[#bec8ff] font-semibold">
+                          Ejemplo
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-[11px] text-[#a1a1aa] stat-detail mt-0.5">
+                      Visitas: {loc.visitsCount} · Nuevos: {loc.newMembersCount} · Premios: {loc.rewardsRedeemedCount}
+                    </p>
+                  </div>
+
+                  <div className="flex items-center gap-2 shrink-0">
+                    <Link
+                      to="/panel/locales"
+                      className="px-2.5 py-1.5 rounded-lg bg-[#111113] border border-[#242426] hover:border-[#bec8ff] text-[11px] font-semibold text-[#f1f1ee] inline-flex items-center gap-1"
+                    >
+                      <Printer className="w-3 h-3" />
+                      Cartel A5
+                    </Link>
+                    <button
+                      type="button"
+                      onClick={() => handleCopyLocalLink(loc.code)}
+                      className="px-2.5 py-1.5 rounded-lg bg-[#111113] border border-[#242426] hover:border-[#bec8ff] text-[11px] font-semibold text-[#f1f1ee] inline-flex items-center gap-1 cursor-pointer"
+                    >
+                      {copiedCode === loc.code ? (
+                        <>
+                          <Check className="w-3 h-3 text-[#34d399]" />
+                          Copiado
+                        </>
+                      ) : (
+                        <>
+                          <Copy className="w-3 h-3" />
+                          Link
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
           </Card>
         </div>
       )}
