@@ -90,11 +90,6 @@ const ClubLocalsView = lazy(() =>
 const ClubAuditView = lazy(() =>
   import('./features/panel/ClubAuditView').then((m) => ({ default: m.ClubAuditView }))
 );
-const ClubSubscriptionView = lazy(() =>
-  import('./features/panel/ClubSubscriptionView').then((m) => ({
-    default: m.ClubSubscriptionView,
-  }))
-);
 const BenefitNetworkView = lazy(() =>
   import('./features/panel/NetworkActivationsView').then((m) => ({
     default: m.NetworkActivationsView,
@@ -188,11 +183,12 @@ export const App: React.FC = () => {
                     <Route path="/activar" element={<ActivateCartelView />} />
                     <Route path="/activar/:code" element={<ActivateCartelView />} />
 
-                    {/* Hub Público del Cliente (QR / NFC) */}
+                    {/* Hub Público del Cliente + Tarjeta de Sellos (QR / NFC / Slug) */}
+                    <Route path="/u/:code" element={<PublicHubView />} />
                     <Route path="/h/:code" element={<PublicHubView />} />
                     <Route path="/hub/:code" element={<PublicHubView />} />
 
-                    {/* Comprobante Digital de Compra */}
+                    {/* Comprobante Digital de Compra o Redirección Smart Hub */}
                     <Route path="/r/:id" element={<ReceiptDetailView />} />
 
                     {/* Modo Caja — Accesible para Cajero, Encargado, Dueño y SuperAdmin */}
@@ -290,14 +286,8 @@ export const App: React.FC = () => {
                           </RoleRouteGuard>
                         }
                       />
-                      <Route
-                        path="suscripcion"
-                        element={
-                          <RoleRouteGuard allowedRoles={['owner', 'superadmin']}>
-                            <ClubSubscriptionView />
-                          </RoleRouteGuard>
-                        }
-                      />
+                      {/* Suscripción ahora vive dentro de Mi Cuenta */}
+                      <Route path="suscripcion" element={<Navigate to="/panel/cuenta" replace />} />
                       <Route
                         path="red"
                         element={

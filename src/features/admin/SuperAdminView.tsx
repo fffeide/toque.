@@ -1,439 +1,790 @@
-import React, { useState, useEffect } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
-import { api, SuperAdminSummary } from '../../api';
-import { WaitlistEntry } from '../../api/types';
+import React, { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
+import { api } from '../../api';
+import {
+  SuperAdminSummary,
+  SuperAdminBusinessDetail,
+  PlatformUserCategory,
+  WaitlistEntry,
+} from '../../api/types';
 import { useAuth } from '../../lib/authContext';
-import { useTheme } from '../../lib/themeContext';
-import { Card } from '../../components/ui/Card';
-import { Button } from '../../components/ui/Button';
+import { useToast } from '../../components/ui/Toast';
 import { Skeleton } from '../../components/ui/Skeleton';
-import { formatCurrency, formatDate } from '../../lib/formatters';
+import { formatARS, formatDateTimeAR } from '../../lib/format';
 import {
   ShieldCheck,
   Store,
   QrCode,
-  Receipt,
+  TrendingUp,
   Award,
   Wallet,
   RefreshCw,
   ArrowLeft,
   ExternalLink,
-  Zap,
-  Sun,
-  Moon,
-  LogOut,
-  Clock,
-  Download,
+  Mail,
+  Users,
+  Eye,
+  X,
+  ShoppingBag,
+  Gift,
+  CheckCircle2,
+  Search,
 } from 'lucide-react';
 
+type AdminTab = 'overview' | 'users' | 'carteles' | 'waitlist';
+
 export const SuperAdminView: React.FC = () => {
-  const { logout } = useAuth();
-  const { isDark, toggleTheme } = useTheme();
-  const navigate = useNavigate();
+  const { user } = useAuth();
+  const { showToast } = useToast();
+
   const [summary, setSummary] = useState<SuperAdminSummary | null>(null);
   const [waitlist, setWaitlist] = useState<WaitlistEntry[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const [walletStatus, setWalletStatus] = useState<{
+    configured: boolean;
+    emailConfigured?: boolean;
+    provider: string;
+    passesIssuedCount?: number;
+  } | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState<AdminTab>('overview');
 
-  const loadGlobalMetrics = async () => {
-    setIsLoading(true);
+  // Filtro del Directorio de Usuarios
+  const [userCategoryFilter, setUserCategoryFilter] = useState<'all' | PlatformUserCategory>('all');
+  const [userSearch, setUserSearch] = useState('');
+
+  // Modal de Perfil Detallado de Comercio (sin datos sensibles)
+  const [selectedBizDetail, setSelectedBizDetail] = useState<SuperAdminBusinessDetail | null>(null);
+  const [loadingBizDetail, setLoadingBizDetail] = useState(false);
+
+  const loadData = async () => {
     try {
-      const [data, waitlistData] = await Promise.all([
+      setLoading(true);
+      const [sum, wStatus, wl] = await Promise.all([
         api.getSuperAdminSummary(),
+        api.getWalletStatus(),
         api.listWaitlist(),
       ]);
-      setSummary(data);
-      setWaitlist(waitlistData);
-    } catch {
-      // ignore
+      setSummary(sum);
+      setWalletStatus(wStatus);
+      setWaitlist(wl);
+    } catch (err: any) {
+      showToast(err?.message || 'Error al cargar panel Super Admin', 'error');
     } finally {
-      setIsLoading(false);
+      setLoading(false);
     }
   };
 
   useEffect(() => {
-    loadGlobalMetrics();
+    loadData();
   }, []);
 
-  const handleLogout = async () => {
-    await logout();
-    navigate('/login');
+  const handleOpenBusinessDetail = async (businessId: string) => {
+    try {
+      setLoadingBizDetail(true);
+      const detail = await api.getSuperAdminBusinessDetail(businessId);
+      setSelectedBizDetail(detail);
+    } catch (err: any) {
+      showToast(err?.message || 'No se pudo cargar el detalle del comercio', 'error');
+    } finally {
+      setLoadingBizDetail(false);
+    }
   };
 
-  const handleExportWaitlistCsv = () => {
-    const headers = ['Fecha', 'Email', 'Producto', 'Consentimiento', 'Ejemplo'];
-    const rows = waitlist.map((w) => [
-      new Date(w.createdAt).toLocaleString('es-AR'),
-      w.email,
-      w.product,
-      w.consent ? 'Si' : 'No',
-      w.isSample ? 'Ejemplo' : 'Real',
-    ]);
-    const csv = [headers.join(','), ...rows.map((r) => r.join(','))].join('\n');
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `lista-de-espera-toque-${new Date().toISOString().slice(0, 10)}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
-  };
-
-  if (isLoading || !summary) {
+  const allUsers = summary?.allUsers || [];
+  const filteredUsers = allUsers.filter((u) => {
+    if (userCategoryFilter !== 'all' && u.category !== userCategoryFilter) return false;
+    const q = userSearch.trim().toLowerCase();
+    if (!q) return true;
     return (
-      <div className="min-h-screen bg-[#000000] text-[#f1f1ee] p-6">
-        <div className="max-w-6xl mx-auto space-y-6">
-          <Skeleton className="h-12 w-72 bg-[#111113]" />
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            {[1, 2, 3, 4].map((i) => (
-              <Skeleton key={i} className="h-32 rounded-2xl bg-[#111113]" />
-            ))}
-          </div>
-          <Skeleton className="h-80 w-full rounded-2xl bg-[#111113]" />
-        </div>
-      </div>
+      u.displayName.toLowerCase().includes(q) ||
+      u.emailOrContact.toLowerCase().includes(q) ||
+      (u.businessName || '').toLowerCase().includes(q) ||
+      u.roleLabel.toLowerCase().includes(q)
     );
-  }
-
-  const globalKpis = [
-    {
-      label: 'Comercios Registrados',
-      value: summary.totalBusinesses.toString(),
-      sub: `${summary.activeCarteles} de ${summary.totalCarteles} carteles activos`,
-      icon: Store,
-      accent: 'text-[#bec8ff] bg-[#bec8ff]/15',
-    },
-    {
-      label: 'Volumen Facturado',
-      value: formatCurrency(summary.totalSalesAmount),
-      sub: `${summary.totalSalesCount} cobros pagados en caja`,
-      icon: Zap,
-      accent: 'text-[#34d399] bg-[#2fb36a]/15',
-    },
-    {
-      label: 'Recibos Digitales Emitidos',
-      value: summary.totalReceiptsEmitted.toString(),
-      sub: `${summary.claimedReceiptsCount} reclamados por clientes`,
-      icon: Receipt,
-      accent: 'text-[#bec8ff] bg-[#bec8ff]/15',
-    },
-    {
-      label: 'Socios Club & Wallet',
-      value: summary.totalClubMembers.toString(),
-      sub: `${summary.walletPassesIssued} pases Wallet emitidos`,
-      icon: Wallet,
-      accent: 'text-[#34d399] bg-[#2fb36a]/15',
-    },
-  ];
-
-  const countByProduct = {
-    estrellas: waitlist.filter((w) => w.product === 'estrellas').length,
-    recibo: waitlist.filter((w) => w.product === 'recibo').length,
-    toquecitos: waitlist.filter((w) => w.product === 'toquecitos').length,
-  };
+  });
 
   return (
-    <div className="theme-panel min-h-screen bg-[#000000] text-[#f1f1ee]">
-      {/* Header Global */}
-      <header className="border-b border-[#242426] bg-[#0c0c0c] px-4 sm:px-8 py-4 sticky top-0 z-20">
-        <div className="max-w-6xl mx-auto flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <Link
-              to="/panel"
-              className="w-9 h-9 rounded-xl bg-[#111113] border border-[#242426] hover:border-[#343438] text-[#f1f1ee] flex items-center justify-center transition-colors"
-              title="Ir al panel del comercio"
-            >
-              <ArrowLeft className="w-4 h-4" />
-            </Link>
-            <div>
-              <div className="flex items-center gap-2">
-                <span className="font-bold text-lg text-[#f1f1ee] tracking-tight">
-                  Super Admin Global · toque™
-                </span>
-                <span className="text-[10px] font-bold uppercase tracking-wider bg-[#bec8ff] text-[#0c0c0c] px-2.5 py-0.5 rounded-full">
-                  Nivel Plataforma
-                </span>
-              </div>
-              <p className="text-xs text-[#a1a1aa]">
-                Monitoreo general de comercios adheridos, carteles activos, lista de espera y operaciones.
-              </p>
+    <div className="min-h-screen bg-[#0A0A0A] text-[#f1f1ee]">
+      {/* Top Header */}
+      <header className="h-16 px-4 sm:px-8 border-b border-[#242428] bg-[#141417] flex items-center justify-between sticky top-0 z-20">
+        <div className="flex items-center gap-3">
+          <div className="w-9 h-9 rounded-xl bg-[#bec8ff] text-[#0c0c0c] flex items-center justify-center font-bold">
+            <ShieldCheck className="w-5 h-5" />
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="font-bold text-base text-[#f1f1ee]">Toque Super Admin</span>
+              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-[#2fb36a]/20 text-[#2fb36a]">
+                DATOS 100% REALES
+              </span>
             </div>
+            <p className="text-xs text-[#a1a1aa]">{user?.email}</p>
           </div>
+        </div>
 
-          <div className="flex items-center gap-2.5">
-            <button
-              type="button"
-              onClick={toggleTheme}
-              title={isDark ? 'Cambiar a modo claro' : 'Cambiar a modo oscuro'}
-              aria-label="Cambiar tema"
-              className="w-9 h-9 rounded-xl bg-[#111113] border border-[#242426] hover:border-[#bec8ff] text-[#f1f1ee] flex items-center justify-center transition-colors cursor-pointer"
-            >
-              {isDark ? <Sun className="w-4 h-4 text-[#bec8ff]" /> : <Moon className="w-4 h-4" />}
-            </button>
-
-            <Button
-              variant="secundario"
-              size="sm"
-              onClick={loadGlobalMetrics}
-              icon={<RefreshCw className="w-3.5 h-3.5" />}
-            >
-              Actualizar
-            </Button>
-
-            <button
-              type="button"
-              onClick={handleLogout}
-              title="Cerrar sesión"
-              aria-label="Cerrar sesión"
-              className="w-9 h-9 rounded-xl bg-[#111113] border border-[#242426] hover:border-[#343438] text-[#a1a1aa] hover:text-[#f1f1ee] flex items-center justify-center transition-colors cursor-pointer"
-            >
-              <LogOut className="w-4 h-4" />
-            </button>
-          </div>
+        <div className="flex items-center gap-2.5">
+          <button
+            type="button"
+            onClick={loadData}
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-[#1c1c21] hover:bg-[#25252b] text-xs font-semibold text-[#f1f1ee] border border-[#2c2c32] transition-colors cursor-pointer"
+          >
+            <RefreshCw className="w-3.5 h-3.5" />
+            <span>Actualizar</span>
+          </button>
+          <Link
+            to="/panel/resumen"
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-[#bec8ff] text-[#0c0c0c] text-xs font-bold"
+          >
+            <ArrowLeft className="w-3.5 h-3.5" />
+            <span>Panel Comercio</span>
+          </Link>
         </div>
       </header>
 
-      <main className="max-w-6xl mx-auto p-4 sm:p-8 space-y-8">
-        {/* KPIs Globales */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          {globalKpis.map((kpi) => {
-            const Icon = kpi.icon;
-            return (
-              <Card key={kpi.label} className="p-5 flex flex-col justify-between gap-4">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-semibold text-[#a1a1aa]">{kpi.label}</span>
-                  <div className={`w-9 h-9 rounded-xl flex items-center justify-center ${kpi.accent}`}>
-                    <Icon className="w-4 h-4" />
-                  </div>
+      <main className="max-w-7xl mx-auto p-4 sm:p-8 space-y-8">
+        {loading || !summary ? (
+          <div className="space-y-6">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-4">
+              {[1, 2, 3, 4, 5, 6].map((n) => (
+                <Skeleton key={n} className="h-28 rounded-2xl bg-[#141417]" />
+              ))}
+            </div>
+            <Skeleton className="h-80 rounded-2xl bg-[#141417]" />
+          </div>
+        ) : (
+          <>
+            {/* Global Real Metrics */}
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
+              <div className="rounded-2xl bg-[#141417] border border-[#242428] p-5 space-y-2">
+                <div className="flex items-center justify-between text-[#a1a1aa]">
+                  <span className="text-xs font-medium">Comercios Reales</span>
+                  <Store className="w-4 h-4 text-[#bec8ff]" />
                 </div>
-                <div>
-                  <p className="text-3xl font-bold text-[#f1f1ee] tabular-nums tracking-tight">
-                    {kpi.value}
-                  </p>
-                  <p className="text-[11px] text-[#a1a1aa] mt-1">{kpi.sub}</p>
+                <p className="text-2xl font-extrabold text-[#f1f1ee]">
+                  {summary.totalBusinesses}
+                </p>
+                <p className="text-[11px] text-[#a1a1aa]">Activos en plataforma</p>
+              </div>
+
+              <div className="rounded-2xl bg-[#141417] border border-[#242428] p-5 space-y-2">
+                <div className="flex items-center justify-between text-[#a1a1aa]">
+                  <span className="text-xs font-medium">Wallets Generadas</span>
+                  <Wallet className="w-4 h-4 text-[#2fb36a]" />
                 </div>
-              </Card>
-            );
-          })}
-        </div>
+                <p className="text-2xl font-extrabold text-[#2fb36a]">
+                  {summary.walletPassesIssued}
+                </p>
+                <p className="text-[11px] text-[#a1a1aa]">
+                  Apple / Google Wallet ({walletStatus?.configured ? 'API activa' : 'Servidor'})
+                </p>
+              </div>
 
-        {/* Lista de espera de próximos productos */}
-        <Card padding="none" className="overflow-hidden">
-          <div className="p-5 border-b border-[#242426] flex flex-wrap items-center justify-between gap-3">
-            <div className="flex items-center gap-2">
-              <Clock className="w-4 h-4 text-[#bec8ff]" />
-              <h2 className="font-bold text-base text-[#f1f1ee]">
-                Lista de espera ({waitlist.length})
-              </h2>
-            </div>
-            <div className="flex items-center gap-3 text-xs text-[#a1a1aa]">
-              <span>Estrellas: <strong className="text-[#f1f1ee]">{countByProduct.estrellas}</strong></span>
-              <span>·</span>
-              <span>Recibo: <strong className="text-[#f1f1ee]">{countByProduct.recibo}</strong></span>
-              <span>·</span>
-              <span>Toquecitos: <strong className="text-[#f1f1ee]">{countByProduct.toquecitos}</strong></span>
-              <Button variant="secundario" size="sm" onClick={handleExportWaitlistCsv} icon={<Download className="w-3.5 h-3.5" />}>
-                Exportar CSV
-              </Button>
-            </div>
-          </div>
+              <div className="rounded-2xl bg-[#141417] border border-[#242428] p-5 space-y-2">
+                <div className="flex items-center justify-between text-[#a1a1aa]">
+                  <span className="text-xs font-medium">Socios Club</span>
+                  <Award className="w-4 h-4 text-[#bec8ff]" />
+                </div>
+                <p className="text-2xl font-extrabold text-[#f1f1ee]">
+                  {summary.totalClubMembers}
+                </p>
+                <p className="text-[11px] text-[#a1a1aa]">Tarjetas de sellos activas</p>
+              </div>
 
-          <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse text-xs">
-              <thead>
-                <tr className="border-b border-[#242426] bg-[#18181b] text-[#a1a1aa] font-semibold uppercase text-[11px] tracking-wider">
-                  <th className="py-3 px-4">Fecha</th>
-                  <th className="py-3 px-4">Correo</th>
-                  <th className="py-3 px-4">Producto</th>
-                  <th className="py-3 px-4 text-right">Origen</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-[#242426]">
-                {waitlist.map((entry) => (
-                  <tr key={entry.id} className="hover:bg-[#18181b] transition-colors">
-                    <td className="py-3 px-4 text-[#a1a1aa]">{formatDate(entry.createdAt)}</td>
-                    <td className="py-3 px-4 font-mono font-bold text-[#f1f1ee]">{entry.email}</td>
-                    <td className="py-3 px-4 uppercase font-semibold text-[#bec8ff]">{entry.product}</td>
-                    <td className="py-3 px-4 text-right">
-                      {entry.isSample ? (
-                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-[#bec8ff]/15 text-[#bec8ff]">
-                          Ejemplo
-                        </span>
-                      ) : (
-                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-[#2fb36a]/20 text-[#34d399]">
-                          Web
-                        </span>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </Card>
+              <div className="rounded-2xl bg-[#141417] border border-[#242428] p-5 space-y-2">
+                <div className="flex items-center justify-between text-[#a1a1aa]">
+                  <span className="text-xs font-medium">Usuarios Totales</span>
+                  <Users className="w-4 h-4 text-[#bec8ff]" />
+                </div>
+                <p className="text-2xl font-extrabold text-[#f1f1ee]">{allUsers.length}</p>
+                <p className="text-[11px] text-[#a1a1aa]">Comercios + Socios + Bóveda</p>
+              </div>
 
-        {/* Tabla de Comercios Registrados */}
-        <Card padding="none" className="overflow-hidden">
-          <div className="p-5 border-b border-[#242426] flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <ShieldCheck className="w-4 h-4 text-[#bec8ff]" />
-              <h2 className="font-bold text-base text-[#f1f1ee]">
-                Comercios en la Plataforma ({summary.businesses.length})
-              </h2>
-            </div>
-            <span className="text-xs text-[#a1a1aa]">
-              Escaneos globales: <strong className="text-[#f1f1ee]">{summary.totalScansCount}</strong> · Clics a reseña:{' '}
-              <strong className="text-[#f1f1ee]">{summary.totalReviewClicks}</strong>
-            </span>
-          </div>
+              <div className="rounded-2xl bg-[#141417] border border-[#242428] p-5 space-y-2">
+                <div className="flex items-center justify-between text-[#a1a1aa]">
+                  <span className="text-xs font-medium">Carteles Activos</span>
+                  <QrCode className="w-4 h-4 text-[#34d399]" />
+                </div>
+                <p className="text-2xl font-extrabold text-[#f1f1ee]">
+                  {summary.activeCarteles} / {summary.totalCarteles}
+                </p>
+                <p className="text-[11px] text-[#a1a1aa]">
+                  {summary.totalScansCount} escaneos reales
+                </p>
+              </div>
 
-          <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse text-xs">
-              <thead>
-                <tr className="border-b border-[#242426] bg-[#18181b] text-[#a1a1aa] font-semibold uppercase text-[11px] tracking-wider">
-                  <th className="py-3 px-4">Comercio</th>
-                  <th className="py-3 px-4">Titular / Correo</th>
-                  <th className="py-3 px-4 text-center">Carteles</th>
-                  <th className="py-3 px-4 text-center">Equipo</th>
-                  <th className="py-3 px-4 text-center">Socios Club</th>
-                  <th className="py-3 px-4 text-right">Ventas</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-[#242426]">
-                {summary.businesses.map((biz) => (
-                  <tr key={biz.id} className="hover:bg-[#18181b] transition-colors">
-                    <td className="py-3.5 px-4 font-bold text-[#f1f1ee]">
-                      {biz.name}
-                    </td>
-                    <td className="py-3.5 px-4 text-[#f1f1ee]">
-                      <div>{biz.ownerName}</div>
-                      <span className="text-[11px] font-mono text-[#a1a1aa]">{biz.email}</span>
-                    </td>
-                    <td className="py-3.5 px-4 text-center font-mono text-[#f1f1ee]">
-                      {biz.cartelesCount}
-                    </td>
-                    <td className="py-3.5 px-4 text-center font-mono text-[#f1f1ee]">
-                      {biz.teamCount}
-                    </td>
-                    <td className="py-3.5 px-4 text-center font-mono text-[#f1f1ee]">
-                      {biz.membersCount}
-                    </td>
-                    <td className="py-3.5 px-4 text-right font-bold text-[#f1f1ee] tabular-nums">
-                      {formatCurrency(biz.salesAmount)}
-                      <span className="block text-[10px] text-[#a1a1aa] font-normal">
-                        {biz.salesCount} cobro(s)
-                      </span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </Card>
-
-        {/* Grilla inferior: Carteles Registrados y Últimos Cobros */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <Card className="p-5 space-y-4">
-            <div className="flex items-center justify-between pb-3 border-b border-[#242426]">
-              <div className="flex items-center gap-2">
-                <QrCode className="w-4 h-4 text-[#bec8ff]" />
-                <h3 className="font-bold text-base text-[#f1f1ee]">
-                  Carteles NFC / QR ({summary.carteles.length})
-                </h3>
+              <div className="rounded-2xl bg-[#141417] border border-[#242428] p-5 space-y-2">
+                <div className="flex items-center justify-between text-[#a1a1aa]">
+                  <span className="text-xs font-medium">Volumen Cobros</span>
+                  <TrendingUp className="w-4 h-4 text-[#34d399]" />
+                </div>
+                <p className="text-2xl font-extrabold text-[#f1f1ee]">
+                  {formatARS(summary.totalSalesAmount)}
+                </p>
+                <p className="text-[11px] text-[#a1a1aa]">
+                  {summary.totalSalesCount} cobros emitidos
+                </p>
               </div>
             </div>
 
-            <div className="space-y-2.5 max-h-96 overflow-y-auto pr-1">
-              {summary.carteles.map((c) => (
-                <div
-                  key={c.id}
-                  className="p-3.5 rounded-xl bg-[#18181b] border border-[#28282a] flex items-center justify-between text-xs"
-                >
+            {/* Navegación de Pestañas de Super Admin */}
+            <div className="flex items-center gap-2 border-b border-[#242428] pb-3 overflow-x-auto">
+              <button
+                type="button"
+                onClick={() => setActiveTab('overview')}
+                className={`px-4 py-2 rounded-xl text-xs font-bold transition-colors cursor-pointer ${
+                  activeTab === 'overview'
+                    ? 'bg-[#bec8ff] text-[#0c0c0c]'
+                    : 'bg-[#141417] text-[#a1a1aa] hover:text-[#f1f1ee]'
+                }`}
+              >
+                Comercios y Perfiles Detallados ({summary.businesses.length})
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setActiveTab('users')}
+                className={`px-4 py-2 rounded-xl text-xs font-bold transition-colors cursor-pointer ${
+                  activeTab === 'users'
+                    ? 'bg-[#bec8ff] text-[#0c0c0c]'
+                    : 'bg-[#141417] text-[#a1a1aa] hover:text-[#f1f1ee]'
+                }`}
+              >
+                Directorio de Usuarios ({allUsers.length})
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setActiveTab('carteles')}
+                className={`px-4 py-2 rounded-xl text-xs font-bold transition-colors cursor-pointer ${
+                  activeTab === 'carteles'
+                    ? 'bg-[#bec8ff] text-[#0c0c0c]'
+                    : 'bg-[#141417] text-[#a1a1aa] hover:text-[#f1f1ee]'
+                }`}
+              >
+                Carteles Físicos ({summary.carteles.length})
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setActiveTab('waitlist')}
+                className={`px-4 py-2 rounded-xl text-xs font-bold transition-colors cursor-pointer ${
+                  activeTab === 'waitlist'
+                    ? 'bg-[#bec8ff] text-[#0c0c0c]'
+                    : 'bg-[#141417] text-[#a1a1aa] hover:text-[#f1f1ee]'
+                }`}
+              >
+                Lista de Espera ({waitlist.length})
+              </button>
+            </div>
+
+            {/* TAB 1: COMERCIOS REGISTRADOS (CON PERFIL DETALLADO AL TOCAR) */}
+            {activeTab === 'overview' && (
+              <div className="rounded-2xl bg-[#141417] border border-[#242428] overflow-hidden">
+                <div className="p-6 border-b border-[#242428] flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                   <div>
-                    <div className="flex items-center gap-2">
-                      <span className="font-mono font-bold text-[#bec8ff]">{c.code}</span>
-                      <span className="font-semibold text-[#f1f1ee]">{c.name}</span>
-                      <span
-                        className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${
-                          c.status === 'active'
-                            ? 'bg-[#2fb36a]/20 text-[#34d399]'
-                            : 'bg-[#242426] text-[#a1a1aa]'
-                        }`}
-                      >
-                        {c.status === 'active' ? 'Activo' : c.status}
-                      </span>
-                    </div>
-                    <p className="text-[11px] text-[#a1a1aa] mt-1">
-                      Escaneos: <strong className="text-[#f1f1ee]">{c.scansCount || 0}</strong> · Clics reseña:{' '}
-                      <strong className="text-[#f1f1ee]">{c.reviewClicksCount || 0}</strong>
+                    <h2 className="text-base font-bold text-[#f1f1ee]">
+                      Comercios Registrados (Tocá un comercio para ver su perfil detallado)
+                    </h2>
+                    <p className="text-xs text-[#a1a1aa] mt-0.5">
+                      Vista operativa con estadísticas reales de carteles, wallets generadas, socios y productos sin exponer información sensible.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse">
+                    <thead>
+                      <tr className="border-b border-[#242428] bg-[#18181c] text-[11px] font-semibold uppercase tracking-wider text-[#a1a1aa]">
+                        <th className="py-3.5 px-5">Comercio</th>
+                        <th className="py-3.5 px-5">Titular</th>
+                        <th className="py-3.5 px-5">Carteles / Locales</th>
+                        <th className="py-3.5 px-5">Socios Club</th>
+                        <th className="py-3.5 px-5">Wallets Generadas</th>
+                        <th className="py-3.5 px-5">Productos</th>
+                        <th className="py-3.5 px-5 text-right">Detalle</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-[#202024] text-sm">
+                      {summary.businesses.map((biz) => (
+                        <tr
+                          key={biz.id}
+                          onClick={() => handleOpenBusinessDetail(biz.id)}
+                          className="hover:bg-[#1a1a1f] cursor-pointer transition-colors"
+                        >
+                          <td className="py-4 px-5">
+                            <div className="flex items-center gap-2.5">
+                              <div
+                                style={{ backgroundColor: biz.cardThemeColor || '#1e1b4b' }}
+                                className="w-8 h-8 rounded-lg border border-white/20 flex items-center justify-center font-bold text-xs text-white shrink-0"
+                              >
+                                {biz.name.charAt(0).toUpperCase()}
+                              </div>
+                              <div>
+                                <p className="font-bold text-[#f1f1ee]">{biz.name}</p>
+                                <p className="text-xs text-[#bec8ff] font-mono">/u/{biz.id}</p>
+                              </div>
+                            </div>
+                          </td>
+                          <td className="py-4 px-5 text-xs text-[#a1a1aa]">{biz.ownerName}</td>
+                          <td className="py-4 px-5 text-xs text-[#f1f1ee]">
+                            {biz.cartelesCount} cartel(es) · {biz.localsCount} local(es)
+                          </td>
+                          <td className="py-4 px-5 font-bold text-[#bec8ff]">{biz.membersCount}</td>
+                          <td className="py-4 px-5 font-bold text-[#2fb36a]">
+                            {biz.walletPassesIssued}
+                          </td>
+                          <td className="py-4 px-5 text-xs text-[#f1f1ee]">
+                            {biz.productsCount} cargados
+                          </td>
+                          <td className="py-4 px-5 text-right">
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleOpenBusinessDetail(biz.id);
+                              }}
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#1c1c21] hover:bg-[#bec8ff] hover:text-[#0c0c0c] text-xs font-bold text-[#bec8ff] transition-colors cursor-pointer"
+                            >
+                              <Eye className="w-3.5 h-3.5" />
+                              <span>Ver perfil</span>
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {/* TAB 2: DIRECTORIO DE USUARIOS DE TODO TIPO */}
+            {activeTab === 'users' && (
+              <div className="rounded-2xl bg-[#141417] border border-[#242428] overflow-hidden space-y-4 p-6">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <div>
+                    <h2 className="text-base font-bold text-[#f1f1ee]">
+                      Directorio Unificado de Usuarios
+                    </h2>
+                    <p className="text-xs text-[#a1a1aa] mt-0.5">
+                      Incluye usuarios de comercios (dueños, encargados, cajeros), socios del Club de Sellos, usuarios de Bóveda / Toquecitos y suscriptores.
                     </p>
                   </div>
 
-                  <Link
-                    to={`/h/${c.code}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="px-3 py-1.5 rounded-xl bg-[#111113] border border-[#242426] hover:border-[#bec8ff] text-[#f1f1ee] font-semibold inline-flex items-center gap-1.5"
-                  >
-                    <span>Hub</span>
-                    <ExternalLink className="w-3 h-3" />
-                  </Link>
-                </div>
-              ))}
-            </div>
-          </Card>
-
-          <Card className="p-5 space-y-4">
-            <div className="flex items-center justify-between pb-3 border-b border-[#242426]">
-              <div className="flex items-center gap-2">
-                <Award className="w-4 h-4 text-[#34d399]" />
-                <h3 className="font-bold text-base text-[#f1f1ee]">
-                  Actividad de Cobros ({summary.recentSales.length})
-                </h3>
-              </div>
-            </div>
-
-            {summary.recentSales.length === 0 ? (
-              <div className="py-12 text-center text-xs text-[#a1a1aa]">
-                Todavía no se emitieron cobros en la plataforma.
-              </div>
-            ) : (
-              <div className="space-y-2.5 max-h-96 overflow-y-auto pr-1">
-                {summary.recentSales.map((s) => (
-                  <div
-                    key={s.id}
-                    className="p-3.5 rounded-xl bg-[#18181b] border border-[#28282a] flex items-center justify-between text-xs"
-                  >
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className="font-bold text-sm text-[#f1f1ee] tabular-nums">
-                          {formatCurrency(s.amount)}
-                        </span>
-                        <span className="font-mono text-[11px] text-[#bec8ff]">
-                          {s.cartelCode || s.cartelName}
-                        </span>
-                      </div>
-                      <p className="text-[11px] text-[#a1a1aa] mt-0.5">
-                        {formatDate(s.createdAt)} · Cajero: {s.cashierName || 'Mostrador'}
-                      </p>
-                    </div>
-
-                    {s.receiptId && (
-                      <Link
-                        to={`/r/${s.receiptId}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-[11px] font-mono font-semibold text-[#bec8ff] hover:underline"
-                      >
-                        {s.receiptId} ↗
-                      </Link>
-                    )}
+                  <div className="relative w-full sm:w-72">
+                    <Search className="w-4 h-4 text-[#a1a1aa] absolute left-3.5 top-1/2 -translate-y-1/2" />
+                    <input
+                      type="text"
+                      value={userSearch}
+                      onChange={(e) => setUserSearch(e.target.value)}
+                      placeholder="Buscar por nombre, rol o comercio..."
+                      className="w-full pl-10 pr-4 py-2 rounded-xl bg-[#18181c] border border-[#2c2c32] text-xs text-[#f1f1ee]"
+                    />
                   </div>
-                ))}
+                </div>
+
+                {/* Filtros por tipo de usuario */}
+                <div className="flex flex-wrap gap-2">
+                  {(
+                    [
+                      { id: 'all', label: `Todos (${allUsers.length})` },
+                      {
+                        id: 'merchant_team',
+                        label: `Comercios y Equipo (${allUsers.filter((u) => u.category === 'merchant_team').length})`,
+                      },
+                      {
+                        id: 'club_member',
+                        label: `Socios Tarjeta de Sellos (${allUsers.filter((u) => u.category === 'club_member').length})`,
+                      },
+                      {
+                        id: 'consumer_vault',
+                        label: `Usuarios Toquecitos / Bóveda (${allUsers.filter((u) => u.category === 'consumer_vault').length})`,
+                      },
+                      {
+                        id: 'waitlist',
+                        label: `Lista de Espera (${allUsers.filter((u) => u.category === 'waitlist').length})`,
+                      },
+                    ] as Array<{ id: 'all' | PlatformUserCategory; label: string }>
+                  ).map((f) => (
+                    <button
+                      key={f.id}
+                      type="button"
+                      onClick={() => setUserCategoryFilter(f.id)}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-colors cursor-pointer ${
+                        userCategoryFilter === f.id
+                          ? 'bg-[#bec8ff] text-[#0c0c0c] font-bold'
+                          : 'bg-[#18181c] border border-[#28282e] text-[#a1a1aa] hover:text-[#f1f1ee]'
+                      }`}
+                    >
+                      {f.label}
+                    </button>
+                  ))}
+                </div>
+
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse">
+                    <thead>
+                      <tr className="border-b border-[#242428] bg-[#18181c] text-[11px] font-semibold uppercase tracking-wider text-[#a1a1aa]">
+                        <th className="py-3 px-4">Categoría / Rol</th>
+                        <th className="py-3 px-4">Nombre / Identificador</th>
+                        <th className="py-3 px-4">Contacto (Protegido)</th>
+                        <th className="py-3 px-4">Comercio Vinculado</th>
+                        <th className="py-3 px-4">Estado / Actividad</th>
+                        <th className="py-3 px-4">Alta</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-[#202024] text-xs">
+                      {filteredUsers.length === 0 ? (
+                        <tr>
+                          <td colSpan={6} className="py-8 text-center text-[#a1a1aa]">
+                            No hay usuarios registrados en esta categoría todavía.
+                          </td>
+                        </tr>
+                      ) : (
+                        filteredUsers.map((u) => (
+                          <tr key={u.id} className="hover:bg-[#1a1a1f]">
+                            <td className="py-3.5 px-4">
+                              <span
+                                className={`px-2.5 py-0.5 rounded-full text-[11px] font-bold ${
+                                  u.category === 'merchant_team'
+                                    ? 'bg-[#bec8ff]/15 text-[#bec8ff]'
+                                    : u.category === 'club_member'
+                                    ? 'bg-[#2fb36a]/15 text-[#2fb36a]'
+                                    : u.category === 'consumer_vault'
+                                    ? 'bg-[#f59e0b]/15 text-[#f59e0b]'
+                                    : 'bg-[#242428] text-[#a1a1aa]'
+                                }`}
+                              >
+                                {u.roleLabel}
+                              </span>
+                            </td>
+                            <td className="py-3.5 px-4 font-bold text-[#f1f1ee]">
+                              {u.displayName}
+                            </td>
+                            <td className="py-3.5 px-4 font-mono text-[#a1a1aa]">
+                              {u.emailOrContact}
+                            </td>
+                            <td className="py-3.5 px-4 text-[#f1f1ee]">
+                              {u.businessName || 'Plataforma Toque'}
+                            </td>
+                            <td className="py-3.5 px-4 text-[#a1a1aa]">
+                              {u.statusLabel}
+                              {u.walletPassIssued && (
+                                <span className="ml-2 px-2 py-0.5 rounded bg-[#2fb36a]/20 text-[#2fb36a] text-[10px] font-bold">
+                                  Wallet activa
+                                </span>
+                              )}
+                            </td>
+                            <td className="py-3.5 px-4 text-[#a1a1aa]">
+                              {formatDateTimeAR(u.createdAt)}
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             )}
-          </Card>
-        </div>
+
+            {/* TAB 3: CARTELES FÍSICOS */}
+            {activeTab === 'carteles' && (
+              <div className="rounded-2xl bg-[#141417] border border-[#242428] overflow-hidden">
+                <div className="p-6 border-b border-[#242428]">
+                  <h2 className="text-base font-bold text-[#f1f1ee]">
+                    Carteles Físicos NFC + QR en la Red ({summary.carteles.length})
+                  </h2>
+                </div>
+
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse">
+                    <thead>
+                      <tr className="border-b border-[#242428] bg-[#18181c] text-[11px] font-semibold uppercase tracking-wider text-[#a1a1aa]">
+                        <th className="py-3.5 px-5">Código</th>
+                        <th className="py-3.5 px-5">Nombre</th>
+                        <th className="py-3.5 px-5">Estado</th>
+                        <th className="py-3.5 px-5">Modo</th>
+                        <th className="py-3.5 px-5">Escaneos Reales</th>
+                        <th className="py-3.5 px-5 text-right">Vista Pública</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-[#202024] text-sm">
+                      {summary.carteles.map((c) => (
+                        <tr key={c.id} className="hover:bg-[#1a1a1f]">
+                          <td className="py-4 px-5 font-mono font-bold text-[#bec8ff]">
+                            {c.code}
+                          </td>
+                          <td className="py-4 px-5 font-medium text-[#f1f1ee]">{c.name}</td>
+                          <td className="py-4 px-5">
+                            <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-[#2fb36a]/15 text-[#34d399]">
+                              {c.status}
+                            </span>
+                          </td>
+                          <td className="py-4 px-5 text-xs text-[#a1a1aa] uppercase">
+                            {c.mode}
+                          </td>
+                          <td className="py-4 px-5 font-semibold text-[#f1f1ee]">
+                            {c.scansCount || 0}
+                          </td>
+                          <td className="py-4 px-5 text-right">
+                            <Link
+                              to={`/h/${c.code}`}
+                              className="inline-flex items-center gap-1 text-xs font-semibold text-[#bec8ff] hover:underline"
+                            >
+                              <span>Abrir Hub</span>
+                              <ExternalLink className="w-3.5 h-3.5" />
+                            </Link>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {/* TAB 4: LISTA DE ESPERA */}
+            {activeTab === 'waitlist' && (
+              <div className="rounded-2xl bg-[#141417] border border-[#242428] overflow-hidden">
+                <div className="p-6 border-b border-[#242428] flex items-center justify-between">
+                  <div className="flex items-center gap-2.5">
+                    <Mail className="w-5 h-5 text-[#2fb36a]" />
+                    <h2 className="text-base font-bold text-[#f1f1ee]">
+                      Lista de Espera ({waitlist.length})
+                    </h2>
+                  </div>
+                </div>
+
+                {waitlist.length === 0 ? (
+                  <div className="p-8 text-center text-xs text-[#a1a1aa]">
+                    Todavía no hay registros en la lista de espera.
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left border-collapse">
+                      <thead>
+                        <tr className="border-b border-[#242428] bg-[#18181c] text-[11px] font-semibold uppercase tracking-wider text-[#a1a1aa]">
+                          <th className="py-3.5 px-5">Correo</th>
+                          <th className="py-3.5 px-5">Producto</th>
+                          <th className="py-3.5 px-5">Consentimiento</th>
+                          <th className="py-3.5 px-5">Fecha</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-[#202024] text-sm">
+                        {waitlist.map((entry) => (
+                          <tr key={entry.id} className="hover:bg-[#1a1a1f]">
+                            <td className="py-4 px-5 font-medium text-[#f1f1ee]">{entry.email}</td>
+                            <td className="py-4 px-5 text-xs text-[#bec8ff] font-bold uppercase">
+                              {entry.product}
+                            </td>
+                            <td className="py-4 px-5 text-xs text-[#34d399]">
+                              {entry.consent ? 'Autorizado' : 'No'}
+                            </td>
+                            <td className="py-4 px-5 text-xs text-[#a1a1aa]">
+                              {formatDateTimeAR(entry.createdAt)}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            )}
+          </>
+        )}
       </main>
+
+      {/* ================================================================= */}
+      {/* MODAL DE PERFIL DETALLADO DEL COMERCIO (SIN DATOS SENSIBLES)      */}
+      {/* ================================================================= */}
+      {(selectedBizDetail || loadingBizDetail) && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
+          <div className="max-w-3xl w-full rounded-3xl bg-[#141417] border border-[#2c2c32] p-6 sm:p-8 space-y-6 my-8 max-h-[90vh] overflow-y-auto">
+            {loadingBizDetail || !selectedBizDetail ? (
+              <div className="space-y-4">
+                <Skeleton className="h-8 w-56 rounded-xl bg-[#1c1c21]" />
+                <Skeleton className="h-44 w-full rounded-2xl bg-[#1c1c21]" />
+              </div>
+            ) : (
+              <>
+                <div className="flex items-start justify-between gap-4 pb-4 border-b border-[#242428]">
+                  <div className="flex items-center gap-3">
+                    <div
+                      style={{
+                        backgroundColor:
+                          selectedBizDetail.business.cardThemeColor || '#1e1b4b',
+                      }}
+                      className="w-12 h-12 rounded-2xl border border-white/20 flex items-center justify-center font-extrabold text-xl text-white"
+                    >
+                      {selectedBizDetail.business.name.charAt(0).toUpperCase()}
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <h3 className="text-xl font-bold text-[#f1f1ee]">
+                          {selectedBizDetail.business.name}
+                        </h3>
+                        <span className="px-2.5 py-0.5 rounded-full bg-[#2fb36a]/15 text-[#2fb36a] text-[10px] font-bold">
+                          Perfil Verificado
+                        </span>
+                      </div>
+                      <p className="text-xs text-[#a1a1aa]">
+                        Slug:{' '}
+                        <code className="text-[#bec8ff]">
+                          /u/{selectedBizDetail.business.id}
+                        </code>{' '}
+                        · Responsable: {selectedBizDetail.business.ownerName}
+                      </p>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => setSelectedBizDetail(null)}
+                    className="p-2 rounded-xl bg-[#1c1c21] text-[#a1a1aa] hover:text-white cursor-pointer"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+
+                {/* Indicadores Operativos del Comercio */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  <div className="p-4 rounded-2xl bg-[#18181c] border border-[#26262b]">
+                    <span className="text-[11px] text-[#a1a1aa]">Socios en el Club</span>
+                    <p className="text-2xl font-extrabold text-[#f1f1ee] mt-1">
+                      {selectedBizDetail.membersCount}
+                    </p>
+                  </div>
+                  <div className="p-4 rounded-2xl bg-[#18181c] border border-[#26262b]">
+                    <span className="text-[11px] text-[#a1a1aa]">Wallets Emitidas</span>
+                    <p className="text-2xl font-extrabold text-[#2fb36a] mt-1">
+                      {selectedBizDetail.walletPassesIssued}
+                    </p>
+                  </div>
+                  <div className="p-4 rounded-2xl bg-[#18181c] border border-[#26262b]">
+                    <span className="text-[11px] text-[#a1a1aa]">Sellos / Premios</span>
+                    <p className="text-2xl font-extrabold text-[#bec8ff] mt-1">
+                      {selectedBizDetail.stampsAddedCount} / {selectedBizDetail.rewardsRedeemedCount}
+                    </p>
+                  </div>
+                  <div className="p-4 rounded-2xl bg-[#18181c] border border-[#26262b]">
+                    <span className="text-[11px] text-[#a1a1aa]">Productos Cargados</span>
+                    <p className="text-2xl font-extrabold text-[#f1f1ee] mt-1">
+                      {selectedBizDetail.productsCount}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Configuración de Tarjeta de Sellos del Comercio */}
+                <div className="rounded-2xl bg-[#18181c] border border-[#26262b] p-5 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-[#bec8ff] flex items-center gap-1.5">
+                      <Gift className="w-4 h-4" />
+                      Configuración de Tarjeta de Sellos Digital
+                    </h4>
+                    <Link
+                      to={`/u/${selectedBizDetail.business.id}`}
+                      className="text-xs font-semibold text-[#2fb36a] hover:underline inline-flex items-center gap-1"
+                    >
+                      <span>Abrir vista pública</span>
+                      <ExternalLink className="w-3 h-3" />
+                    </Link>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+                    <div>
+                      <span className="text-[#a1a1aa] block">Premio (Meta {selectedBizDetail.clubConfig.targetStamps || 10} sellos):</span>
+                      <span className="font-bold text-[#f1f1ee]">
+                        {selectedBizDetail.clubConfig.loyaltyReward ||
+                          selectedBizDetail.clubConfig.rewardText}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-[#a1a1aa] block">Regla:</span>
+                      <span className="font-bold text-[#f1f1ee]">
+                        {selectedBizDetail.clubConfig.howToEarn || '1 sello por visita o compra'}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-[#a1a1aa] block">Color de tarjeta:</span>
+                      <span className="font-mono font-bold text-[#f1f1ee]">
+                        {selectedBizDetail.clubConfig.cardThemeColor ||
+                          selectedBizDetail.clubConfig.brandColor}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Locales y Carteles Vinculados */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="rounded-2xl bg-[#18181c] border border-[#26262b] p-4 space-y-2.5">
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-[#a1a1aa]">
+                      Locales ({selectedBizDetail.locals.length})
+                    </h4>
+                    {selectedBizDetail.locals.map((loc) => (
+                      <div
+                        key={loc.id}
+                        className="p-3 rounded-xl bg-[#141417] border border-[#242428] flex items-center justify-between text-xs"
+                      >
+                        <div>
+                          <p className="font-bold text-[#f1f1ee]">{loc.name}</p>
+                          <p className="text-[#a1a1aa]">{loc.address}</p>
+                        </div>
+                        <span className="font-mono font-bold text-[#bec8ff]">{loc.code}</span>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="rounded-2xl bg-[#18181c] border border-[#26262b] p-4 space-y-2.5">
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-[#a1a1aa]">
+                      Equipo Operativo ({selectedBizDetail.team.length})
+                    </h4>
+                    {selectedBizDetail.team.map((tm) => (
+                      <div
+                        key={tm.id}
+                        className="p-3 rounded-xl bg-[#141417] border border-[#242428] flex items-center justify-between text-xs"
+                      >
+                        <div>
+                          <p className="font-bold text-[#f1f1ee]">{tm.name}</p>
+                          <p className="text-[#a1a1aa] uppercase text-[10px]">{tm.role}</p>
+                        </div>
+                        <span className="inline-flex items-center gap-1 text-[#2fb36a] font-semibold">
+                          <CheckCircle2 className="w-3.5 h-3.5" />
+                          {tm.status}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Catálogo de Productos del Comercio */}
+                {selectedBizDetail.products.length > 0 && (
+                  <div className="rounded-2xl bg-[#18181c] border border-[#26262b] p-4 space-y-2.5">
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-[#a1a1aa] flex items-center gap-1.5">
+                      <ShoppingBag className="w-3.5 h-3.5 text-[#bec8ff]" />
+                      Catálogo de Productos ({selectedBizDetail.productsCount})
+                    </h4>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      {selectedBizDetail.products.slice(0, 6).map((prod) => (
+                        <div
+                          key={prod.id}
+                          className="p-2.5 rounded-xl bg-[#141417] border border-[#242428] flex items-center justify-between text-xs"
+                        >
+                          <span className="font-semibold text-[#f1f1ee] truncate">{prod.title}</span>
+                          {prod.price !== undefined && (
+                            <span className="font-bold text-[#bec8ff] shrink-0">
+                              {formatARS(prod.price)}
+                            </span>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 };

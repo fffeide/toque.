@@ -8,6 +8,7 @@ import {
   User,
   Cartel,
   HubConfig,
+  HubProduct,
   PublicHub,
   Sale,
   Receipt,
@@ -17,6 +18,7 @@ import {
   RecognizedClientAccount,
   ClubLocal,
   AuditLogEntry,
+  StampLogEntry,
   NotificationTemplate,
   NotificationLimits,
   SetupProgress,
@@ -35,6 +37,8 @@ import {
   TeamMember,
   WalletPassResponse,
   SuperAdminSummary,
+  SuperAdminBusinessDetail,
+  PlatformUserRecord,
   NetworkActivation,
   NetworkActivationFormat,
   ConsumerUser,
@@ -91,10 +95,12 @@ class HttpApi implements ToqueApi {
   async requestOtp(email: string, purpose: OtpPurpose = 'login') {
     return this.request<{
       sent: boolean;
+      emailSent?: boolean;
+      deliveryProvider?: string;
       expiresInSeconds: number;
       resendAvailableInSeconds: number;
       demoHintCode?: string;
-    }>('/auth/otp/request', {
+    }>('/auth/send-otp', {
       method: 'POST',
       body: JSON.stringify({ email, purpose }),
     });
@@ -109,7 +115,7 @@ class HttpApi implements ToqueApi {
       verified: boolean;
       user?: User;
       account?: RecognizedClientAccount;
-    }>('/auth/otp/verify', {
+    }>('/auth/verify-otp', {
       method: 'POST',
       body: JSON.stringify({ email, code, ...extra }),
     });
@@ -156,11 +162,13 @@ class HttpApi implements ToqueApi {
 
   async registerMember(data: {
     localCode?: string;
-    name: string;
+    name?: string;
     email: string;
+    phone?: string;
+    birthDate?: string;
     birthDay?: number;
     birthMonth?: number;
-    adult: boolean;
+    adult?: boolean;
     marketingConsent: boolean;
   }) {
     return this.request<{
@@ -198,7 +206,9 @@ class HttpApi implements ToqueApi {
   // Sellos, Canje y Toquecitos
   async addStampByCashier(data: {
     memberId?: string;
+    memberCode?: string;
     email?: string;
+    phone?: string;
     amount?: number;
     localId?: string;
     otpCode?: string;
@@ -252,6 +262,14 @@ class HttpApi implements ToqueApi {
   async listToquecitos(accountId?: string): Promise<ToquecitoItem[]> {
     const q = accountId ? `?accountId=${encodeURIComponent(accountId)}` : '';
     return this.request(`/club/toquecitos${q}`);
+  }
+
+  async listStampLogs(period: '30d' | '3m' | '12m' | 'all' = '30d'): Promise<StampLogEntry[]> {
+    return this.request(`/club/stamp-logs?period=${encodeURIComponent(period)}`);
+  }
+
+  async exportStampLogsCsv(period: '30d' | '3m' | '12m' | 'all' = '30d'): Promise<string> {
+    return this.request(`/club/stamp-logs/export-csv?period=${encodeURIComponent(period)}`);
   }
 
   // Correcciones
@@ -489,6 +507,17 @@ class HttpApi implements ToqueApi {
     });
   }
 
+  async importProductsCsv(csvContent: string, replaceExisting = false) {
+    return this.request<{
+      importedCount: number;
+      totalProducts: number;
+      products: HubProduct[];
+    }>('/hub/products/import-csv', {
+      method: 'POST',
+      body: JSON.stringify({ csvContent, replaceExisting }),
+    });
+  }
+
   async getPublicHub(code: string): Promise<PublicHub> {
     return this.request(`/public/hub/${encodeURIComponent(code)}`);
   }
@@ -525,21 +554,24 @@ class HttpApi implements ToqueApi {
     cartelCode: string;
     contact: string;
     name?: string;
+    phone?: string;
+    birthDate?: string;
     consent: boolean;
-  }): Promise<{ member: ClubMember; pointsAwarded: number }> {
+  }): Promise<{ member: ClubMember; pointsAwarded: number; walletPass?: WalletPassResponse }> {
     return this.request('/club/join', {
       method: 'POST',
       body: JSON.stringify(data),
     });
   }
 
-  async getWalletStatus(): Promise<{ configured: boolean; provider: string }> {
+  async getWalletStatus(): Promise<{ configured: boolean; emailConfigured?: boolean; provider: string; passesIssuedCount?: number }> {
     return this.request('/wallet/status');
   }
 
   async createWalletPass(data: {
     cartelCode?: string;
     memberId?: string;
+    memberCode?: string;
     customerName?: string;
     customerContact?: string;
     contact?: string;
@@ -718,6 +750,14 @@ class HttpApi implements ToqueApi {
 
   async getSuperAdminSummary(): Promise<SuperAdminSummary> {
     return this.request('/admin/summary');
+  }
+
+  async getSuperAdminBusinessDetail(businessId: string): Promise<SuperAdminBusinessDetail> {
+    return this.request(`/admin/businesses/${encodeURIComponent(businessId)}`);
+  }
+
+  async listAllPlatformUsers(): Promise<PlatformUserRecord[]> {
+    return this.request('/admin/users');
   }
 }
 

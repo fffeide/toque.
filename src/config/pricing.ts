@@ -69,9 +69,11 @@ export const TOQUE_PLANS: Record<'mensual' | 'anual', PlanDefinition> = {
 };
 
 export const TOQUE_PLANS_LIST: PlanDefinition[] = [TOQUE_PLANS.mensual, TOQUE_PLANS.anual];
+export const PLANS: PlanDefinition[] = TOQUE_PLANS_LIST;
 
 export function formatArsPrice(amount: number): string {
   return `$${amount.toLocaleString('es-AR')}`;
 }
 
 export const formatArs = formatArsPrice;
+

@@ -29,10 +29,16 @@ interface AuthContextType {
     code: string,
     extra?: { businessName?: string; ownerName?: string }
   ) => Promise<User | null>;
+  loginWithOtp: (
+    email: string,
+    code: string,
+    extra?: { businessName?: string; ownerName?: string }
+  ) => Promise<User | null>;
   login: (credentials: { email: string; code?: string }) => Promise<void>;
   register: (data: { businessName: string; ownerName: string; email: string }) => Promise<void>;
   logout: () => Promise<void>;
   refreshProfile: () => Promise<void>;
+  refreshSession: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -128,10 +134,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         isLoading,
         requestOtp,
         verifyOtp,
+        loginWithOtp: verifyOtp,
         login,
         register,
         logout,
         refreshProfile,
+        refreshSession: refreshProfile,
       }}
     >
       {children}

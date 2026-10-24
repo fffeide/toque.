@@ -83,6 +83,19 @@ service cloud.firestore {
         && (!('businessId' in data) || isValidOrgScope(data.businessId))
         && data.contact is string && data.contact.size() >= 3 && data.contact.size() <= 120
         && data.points is number && data.points >= 0
+        && (!('stamps' in data) || (data.stamps is number && data.stamps >= 0))
+        && (!('stampsRequired' in data) || (data.stampsRequired is number && data.stampsRequired >= 1))
+        && (!('rewardsRedeemed' in data) || (data.rewardsRedeemed is number && data.rewardsRedeemed >= 0))
+        && hasValidOptionalUuid(data);
+    }
+
+    function isValidStampLog(data) {
+      return data.id is string && data.id.size() >= 1 && data.id.size() <= 64
+        && data.businessId is string && isValidOrgScope(data.businessId)
+        && data.memberId is string && data.memberId.size() <= 64
+        && data.action in ['stamp_added', 'reward_redeemed']
+        && data.stampsDelta is number
+        && data.createdAt is string && data.createdAt.size() <= 64
         && hasValidOptionalUuid(data);
     }
 
@@ -153,6 +166,12 @@ service cloud.firestore {
       allow create: if isValidId(memberId) && isValidMember(incoming());
       allow update: if isValidId(memberId) && isValidMember(incoming()) && isSameOrgOnUpdate('businessId');
       allow delete: if isValidId(memberId);
+    }
+
+    match /stamp_logs/{logId} {
+      allow get, list: if true;
+      allow create: if isValidId(logId) && isValidStampLog(incoming());
+      allow update: if isValidId(logId) && isValidStampLog(incoming()) && isSameOrgOnUpdate('businessId');
     }
 
     match /team/{teamId} {

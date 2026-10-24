@@ -6,6 +6,7 @@ import {
   User,
   Cartel,
   HubConfig,
+  HubProduct,
   PublicHub,
   Sale,
   Receipt,
@@ -15,6 +16,7 @@ import {
   RecognizedClientAccount,
   ClubLocal,
   AuditLogEntry,
+  StampLogEntry,
   NotificationTemplate,
   NotificationLimits,
   SetupProgress,
@@ -33,6 +35,8 @@ import {
   TeamMember,
   WalletPassResponse,
   SuperAdminSummary,
+  SuperAdminBusinessDetail,
+  PlatformUserRecord,
   NetworkActivation,
   NetworkActivationFormat,
   ConsumerUser,
@@ -46,6 +50,8 @@ export interface ToqueApi {
     purpose?: OtpPurpose
   ): Promise<{
     sent: boolean;
+    emailSent?: boolean;
+    deliveryProvider?: string;
     expiresInSeconds: number;
     resendAvailableInSeconds: number;
     demoHintCode?: string;
@@ -81,11 +87,13 @@ export interface ToqueApi {
 
   registerMember(data: {
     localCode?: string;
-    name: string;
+    name?: string;
     email: string;
+    phone?: string;
+    birthDate?: string;
     birthDay?: number;
     birthMonth?: number;
-    adult: boolean;
+    adult?: boolean;
     marketingConsent: boolean;
   }): Promise<{
     member: ClubMember;
@@ -110,7 +118,9 @@ export interface ToqueApi {
   // Club — Suma de Sellos, Canje y Toquecitos
   addStampByCashier(data: {
     memberId?: string;
+    memberCode?: string;
     email?: string;
+    phone?: string;
     amount?: number;
     localId?: string;
     otpCode?: string;
@@ -146,6 +156,11 @@ export interface ToqueApi {
   }>;
 
   listToquecitos(accountId?: string): Promise<ToquecitoItem[]>;
+
+  // Historial de Sellos y Premios (Stamp Logs & CSV)
+  listStampLogs(period?: '30d' | '3m' | '12m' | 'all'): Promise<StampLogEntry[]>;
+
+  exportStampLogsCsv(period?: '30d' | '3m' | '12m' | 'all'): Promise<string>;
 
   // Club — Correcciones (Solo lectura con motivo obligatorio >= 10 caracteres)
   voidStamp(data: {
@@ -285,10 +300,19 @@ export interface ToqueApi {
     patch: Partial<Pick<Cartel, 'name' | 'role' | 'status' | 'mode' | 'reviewUrl'>>
   ): Promise<Cartel>;
 
-  // Hub y Recibos
+  // Hub, Productos (con importación CSV) y Recibos
   getHubConfig(): Promise<HubConfig>;
 
   updateHubConfig(patch: Partial<HubConfig>): Promise<HubConfig>;
+
+  importProductsCsv(
+    csvContent: string,
+    replaceExisting?: boolean
+  ): Promise<{
+    importedCount: number;
+    totalProducts: number;
+    products: HubProduct[];
+  }>;
 
   getPublicHub(code: string): Promise<PublicHub>;
 
@@ -306,14 +330,17 @@ export interface ToqueApi {
     cartelCode: string;
     contact: string;
     name?: string;
+    phone?: string;
+    birthDate?: string;
     consent: boolean;
   }): Promise<{ member: ClubMember; pointsAwarded: number; walletPass?: WalletPassResponse }>;
 
-  getWalletStatus(): Promise<{ configured: boolean; provider: string }>;
+  getWalletStatus(): Promise<{ configured: boolean; emailConfigured?: boolean; provider: string; passesIssuedCount?: number }>;
 
   createWalletPass(data: {
     cartelCode?: string;
     memberId?: string;
+    memberCode?: string;
     customerName?: string;
     customerContact?: string;
     contact?: string;
@@ -417,4 +444,8 @@ export interface ToqueApi {
 
   // Super Admin
   getSuperAdminSummary(): Promise<SuperAdminSummary>;
+
+  getSuperAdminBusinessDetail(businessId: string): Promise<SuperAdminBusinessDetail>;
+
+  listAllPlatformUsers(): Promise<PlatformUserRecord[]>;
 }

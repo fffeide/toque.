@@ -258,11 +258,6 @@ export const ClubLocalsView: React.FC = () => {
                         <h3 className="text-xl font-bold text-[#f1f1ee]">
                           {loc.name}
                         </h3>
-                        {loc.isSample && (
-                          <span className="px-2 py-0.5 text-[10px] font-bold rounded bg-[#f59e0b]/15 text-[#f59e0b] border border-[#f59e0b]/30">
-                            Ejemplo
-                          </span>
-                        )}
                       </div>
                       <p className="text-sm text-[#a1a1aa] flex items-center gap-1">
                         <MapPin className="w-4 h-4 shrink-0" />
@@ -342,7 +337,7 @@ export const ClubLocalsView: React.FC = () => {
               Club de clientes · {printLocal.name}
             </div>
             <h2 className="text-3xl font-extrabold tracking-tight text-[#0c0c0c]">
-              {config?.name || config?.clubName || 'Café del Barrio'}
+              {config?.name || config?.clubName || 'Musical Monroe'}
             </h2>
             <p className="text-base font-medium text-zinc-700">
               Escaneá con la cámara de tu celular y sumá sellos en cada visita.
@@ -358,7 +353,7 @@ export const ClubLocalsView: React.FC = () => {
               Tu premio al completar {config?.targetStamps || 10} sellos
             </div>
             <div className="text-2xl font-extrabold text-[#0c0c0c]">
-              {config?.rewardText || config?.welcomeBenefitText || '1 Café + Medialuna sin cargo'}
+              {config?.rewardText || config?.welcomeBenefitText || 'Beneficio exclusivo en instrumentos y accesorios'}
             </div>
           </div>
 

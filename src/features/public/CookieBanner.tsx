@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { ShieldCheck, Check, Cookie, X } from 'lucide-react';
+import { Check, Cookie, X } from 'lucide-react';
 import { getConsentPreferences, saveConsentPreferences } from '../../config/legal';
 
 export const CookieBanner: React.FC = () => {
@@ -11,10 +11,7 @@ export const CookieBanner: React.FC = () => {
     if (!existing) {
       setVisible(true);
     } else {
-      const w = window as unknown as { clarity?: (...args: any[]) => void };
-      if (typeof w.clarity === 'function') {
-        w.clarity('consent', existing.analyticsClarity);
-      }
+      saveConsentPreferences(existing.analyticsClarity);
     }
   }, []);
 
@@ -44,16 +41,16 @@ export const CookieBanner: React.FC = () => {
           <div className="space-y-1 text-xs leading-relaxed">
             <div className="flex items-center gap-2">
               <span className="font-bold text-[#f1f1ee]">
-                Privacidad, Consentimiento y Microsoft Clarity
+                Privacidad, Cookies y Analítica Opcional
               </span>
               <span className="px-2 py-0.5 rounded-md bg-[#18181b] border border-[#28282c] text-[10px] text-[#bec8ff] font-medium">
                 Ley 25.326
               </span>
             </div>
             <p className="text-[#a1a1aa]">
-              Usamos almacenamiento local técnico para el funcionamiento de Caja y Hub, y{' '}
+              Usamos cookies técnicas necesarias para tu sesión y, solo si aceptás,{' '}
               <strong className="text-[#f1f1ee] font-medium">Microsoft Clarity</strong> con datos
-              enmascarados para mejorar la experiencia de uso. Consultá nuestros{' '}
+              enmascarados para mejorar la experiencia. Si elegís &ldquo;Solo necesarias&rdquo;, Clarity permanece desactivado. Consultá{' '}
               <Link to="/terminos" className="text-[#bec8ff] underline hover:text-white">
                 Términos
               </Link>
@@ -89,7 +86,7 @@ export const CookieBanner: React.FC = () => {
           <button
             type="button"
             onClick={handleEssentialOnly}
-            aria-label="Cerrar aviso"
+            aria-label="Rechazar analítica y cerrar aviso"
             className="p-1.5 rounded-lg text-[#71717a] hover:text-[#f1f1ee] transition-colors cursor-pointer"
           >
             <X className="w-4 h-4" />

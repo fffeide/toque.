@@ -1,5 +1,5 @@
--- 0002_smart_hub.sql: Evolución Smart Receipt & Post-Purchase Hub (Cloudflare D1)
--- Extiende el esquema sin romper 0001_init.sql
+-- 0002_smart_hub.sql: Evolución Smart Receipt, Post-Purchase Hub y Tarjeta de Sellos Digital (Cloudflare D1)
+-- Extiende el esquema sin romper 0001_init.sql e inicializa el comercio oficial Musical Monroe
 
 -- 1. Extensión de la tabla de carteles
 ALTER TABLE carteles ADD COLUMN mode TEXT DEFAULT 'smart_hub' CHECK(mode IN ('direct_review', 'smart_hub'));
@@ -10,14 +10,16 @@ ALTER TABLE carteles ADD COLUMN claim_status TEXT DEFAULT 'claimed' CHECK(claim_
 CREATE TABLE IF NOT EXISTS hub_configs (
   tenant_id TEXT PRIMARY KEY REFERENCES tenants(id) ON DELETE CASCADE,
   sections_order TEXT NOT NULL DEFAULT '["loyalty","reviews","receipt","offers","socials","signup","footer"]',
-  brand_color TEXT NOT NULL DEFAULT '#3A3FE0',
+  brand_color TEXT NOT NULL DEFAULT '#1e1b4b',
   logo_url TEXT,
   review_prompt TEXT NOT NULL DEFAULT '¿Cómo estuvo tu visita? Tu opinión nos ayuda a mejorar.',
-  loyalty_title TEXT NOT NULL DEFAULT 'Club de Beneficios',
-  loyalty_reward TEXT NOT NULL DEFAULT '10% OFF en tu próxima compra',
-  stamps_required INTEGER NOT NULL DEFAULT 5,
-  offer_title TEXT DEFAULT 'Promoción Especial',
-  offer_desc TEXT DEFAULT 'Presentando este comprobante en tu próxima visita obtenés un beneficio exclusivo.',
+  loyalty_title TEXT NOT NULL DEFAULT 'Tarjeta de sellos de Musical Monroe',
+  loyalty_reward TEXT NOT NULL DEFAULT 'Beneficio exclusivo en instrumentos y accesorios',
+  how_to_earn TEXT NOT NULL DEFAULT '1 sello por visita o compra',
+  expiration_policy TEXT NOT NULL DEFAULT 'No vencen',
+  stamps_required INTEGER NOT NULL DEFAULT 10,
+  offer_title TEXT DEFAULT 'Beneficio Exclusivo',
+  offer_desc TEXT DEFAULT 'Presentando tu tarjeta digital en mostrador sumás sellos y accedés a beneficios en instrumentos y accesorios.',
   offer_cta TEXT DEFAULT 'Canjear en mostrador',
   offer_url TEXT,
   offer_image TEXT,
@@ -25,22 +27,48 @@ CREATE TABLE IF NOT EXISTS hub_configs (
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
--- 3. Tabla loyalty_members (Fidelidad y Pases de Wallet)
+-- 3. Tabla loyalty_members (Fidelización por Tarjeta de Sellos Digital y Pases de Wallet)
 CREATE TABLE IF NOT EXISTS loyalty_members (
   id TEXT PRIMARY KEY,
   tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  member_code TEXT NOT NULL,
   customer_name TEXT,
+  customer_email TEXT NOT NULL,
+  customer_phone TEXT,
+  birth_date TEXT,
   customer_phone_or_email TEXT NOT NULL,
-  stamps INTEGER NOT NULL DEFAULT 1,
+  stamps INTEGER NOT NULL DEFAULT 0,
+  stamps_required INTEGER NOT NULL DEFAULT 10,
+  rewards_redeemed INTEGER NOT NULL DEFAULT 0,
   points INTEGER NOT NULL DEFAULT 0,
+  consent INTEGER NOT NULL DEFAULT 0,
   pass_url TEXT,
+  last_stamped_at TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_loyalty_members_tenant ON loyalty_members(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_loyalty_members_contact ON loyalty_members(tenant_id, customer_phone_or_email);
+CREATE INDEX IF NOT EXISTS idx_loyalty_members_code ON loyalty_members(tenant_id, member_code);
 
--- 4. Tabla partner_referrals (Programa de Activation Partners)
+-- 4. Tabla stamp_logs (Historial auditable de sellos y premios para CSV y Panel)
+CREATE TABLE IF NOT EXISTS stamp_logs (
+  id TEXT PRIMARY KEY,
+  tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  member_id TEXT NOT NULL,
+  member_name TEXT,
+  member_email TEXT,
+  member_phone TEXT,
+  action TEXT NOT NULL CHECK(action IN ('stamp_added', 'reward_redeemed')),
+  stamps_delta INTEGER NOT NULL,
+  staff_email TEXT,
+  local_name TEXT DEFAULT 'Casa Central',
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_stamp_logs_tenant ON stamp_logs(tenant_id, created_at);
+
+-- 5. Tabla partner_referrals (Programa de Activation Partners)
 CREATE TABLE IF NOT EXISTS partner_referrals (
   id TEXT PRIMARY KEY,
   partner_code TEXT NOT NULL,
@@ -52,3 +80,30 @@ CREATE TABLE IF NOT EXISTS partner_referrals (
 );
 
 CREATE INDEX IF NOT EXISTS idx_partner_referrals_code ON partner_referrals(partner_code);
+
+-- 6. Configuración inicial lista para producción: "Musical Monroe" (MONROE01)
+INSERT OR IGNORE INTO tenants (id, slug, name, owner_email, created_at)
+VALUES ('musical-monroe', 'musical-monroe', 'Musical Monroe', 'hola@musicalmonroe.com.ar', datetime('now'));
+
+INSERT OR IGNORE INTO carteles (id, code, tenant_id, name, role, status, mode, tile_color, claim_status, created_at)
+VALUES ('cartel-monroe-01', 'MONROE01', 'musical-monroe', 'Mostrador Musical Monroe', 'caja', 'active', 'smart_hub', 'black', 'claimed', datetime('now'));
+
+INSERT OR IGNORE INTO hub_configs (
+  tenant_id,
+  brand_color,
+  loyalty_title,
+  loyalty_reward,
+  how_to_earn,
+  expiration_policy,
+  stamps_required,
+  updated_at
+) VALUES (
+  'musical-monroe',
+  '#1e1b4b',
+  'Tarjeta de sellos de Musical Monroe',
+  'Beneficio exclusivo en instrumentos y accesorios',
+  '1 sello por visita o compra',
+  'No vencen',
+  10,
+  datetime('now')
+);

@@ -24,6 +24,7 @@ import {
   Store,
   ShieldAlert,
   Type,
+  MoreHorizontal,
 } from 'lucide-react';
 
 interface NavItem {
@@ -37,7 +38,7 @@ interface NavItem {
 const ALL_NAV_ITEMS: NavItem[] = [
   {
     to: '/panel/resumen',
-    label: 'Resumen',
+    label: 'Panel',
     icon: LayoutDashboard,
     roles: ['owner', 'manager', 'cashier', 'superadmin'],
   },
@@ -49,7 +50,7 @@ const ALL_NAV_ITEMS: NavItem[] = [
   },
   {
     to: '/panel/fidelidad',
-    label: 'Club Fidelidad',
+    label: 'Clientes y Tarjeta',
     icon: Award,
     roles: ['owner', 'manager', 'superadmin'],
   },
@@ -79,13 +80,13 @@ const ALL_NAV_ITEMS: NavItem[] = [
   },
   {
     to: '/panel/hub',
-    label: 'Hub',
+    label: 'Smart Hub',
     icon: Smartphone,
     roles: ['owner', 'manager', 'superadmin'],
   },
   {
     to: '/panel/productos',
-    label: 'Productos',
+    label: 'Productos (CSV)',
     icon: ShoppingBag,
     roles: ['owner', 'manager', 'superadmin'],
   },
@@ -103,16 +104,10 @@ const ALL_NAV_ITEMS: NavItem[] = [
     roles: ['owner', 'manager', 'superadmin'],
   },
   {
-    to: '/panel/suscripcion',
-    label: 'Suscripción',
-    icon: CreditCard,
-    roles: ['owner', 'superadmin'],
-  },
-  {
     to: '/panel/cuenta',
-    label: 'Mi Cuenta',
+    label: 'Mi Cuenta y Suscripción',
     icon: Settings,
-    roles: ['owner', 'superadmin'],
+    roles: ['owner', 'manager', 'cashier', 'superadmin'],
   },
 ];
 
@@ -149,8 +144,8 @@ export const PanelLayout: React.FC = () => {
       : 'Cajero';
 
   return (
-    <div className="theme-panel min-h-screen flex flex-col md:flex-row bg-[#000000] text-[#f1f1ee]">
-      {/* Sidebar Desktop — siempre mantiene su fondo negro en modo claro y oscuro */}
+    <div className="theme-panel min-h-screen flex flex-col md:flex-row bg-[#000000] text-[#f1f1ee] pb-20 md:pb-0">
+      {/* Sidebar Desktop — mantiene su estética Matte Dark Flat */}
       <aside className="panel-chrome-dark hidden md:flex md:w-64 md:flex-col border-r border-[#242426] bg-[#111113] text-[#f1f1ee] shrink-0">
         {/* Brand Header */}
         <div className="h-16 px-6 flex items-center justify-between border-b border-[#242426]">
@@ -174,14 +169,14 @@ export const PanelLayout: React.FC = () => {
           <div className="p-3 rounded-xl bg-[#18181b] border border-[#28282a]">
             <div className="flex items-center justify-between gap-2">
               <p className="text-xs font-semibold text-[#f1f1ee] truncate">
-                {business?.name || 'Café & Panadería La Esquina'}
+                {business?.name || 'Musical Monroe'}
               </p>
               <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-[#bec8ff]/15 text-[#bec8ff] shrink-0">
                 {roleBadgeLabel}
               </span>
             </div>
             <p className="text-[11px] text-[#a1a1aa] truncate mt-0.5">
-              {user?.name || 'Martín Gómez'}
+              {user?.name || 'Musical Monroe'}
             </p>
           </div>
         </div>
@@ -212,7 +207,7 @@ export const PanelLayout: React.FC = () => {
             );
           })}
 
-          {currentRole === 'superadmin' && (
+          {(currentRole === 'superadmin' || currentRole === 'owner') && (
             <NavLink
               to="/admin"
               className={({ isActive }) =>
@@ -257,7 +252,7 @@ export const PanelLayout: React.FC = () => {
 
       {/* Main Content Area */}
       <div className="flex-1 flex flex-col min-w-0">
-        {/* Top Bar (Nombre del comercio + Rol) — se mantiene en negro también en modo claro */}
+        {/* Top Bar (Nombre del comercio + Rol) */}
         <header className="panel-chrome-dark h-16 px-4 sm:px-8 border-b border-[#242426] bg-[#111113] text-[#f1f1ee] flex items-center justify-between sticky top-0 z-20">
           <div className="flex items-center gap-3">
             <button
@@ -272,11 +267,13 @@ export const PanelLayout: React.FC = () => {
               <div className="w-7 h-7 rounded-lg bg-[#bec8ff] flex items-center justify-center text-[#0c0c0c] font-bold text-xs">
                 T
               </div>
-              <span className="font-bold text-sm text-[#f1f1ee]">toque™</span>
+              <span className="font-bold text-sm text-[#f1f1ee] truncate max-w-[140px]">
+                {business?.name || 'Musical Monroe'}
+              </span>
             </div>
             <div className="hidden md:flex items-center gap-2.5">
               <span className="text-sm font-semibold text-[#f1f1ee]">
-                {business?.name || 'Café & Panadería La Esquina'}
+                {business?.name || 'Musical Monroe'}
               </span>
               <span className="text-[11px] font-semibold px-2.5 py-0.5 rounded-full bg-[#18181b] border border-[#28282a] text-[#bec8ff]">
                 Nivel: {roleBadgeLabel}
@@ -300,7 +297,6 @@ export const PanelLayout: React.FC = () => {
               <span className="hidden sm:inline">Letra más grande</span>
             </button>
 
-            {/* Botón Modo Oscuro / Claro */}
             <button
               type="button"
               onClick={toggleTheme}
@@ -325,11 +321,11 @@ export const PanelLayout: React.FC = () => {
           </div>
         </header>
 
-        {/* Mobile Drawer */}
+        {/* Mobile Drawer / Bottom Sheet ("Más") */}
         {mobileOpen && (
           <div className="fixed inset-0 z-50 md:hidden flex">
             <div
-              className="fixed inset-0 bg-black/70"
+              className="fixed inset-0 bg-black/75"
               onClick={() => setMobileOpen(false)}
             />
             <div className="panel-chrome-dark relative w-72 max-w-[85vw] bg-[#111113] text-[#f1f1ee] border-r border-[#242426] h-full flex flex-col z-10">
@@ -366,7 +362,7 @@ export const PanelLayout: React.FC = () => {
               <div className="p-4 border-b border-[#242426]">
                 <div className="flex items-center justify-between gap-2">
                   <p className="text-xs font-semibold text-[#f1f1ee] truncate">
-                    {business?.name || 'Café & Panadería La Esquina'}
+                    {business?.name || 'Musical Monroe'}
                   </p>
                   <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-[#bec8ff]/15 text-[#bec8ff]">
                     {roleBadgeLabel}
@@ -400,6 +396,23 @@ export const PanelLayout: React.FC = () => {
                     </NavLink>
                   );
                 })}
+
+                {(currentRole === 'superadmin' || currentRole === 'owner') && (
+                  <NavLink
+                    to="/admin"
+                    onClick={() => setMobileOpen(false)}
+                    className={({ isActive }) =>
+                      `flex items-center gap-3 px-3.5 py-3 rounded-xl text-sm font-medium mt-2 border border-[#bec8ff]/30 ${
+                        isActive
+                          ? 'bg-[#bec8ff] text-[#0c0c0c] font-bold'
+                          : 'bg-[#bec8ff]/10 text-[#bec8ff]'
+                      }`
+                    }
+                  >
+                    <ShieldCheck className="w-4 h-4" />
+                    <span>Super Admin Global</span>
+                  </NavLink>
+                )}
               </nav>
 
               <div className="p-4 border-t border-[#242426] space-y-2">
@@ -422,6 +435,74 @@ export const PanelLayout: React.FC = () => {
           <Outlet />
         </main>
       </div>
+
+      {/* Barra Inferior Móvil (5 ítems: Panel, Clientes, Escanear central flotante, Avisos, Más) */}
+      <nav
+        aria-label="Navegación principal móvil"
+        className="panel-chrome-dark md:hidden fixed bottom-0 left-0 right-0 z-30 h-16 bg-[#111113]/95 backdrop-blur-md border-t border-[#242426] grid grid-cols-5 items-center px-2"
+      >
+        <NavLink
+          to="/panel/resumen"
+          className={({ isActive }) =>
+            `flex flex-col items-center justify-center gap-1 py-1 text-[11px] font-medium ${
+              isActive ? 'text-[#bec8ff] font-bold' : 'text-[#a1a1aa]'
+            }`
+          }
+        >
+          <LayoutDashboard className="w-4 h-4" />
+          <span>Panel</span>
+        </NavLink>
+
+        <NavLink
+          to="/panel/fidelidad"
+          className={({ isActive }) =>
+            `flex flex-col items-center justify-center gap-1 py-1 text-[11px] font-medium ${
+              isActive ? 'text-[#bec8ff] font-bold' : 'text-[#a1a1aa]'
+            }`
+          }
+        >
+          <Users className="w-4 h-4" />
+          <span>Clientes</span>
+        </NavLink>
+
+        {/* Botón Central Flotante: Escanear */}
+        <div className="flex items-center justify-center -mt-5">
+          <NavLink
+            to="/panel/escanear"
+            className={({ isActive }) =>
+              `w-14 h-14 rounded-2xl flex flex-col items-center justify-center gap-0.5 shadow-xl border transition-transform active:scale-95 ${
+                isActive
+                  ? 'bg-[#bec8ff] text-[#0c0c0c] border-[#bec8ff]'
+                  : 'bg-[#2fb36a] text-[#07150d] border-[#2fb36a]'
+              }`
+            }
+          >
+            <QrCode className="w-5 h-5 stroke-[2.2]" />
+            <span className="text-[10px] font-bold leading-none">Escanear</span>
+          </NavLink>
+        </div>
+
+        <NavLink
+          to="/panel/avisos"
+          className={({ isActive }) =>
+            `flex flex-col items-center justify-center gap-1 py-1 text-[11px] font-medium ${
+              isActive ? 'text-[#bec8ff] font-bold' : 'text-[#a1a1aa]'
+            }`
+          }
+        >
+          <Bell className="w-4 h-4" />
+          <span>Avisos</span>
+        </NavLink>
+
+        <button
+          type="button"
+          onClick={() => setMobileOpen(true)}
+          className="flex flex-col items-center justify-center gap-1 py-1 text-[11px] font-medium text-[#a1a1aa] hover:text-[#f1f1ee] cursor-pointer"
+        >
+          <MoreHorizontal className="w-4 h-4" />
+          <span>Más</span>
+        </button>
+      </nav>
     </div>
   );
 };

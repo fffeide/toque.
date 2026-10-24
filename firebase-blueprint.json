@@ -12,6 +12,12 @@
         "email": { "type": "string", "format": "email", "maxLength": 120 },
         "ownerUid": { "type": "string", "maxLength": 128 },
         "reviewUrl": { "type": "string", "maxLength": 300 },
+        "cardThemeColor": { "type": "string", "maxLength": 32 },
+        "loyaltyTitle": { "type": "string", "maxLength": 120 },
+        "loyaltyReward": { "type": "string", "maxLength": 200 },
+        "howToEarn": { "type": "string", "maxLength": 160 },
+        "expirationPolicy": { "type": "string", "maxLength": 120 },
+        "stampsRequired": { "type": "number" },
         "createdAt": { "type": "string", "maxLength": 64 },
         "scansCount": { "type": "number" },
         "reviewClicksCount": { "type": "number" }
@@ -89,16 +95,23 @@
     },
     "member": {
       "title": "ClubMember",
-      "description": "Socio registrado en el Club de Fidelidad con pase WalletWallet.",
+      "description": "Socio registrado en el Club de Fidelidad con Tarjeta de Sellos Digital y pase WalletWallet.",
       "type": "object",
       "properties": {
         "id": { "type": "string", "maxLength": 64 },
         "uuid": { "type": "string", "maxLength": 64 },
         "businessId": { "type": "string", "maxLength": 64 },
         "name": { "type": "string", "maxLength": 80 },
+        "email": { "type": "string", "maxLength": 120 },
+        "phone": { "type": "string", "maxLength": 40 },
+        "birthDate": { "type": "string", "maxLength": 16 },
         "contact": { "type": "string", "maxLength": 100 },
         "points": { "type": "number" },
         "stamps": { "type": "number" },
+        "stampsRequired": { "type": "number" },
+        "rewardsRedeemed": { "type": "number" },
+        "memberCode": { "type": "string", "maxLength": 32 },
+        "lastStampedAt": { "type": "string", "maxLength": 64 },
         "passId": { "type": "string", "maxLength": 80 },
         "passUrl": { "type": "string", "maxLength": 500 },
         "appleWalletUrl": { "type": "string", "maxLength": 500 },
@@ -107,6 +120,26 @@
         "consent": { "type": "boolean" }
       },
       "required": ["id", "contact", "points", "joinedAt", "consent"]
+    },
+    "stampLog": {
+      "title": "StampLog",
+      "description": "Registro histórico de sellos sumados y premios canjeados por comercio.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 64 },
+        "uuid": { "type": "string", "maxLength": 64 },
+        "businessId": { "type": "string", "maxLength": 64 },
+        "memberId": { "type": "string", "maxLength": 64 },
+        "memberName": { "type": "string", "maxLength": 80 },
+        "memberEmail": { "type": "string", "maxLength": 120 },
+        "memberPhone": { "type": "string", "maxLength": 40 },
+        "action": { "type": "string", "enum": ["stamp_added", "reward_redeemed"] },
+        "stampsDelta": { "type": "number" },
+        "createdAt": { "type": "string", "maxLength": 64 },
+        "staffEmail": { "type": "string", "maxLength": 120 },
+        "localName": { "type": "string", "maxLength": 80 }
+      },
+      "required": ["id", "businessId", "memberId", "action", "stampsDelta", "createdAt"]
     },
     "teamMember": {
       "title": "TeamMember",
@@ -201,6 +234,10 @@
     "/members/{memberId}": {
       "schema": "member",
       "description": "Colección de socios del Club de Fidelidad y pases WalletWallet."
+    },
+    "/stamp_logs/{logId}": {
+      "schema": "stampLog",
+      "description": "Historial de sellos sumados y premios canjeados por comercio."
     },
     "/team/{teamId}": {
       "schema": "teamMember",

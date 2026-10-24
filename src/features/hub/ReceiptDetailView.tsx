@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useNavigate } from 'react-router-dom';
 import { api, Receipt } from '../../api';
 import { Button } from '../../components/ui/Button';
 import { Skeleton } from '../../components/ui/Skeleton';
@@ -43,6 +43,7 @@ function markReceiptOpenedLocally(id: string): void {
 
 export const ReceiptDetailView: React.FC = () => {
   const { id = '' } = useParams<{ id: string }>();
+  const navigate = useNavigate();
   const { showToast } = useToast();
 
   const [receipt, setReceipt] = useState<Receipt | null>(null);
@@ -59,6 +60,11 @@ export const ReceiptDetailView: React.FC = () => {
         if (!active) return;
 
         if (!data) {
+          const cartel = await api.getCartelByCode(id).catch(() => null);
+          if (active && cartel) {
+            navigate(`/h/${cartel.code}`, { replace: true });
+            return;
+          }
           setReceipt(null);
           setIsLockedOrExpired(true);
           return;

@@ -1,7 +1,7 @@
 /**
  * Toque — Definición de Tipos (ToqueApi)
- * Incluye Toque Club (tarjeta de sellos), Locales, Correcciones, Avisos, Suscripción,
- * Verificación por código de 6 dígitos (OTP) y Lista de espera.
+ * Incluye Toque Club (tarjeta de sellos), Smart Hub, Locales, Correcciones, Avisos, Suscripción,
+ * Verificación por código de 6 dígitos (OTP), Importación CSV y Super Admin.
  */
 
 export type CartelRole = 'resena' | 'caja';
@@ -35,6 +35,8 @@ export interface SmartHubConfig {
   reviewPrompt: string;
   loyaltyTitle: string;
   loyaltyReward: string;
+  howToEarn?: string;
+  expirationPolicy?: string;
   stampsRequired: number;
   offerTitle: string;
   offerDesc: string;
@@ -200,9 +202,15 @@ export interface ClubConfig {
   name: string;
   clubName?: string;
   brandColor?: string;
+  cardThemeColor?: string;
   logoUrl?: string;
   targetStamps?: number;
+  stampsRequired?: number;
   rewardText?: string;
+  loyaltyTitle?: string;
+  loyaltyReward?: string;
+  howToEarn?: string;
+  expirationPolicy?: string;
   welcomeBenefitText?: string;
   pointsPerVisit?: number;
   enabled?: boolean;
@@ -235,6 +243,21 @@ export interface ClubStampEntry {
   voidReason?: string;
 }
 
+export interface StampLogEntry {
+  id: string;
+  businessId: string;
+  memberId: string;
+  memberCode?: string;
+  memberName: string;
+  memberEmail?: string;
+  memberPhone?: string;
+  action: 'stamp_added' | 'reward_redeemed';
+  stampsDelta: number;
+  localName?: string;
+  staffEmail?: string;
+  createdAt: string;
+}
+
 export interface ToquecitoItem {
   id: string;
   accountId: string;
@@ -254,7 +277,11 @@ export interface ClubMember {
   localId?: string;
   localCode?: string;
   localName?: string;
+  memberCode?: string;
   name?: string;
+  email?: string;
+  phone?: string;
+  birthDate?: string;
   contact: string;
   maskedEmail?: string;
   birthDay?: number;
@@ -263,16 +290,18 @@ export interface ClubMember {
   marketingConsent?: boolean;
   points: number;
   stamps: number;
+  stampsRequired?: number;
   targetStamps?: number;
   rewardsRedeemed?: number;
   lastVisitAt?: string;
+  lastStampedAt?: string;
   passId?: string;
   passUrl?: string;
   walletPassUrl?: string;
   appleWalletUrl?: string;
   googleWalletUrl?: string;
   joinedAt: string;
-  consent: true;
+  consent: boolean;
   isSample?: boolean;
   stampHistory?: ClubStampEntry[];
 }
@@ -285,10 +314,13 @@ export interface ClubPublicInfo {
   localName: string;
   localAddress?: string;
   programName: string;
+  loyaltyTitle?: string;
   brandColor: string;
   logoUrl?: string;
   targetStamps: number;
   rewardText: string;
+  howToEarn?: string;
+  expirationPolicy?: string;
   mode: ClubRuleType;
   amountPerStamp?: number;
   maxStampsPerVisit?: number;
@@ -398,11 +430,18 @@ export interface BusinessProfile {
   email: string;
   ownerUid?: string;
   reviewUrl?: string;
+  cardThemeColor?: string;
+  loyaltyTitle?: string;
+  loyaltyReward?: string;
+  howToEarn?: string;
+  expirationPolicy?: string;
+  stampsRequired?: number;
   planPaid?: boolean;
   networkEnabled?: boolean;
   createdAt: string;
   scansCount?: number;
   reviewClicksCount?: number;
+  walletPassesIssued?: number;
 }
 
 export type NetworkActivationFormat =
@@ -548,6 +587,41 @@ export interface DashboardSummary {
   visitsCount?: number;
   returningMembersCount?: number;
   rewardsRedeemedCount?: number;
+  stampsAddedCount?: number;
+}
+
+export type PlatformUserCategory = 'merchant_team' | 'club_member' | 'consumer_vault' | 'waitlist';
+
+export interface PlatformUserRecord {
+  id: string;
+  category: PlatformUserCategory;
+  roleLabel: string;
+  displayName: string;
+  emailOrContact: string;
+  businessId?: string;
+  businessName?: string;
+  stamps?: number;
+  rewardsRedeemed?: number;
+  walletPassIssued?: boolean;
+  createdAt: string;
+  statusLabel: string;
+}
+
+export interface SuperAdminBusinessDetail {
+  business: BusinessProfile;
+  clubConfig: ClubConfig;
+  hubConfig: HubConfig;
+  locals: ClubLocal[];
+  carteles: Cartel[];
+  team: Array<Pick<TeamMember, 'id' | 'name' | 'role' | 'status' | 'assignedCartelCode' | 'addedAt'>>;
+  productsCount: number;
+  products: HubProduct[];
+  membersCount: number;
+  walletPassesIssued: number;
+  salesCount: number;
+  salesAmount: number;
+  stampsAddedCount: number;
+  rewardsRedeemedCount: number;
 }
 
 export interface SuperAdminSummary {
@@ -569,10 +643,14 @@ export interface SuperAdminSummary {
       salesAmount: number;
       membersCount: number;
       teamCount: number;
+      walletPassesIssued: number;
+      productsCount: number;
+      localsCount: number;
     }
   >;
   carteles: Cartel[];
   recentSales: Sale[];
+  allUsers: PlatformUserRecord[];
 }
 
 export interface CartelBatch {
