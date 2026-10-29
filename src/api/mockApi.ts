@@ -485,6 +485,33 @@ class MockApi implements ToqueApi {
       window.localStorage.setItem('toque_stamp_logs_v1', JSON.stringify(this.stampLogs));
       window.localStorage.setItem('toque_club_config_v1', JSON.stringify(this.clubConfig));
       window.localStorage.setItem('toque_hub_config_v1', JSON.stringify(this.hubConfig));
+      // Sincronizar también la tarjeta activa del cliente en cada negocio para que cambios desde el panel impacten de inmediato en la tarjeta real
+      for (const m of this.clubMembers) {
+        if (!m.businessId) continue;
+        const key = `toque_member_${m.businessId}`;
+        const rawExisting = window.localStorage.getItem(key);
+        if (rawExisting) {
+          try {
+            const parsed = JSON.parse(rawExisting);
+            if (
+              parsed &&
+              (parsed.id === m.id ||
+                (parsed.email && m.email && parsed.email.toLowerCase() === m.email.toLowerCase()) ||
+                (this.recognizedClient?.email &&
+                  m.email?.toLowerCase() === this.recognizedClient.email.toLowerCase()))
+            ) {
+              window.localStorage.setItem(key, JSON.stringify(m));
+            }
+          } catch {
+            // ignore
+          }
+        } else if (
+          this.recognizedClient?.email &&
+          m.email?.toLowerCase() === this.recognizedClient.email.toLowerCase()
+        ) {
+          window.localStorage.setItem(key, JSON.stringify(m));
+        }
+      }
       if (this.recognizedClient) {
         window.localStorage.setItem(
           'toque_recognized_client_v1',
@@ -1776,6 +1803,7 @@ class MockApi implements ToqueApi {
     localCode: string;
     memberId: string;
     rotatingToken?: string;
+    receiptId?: string;
   }): Promise<{
     member: ClubMember;
     stampsAdded: number;
@@ -1790,10 +1818,10 @@ class MockApi implements ToqueApi {
       throw new Error('El Club de este comercio no está disponible en este momento.');
     }
     const pub = await this.getClubPublic(data.localCode);
-    if (!pub.allowSelfScan) {
+    if (!pub.allowSelfScan && !data.receiptId) {
       throw new Error('Este local suma sellos únicamente con el cajero en mostrador.');
     }
-    if (pub.mode === 'per_amount') {
+    if (pub.mode === 'per_amount' && !data.receiptId) {
       throw new Error(
         'El programa de este local es por monto de compra. Pedile al cajero que escanee tu tarjeta.'
       );
@@ -1806,18 +1834,52 @@ class MockApi implements ToqueApi {
 
     const target = member.targetStamps || pub.targetStamps || 10;
 
-    // 1. Verificar last_stamped_at del miembro en ese negocio (Regla estricta de 24 horas = 86400000 ms)
-    if (member.lastStampedAt) {
-      const elapsedMs = Date.now() - new Date(member.lastStampedAt).getTime();
-      if (!Number.isNaN(elapsedMs) && elapsedMs < 86400000) {
-        const remainingMs = 86400000 - elapsedMs;
+    // Si viene vinculado a un comprobante de compra real (receiptId), verificar que no se haya sumado ya por ese comprobante
+    if (data.receiptId) {
+      const alreadyStampedForReceipt = member.stampHistory?.some(
+        (s) => s.receiptId === data.receiptId && !s.voided
+      );
+      if (alreadyStampedForReceipt) {
         return {
           member: { ...member },
           stampsAdded: 0,
           rewardReady: member.stamps >= target,
-          cooldown: true,
-          remainingMs,
+          cooldown: false,
         };
+      }
+      // Evitar duplicar sello si el socio se acaba de dar de alta hace menos de 15 segundos durante esta misma compra
+      const joinedMs = member.joinedAt ? new Date(member.joinedAt).getTime() : 0;
+      if (
+        member.stamps === 1 &&
+        (member.stampHistory?.length || 0) === 1 &&
+        Date.now() - joinedMs < 15000
+      ) {
+        // Vincular el receiptId al sello inicial de alta para que quede registrado en esta compra
+        if (member.stampHistory && member.stampHistory[0]) {
+          member.stampHistory[0].receiptId = data.receiptId;
+          this.persistClubData();
+        }
+        return {
+          member: { ...member },
+          stampsAdded: 0,
+          rewardReady: member.stamps >= target,
+          cooldown: false,
+        };
+      }
+    } else {
+      // 1. Verificar last_stamped_at del miembro en ese negocio (Regla estricta de 24 horas = 86400000 ms para visitas sin nuevo ticket)
+      if (member.lastStampedAt) {
+        const elapsedMs = Date.now() - new Date(member.lastStampedAt).getTime();
+        if (!Number.isNaN(elapsedMs) && elapsedMs < 86400000) {
+          const remainingMs = 86400000 - elapsedMs;
+          return {
+            member: { ...member },
+            stampsAdded: 0,
+            rewardReady: member.stamps >= target,
+            cooldown: true,
+            remainingMs,
+          };
+        }
       }
     }
 
@@ -1830,7 +1892,8 @@ class MockApi implements ToqueApi {
       localName: pub.localName,
       count: 1,
       source: 'self' as const,
-      actorName: 'Visita en el local',
+      receiptId: data.receiptId,
+      actorName: data.receiptId ? 'Compra en el local (+1 sello)' : 'Visita en el local',
       createdAt: nowIso,
     };
 
@@ -2065,6 +2128,10 @@ class MockApi implements ToqueApi {
     };
 
     this.auditLogs.unshift(auditEntry);
+    this.persistClubData();
+    await this.syncMemberPassOnServer(member);
+    this.notifyHubListeners(member.localCode);
+    this.notifyHubListeners(member.businessId);
     return { member: { ...member }, auditEntry };
   }
 
@@ -2076,6 +2143,7 @@ class MockApi implements ToqueApi {
     member: ClubMember;
     auditEntry: AuditLogEntry;
   }> {
+    this.loadPersistedState();
     this.assertCanModifyAudit(data.reason);
 
     if (!data.delta || data.delta === 0) {
@@ -2087,8 +2155,43 @@ class MockApi implements ToqueApi {
       throw new Error('Cliente no encontrado.');
     }
 
+    const nowIso = new Date().toISOString();
     member.stamps = Math.max(0, (member.stamps || 0) + data.delta);
     member.points = member.stamps;
+    member.lastVisitAt = nowIso;
+    if (data.delta > 0) {
+      member.lastStampedAt = nowIso;
+    }
+
+    const local = this.locals.find((l) => l.id === member.localId) || this.locals[0];
+    member.stampHistory = [
+      {
+        id: `st-adj-${Date.now().toString(36)}`,
+        memberId: member.id,
+        localId: local?.id || 'local-1',
+        localName: local?.name || 'Sucursal Central',
+        count: data.delta,
+        source: 'adjustment',
+        actorName: this.currentUser?.name || this.businessProfile.ownerName || 'Panel del comercio',
+        createdAt: nowIso,
+      },
+      ...(member.stampHistory || []),
+    ];
+
+    this.stampLogs.unshift({
+      id: `log-${Date.now().toString(36)}`,
+      businessId: member.businessId || this.businessProfile.id,
+      memberId: member.id,
+      memberCode: member.barcodeToken || member.memberCode,
+      memberName: member.name || member.maskedEmail || 'Cliente',
+      memberEmail: member.maskedEmail || member.contact,
+      memberPhone: member.phone || '',
+      action: 'stamp_added',
+      stampsDelta: data.delta,
+      localName: local?.name || 'Sucursal Central',
+      staffEmail: this.currentUser?.email || this.businessProfile.email,
+      createdAt: nowIso,
+    });
 
     const actorRole = this.currentUser?.role === 'manager' ? 'Encargado' : 'Dueño';
 
@@ -2103,10 +2206,14 @@ class MockApi implements ToqueApi {
       reason: data.reason.trim(),
       actorName: this.currentUser?.name || this.businessProfile.ownerName,
       actorRole,
-      createdAt: new Date().toISOString(),
+      createdAt: nowIso,
     };
 
     this.auditLogs.unshift(auditEntry);
+    this.persistClubData();
+    await this.syncMemberPassOnServer(member);
+    this.notifyHubListeners(member.localCode);
+    this.notifyHubListeners(member.businessId);
     return { member: { ...member }, auditEntry };
   }
 
@@ -2803,23 +2910,33 @@ class MockApi implements ToqueApi {
     role: CartelRole;
     mode?: HubMode;
     reviewUrl?: string;
+    status?: Cartel['status'];
+    pin?: string;
+    activationPin?: string;
+    tileColor?: Cartel['tileColor'];
+    location?: string;
   }): Promise<Cartel> {
     const bizId = this.getActiveBusinessId();
     const code = (data.code || `BURGER0${this.carteles.length + 1}`).toUpperCase();
+    const pin = data.pin || data.activationPin || '102030';
     const created: Cartel = {
-      id: `cartel-${Date.now().toString(36)}`,
+      id: `cartel-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 5)}`,
       code,
-      pin: '102030',
+      pin,
+      activationPin: pin,
       businessId: bizId,
       name: data.name.trim(),
+      location: data.location || 'Mostrador principal',
       role: data.role,
-      status: 'active',
-      reviewUrl: data.reviewUrl || this.businessProfile.reviewUrl || 'https://maps.google.com',
+      status: data.status || 'active',
+      tileColor: data.tileColor || 'black',
+      reviewUrl: data.reviewUrl ?? this.businessProfile.reviewUrl ?? '',
       mode: data.mode || 'smart_hub',
+      scans: 0,
       scansCount: 0,
       reviewClicksCount: 0,
       createdAt: new Date().toISOString(),
-      activatedAt: new Date().toISOString(),
+      activatedAt: (data.status || 'active') === 'active' ? new Date().toISOString() : undefined,
     };
     this.carteles.push(created);
     return created;
@@ -2842,7 +2959,16 @@ class MockApi implements ToqueApi {
 
   async updateHubConfig(patch: Partial<HubConfig>): Promise<HubConfig> {
     this.hubConfig = { ...this.hubConfig, ...patch };
+    if (patch.googleReviewUrl !== undefined) {
+      this.businessProfile.reviewUrl = patch.googleReviewUrl;
+      for (const c of this.carteles) {
+        if (!c.businessId || c.businessId === this.businessProfile.id) {
+          c.reviewUrl = patch.googleReviewUrl;
+        }
+      }
+    }
     this.syncActiveBusinessStore();
+    this.persistClubData();
     this.notifyHubListeners();
     return { ...this.hubConfig };
   }
@@ -2974,15 +3100,11 @@ class MockApi implements ToqueApi {
     const { business, cartel, clubCfg, hubCfg } = this.resolveCartelAndBusiness(code);
     const lockdown = this.isUnpaidLockdownActive();
 
-    // Buscar comprobante activo del cartel si no expiró (o el último comprobante listo en los últimos 2 min)
+    // Buscar comprobante activo del cartel (incluso si acaban de pasar los 2 minutos, para mostrarlo con blur en el Hub)
     let activeReceipt: Receipt | null = null;
     if (cartel.activeReceiptId) {
       const found = this.receipts.find((r) => r.id === cartel.activeReceiptId);
-      if (
-        found &&
-        found.status === 'ready' &&
-        new Date(found.expiresAt).getTime() >= Date.now()
-      ) {
+      if (found && found.status !== 'cancelled') {
         activeReceipt = found;
       }
     }
@@ -2990,8 +3112,7 @@ class MockApi implements ToqueApi {
       const recentReady = this.receipts.find(
         (r) =>
           r.cartelCode.toUpperCase() === cartel.code.toUpperCase() &&
-          r.status === 'ready' &&
-          new Date(r.expiresAt).getTime() >= Date.now()
+          r.status !== 'cancelled'
       );
       if (recentReady) {
         activeReceipt = recentReady;
@@ -3031,7 +3152,7 @@ class MockApi implements ToqueApi {
       };
     }
 
-    // Buscar socio reconocido para este comercio
+    // Buscar socio reconocido para este comercio (incluyendo sincronización directa con clubMembers)
     let recognizedMember: ClubMember | null = null;
     if (this.recognizedClient?.email) {
       const targetEmail = this.recognizedClient.email.toLowerCase();
@@ -3042,6 +3163,20 @@ class MockApi implements ToqueApi {
               this.memberRawEmails[m.id]?.toLowerCase() === targetEmail) &&
             m.businessId === business.id
         ) || null;
+    }
+    if (!recognizedMember && typeof window !== 'undefined') {
+      try {
+        const savedRaw = window.localStorage.getItem(`toque_member_${business.id}`);
+        if (savedRaw) {
+          const parsed = JSON.parse(savedRaw);
+          if (parsed?.id) {
+            recognizedMember =
+              this.clubMembers.find((m) => m.id === parsed.id) || parsed;
+          }
+        }
+      } catch {
+        // ignore
+      }
     }
 
     return {
@@ -3417,6 +3552,41 @@ class MockApi implements ToqueApi {
     this.receipts.unshift(receipt);
     cartel.activeReceiptId = receipt.id;
     cartel.activeReceiptExpiresAt = receipt.expiresAt;
+
+    // Guardar automáticamente el comprobante emitido en la lista de tickets del usuario en Toquecitos
+    if (typeof window !== 'undefined') {
+      try {
+        const rawList = window.localStorage.getItem('toque_consumer_receipts_v1');
+        const list: ConsumerReceipt[] = rawList ? JSON.parse(rawList) : [];
+        if (!list.some((r) => r.id === receipt.id)) {
+          const consumerReceipt: ConsumerReceipt = {
+            id: receipt.id,
+            consumerId: 'local-consumer',
+            tenantId: receipt.businessId,
+            merchantName: receipt.businessName,
+            businessId: receipt.businessId,
+            cartelCode: receipt.cartelCode,
+            amountArs: receipt.total,
+            total: receipt.total,
+            discountSavedArs: 0,
+            category: 'Gastronomía',
+            receiptNote:
+              receipt.items && receipt.items.length > 0
+                ? receipt.items.map((it) => `${it.quantity}x ${it.name}`).join(' · ')
+                : 'Compra en caja',
+            currency: 'ARS',
+            items: receipt.items || [],
+            method: receipt.method,
+            createdAt: receipt.createdAt,
+            savedAt: nowIso,
+          };
+          const updated = [consumerReceipt, ...list].slice(0, 100);
+          window.localStorage.setItem('toque_consumer_receipts_v1', JSON.stringify(updated));
+        }
+      } catch {
+        // ignore
+      }
+    }
 
     this.notifySalesListeners();
     this.notifyHubListeners(cartel.code);

@@ -7,13 +7,14 @@ import { Skeleton } from '../../components/ui/Skeleton';
 import { useToast } from '../../components/ui/Toast';
 import { formatCurrency } from '../../lib/formatters';
 import { WalletPassCard } from '../../components/wallet/WalletPassCard';
+import { GoogleAddressPicker } from '../../components/maps/GoogleAddressPicker';
+import { BusinessHoursEditor } from '../../components/schedule/BusinessHoursEditor';
 import {
   Smartphone,
   ArrowUp,
   ArrowDown,
   Save,
   Star,
-  Award,
   Receipt,
   MapPin,
   Clock,
@@ -80,10 +81,28 @@ const WhatsAppLogo: React.FC<{ className?: string }> = ({ className = 'w-4 h-4' 
   </svg>
 );
 
-function ensureReceiptAlwaysFirst(blocks: HubConfig['blocks']): HubConfig['blocks'] {
-  const receiptBlock = blocks.find((b) => b.key === 'receipt') || { key: 'receipt', enabled: true };
-  const others = blocks.filter((b) => b.key !== 'receipt');
-  return [{ ...receiptBlock, key: 'receipt', enabled: true }, ...others];
+function normalizeHubBlocks(blocks: HubConfig['blocks']): HubConfig['blocks'] {
+  const defaultOrder: HubBlockKey[] = ['receipt', 'club', 'review', 'products', 'socials', 'details'];
+  const existingMap = new Map(blocks.map((b) => [b.key, b]));
+  const result: HubConfig['blocks'] = [];
+  for (const b of blocks) {
+    if (defaultOrder.includes(b.key)) {
+      result.push({ key: b.key, enabled: b.key === 'receipt' ? true : Boolean(b.enabled) });
+    }
+  }
+  for (const key of defaultOrder) {
+    if (!existingMap.has(key)) {
+      result.push({ key, enabled: true });
+    }
+  }
+  return result;
+}
+
+function isValidReviewLink(url?: string): boolean {
+  if (!url) return false;
+  const t = url.trim();
+  if (!t || t === 'https://maps.google.com' || t === 'https://maps.google.com/') return false;
+  return true;
 }
 
 export const HubEditorView: React.FC = () => {
@@ -103,8 +122,11 @@ export const HubEditorView: React.FC = () => {
       .then(([data, biz, clubCfg, carteles]) => {
         const firstCode = carteles?.[0]?.code || 'BURGER01';
         setActiveCartelCode(firstCode);
+        const cleanGoogleUrl =
+          data.googleReviewUrl === 'https://maps.google.com' ? '' : data.googleReviewUrl || '';
         setConfig({
           ...data,
+          googleReviewUrl: cleanGoogleUrl,
           businessName: data.businessName || biz?.name || clubCfg?.organizationName || 'La Burger',
           rewardText:
             data.rewardText ||
@@ -116,7 +138,7 @@ export const HubEditorView: React.FC = () => {
           colorPreset: data.colorPreset || clubCfg?.colorPreset || 'dark',
           customColor: data.customColor || clubCfg?.customColor,
           logoUrl: data.logoUrl || clubCfg?.logoUrl,
-          blocks: ensureReceiptAlwaysFirst(data.blocks),
+          blocks: normalizeHubBlocks(data.blocks),
         });
       })
       .finally(() => setIsLoading(false));
@@ -125,38 +147,39 @@ export const HubEditorView: React.FC = () => {
   const handleToggleBlock = (key: HubBlockKey) => {
     if (!config) return;
     if (key === 'receipt') return;
-    const nextBlocks = ensureReceiptAlwaysFirst(
+    const nextBlocks = normalizeHubBlocks(
       config.blocks.map((b) => (b.key === key ? { ...b, enabled: !b.enabled } : b))
     );
     setConfig({ ...config, blocks: nextBlocks });
+    api.updateHubConfig({ ...config, blocks: nextBlocks }).catch(() => {});
   };
 
   const handleMoveBlock = (index: number, direction: -1 | 1) => {
     if (!config) return;
-    const ordered = ensureReceiptAlwaysFirst(config.blocks);
-    if (index === 0) return;
+    const ordered = normalizeHubBlocks(config.blocks);
     const targetIndex = index + direction;
-    if (targetIndex < 1 || targetIndex >= ordered.length) return;
+    if (targetIndex < 0 || targetIndex >= ordered.length) return;
 
     const nextBlocks = [...ordered];
     const temp = nextBlocks[index];
     nextBlocks[index] = nextBlocks[targetIndex];
     nextBlocks[targetIndex] = temp;
-    setConfig({ ...config, blocks: ensureReceiptAlwaysFirst(nextBlocks) });
+    setConfig({ ...config, blocks: nextBlocks });
+    api.updateHubConfig({ ...config, blocks: nextBlocks }).catch(() => {});
   };
 
   const handleSave = async () => {
     if (!config) return;
     setIsSaving(true);
     try {
-      const normalizedBlocks = ensureReceiptAlwaysFirst(config.blocks);
+      const normalizedBlocks = normalizeHubBlocks(config.blocks);
       const updated = await api.updateHubConfig({
         ...config,
         blocks: normalizedBlocks,
       });
       setConfig({
         ...updated,
-        blocks: ensureReceiptAlwaysFirst(updated.blocks),
+        blocks: normalizeHubBlocks(updated.blocks),
       });
       showToast('Configuración del Hub guardada', 'success');
     } catch {
@@ -183,7 +206,7 @@ export const HubEditorView: React.FC = () => {
     );
   }
 
-  const orderedBlocks = ensureReceiptAlwaysFirst(config.blocks);
+  const orderedBlocks = normalizeHubBlocks(config.blocks);
   const isPlanPaid = Boolean(config.planPaid);
   const waMePreview = buildWhatsAppWaMeLink(config.socials.whatsapp);
   const featuredProducts = config.products.filter((p) => p.featuredInHub !== false);
@@ -261,8 +284,8 @@ export const HubEditorView: React.FC = () => {
             <div className="space-y-2.5">
               {orderedBlocks.map((block, index) => {
                 const isReceipt = block.key === 'receipt';
-                const canMoveUp = !isReceipt && index > 1;
-                const canMoveDown = !isReceipt && index < orderedBlocks.length - 1;
+                const canMoveUp = index > 0;
+                const canMoveDown = index < orderedBlocks.length - 1;
 
                 return (
                   <div
@@ -288,28 +311,26 @@ export const HubEditorView: React.FC = () => {
                       </span>
                     </div>
 
-                    {!isReceipt && (
-                      <div className="flex items-center gap-1">
-                        <button
-                          type="button"
-                          disabled={!canMoveUp}
-                          onClick={() => handleMoveBlock(index, -1)}
-                          title="Subir bloque"
-                          className="p-1.5 rounded-lg hover:bg-[#242429] text-[#a1a1aa] hover:text-[#f1f1ee] disabled:opacity-25 cursor-pointer"
-                        >
-                          <ArrowUp className="w-4 h-4" />
-                        </button>
-                        <button
-                          type="button"
-                          disabled={!canMoveDown}
-                          onClick={() => handleMoveBlock(index, 1)}
-                          title="Bajar bloque"
-                          className="p-1.5 rounded-lg hover:bg-[#242429] text-[#a1a1aa] hover:text-[#f1f1ee] disabled:opacity-25 cursor-pointer"
-                        >
-                          <ArrowDown className="w-4 h-4" />
-                        </button>
-                      </div>
-                    )}
+                    <div className="flex items-center gap-1">
+                      <button
+                        type="button"
+                        disabled={!canMoveUp}
+                        onClick={() => handleMoveBlock(index, -1)}
+                        title="Subir bloque"
+                        className="p-1.5 rounded-lg hover:bg-[#242429] text-[#a1a1aa] hover:text-[#f1f1ee] disabled:opacity-25 cursor-pointer"
+                      >
+                        <ArrowUp className="w-4 h-4" />
+                      </button>
+                      <button
+                        type="button"
+                        disabled={!canMoveDown}
+                        onClick={() => handleMoveBlock(index, 1)}
+                        title="Bajar bloque"
+                        className="p-1.5 rounded-lg hover:bg-[#242429] text-[#a1a1aa] hover:text-[#f1f1ee] disabled:opacity-25 cursor-pointer"
+                      >
+                        <ArrowDown className="w-4 h-4" />
+                      </button>
+                    </div>
                   </div>
                 );
               })}
@@ -474,47 +495,50 @@ export const HubEditorView: React.FC = () => {
             </Link>
           </Card>
 
-          {/* 5. Horarios y Dirección */}
-          <Card className="p-6">
-            <h2 className="font-bold text-base text-[#f1f1ee] mb-4">Datos del Local</h2>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          {/* 5. Horarios y Dirección con Google Maps y Editor de Turnos / Cortes */}
+          <Card className="p-6 space-y-6">
+            <div>
+              <h2 className="font-bold text-base text-[#f1f1ee]">Datos del local</h2>
+              <p className="text-xs text-[#a1a1aa] mt-0.5">
+                Seleccioná la ubicación exacta con Google Maps y configurá tus horarios con cortes o días específicos.
+              </p>
+            </div>
+
+            <div className="space-y-6">
               <div>
-                <label className="block text-[11px] font-semibold text-[#a1a1aa] mb-1.5">
-                  Dirección
+                <label className="block text-xs font-semibold text-[#f1f1ee] mb-2">
+                  Dirección del local (con buscador y mapa de Google Maps)
                 </label>
-                <input
-                  type="text"
+                <GoogleAddressPicker
                   value={config.details.address || ''}
-                  onChange={(e) =>
+                  onChange={(address) =>
                     setConfig({
                       ...config,
-                      details: { ...config.details, address: e.target.value },
+                      details: { ...config.details, address },
                     })
                   }
-                  className="w-full bg-[#161619] border border-[#28282a] rounded-xl px-3.5 py-2.5 text-sm text-[#f1f1ee] focus:outline-none focus:border-[#bec8ff]"
                 />
               </div>
-              <div>
-                <label className="block text-[11px] font-semibold text-[#a1a1aa] mb-1.5">
-                  Horarios de atención
+
+              <div className="pt-2 border-t border-[#28282a]">
+                <label className="block text-xs font-semibold text-[#f1f1ee] mb-2">
+                  Horarios de atención (intervalos numéricos y cortes durante el día)
                 </label>
-                <input
-                  type="text"
+                <BusinessHoursEditor
                   value={config.details.hours || ''}
-                  onChange={(e) =>
+                  onChange={(hours) =>
                     setConfig({
                       ...config,
-                      details: { ...config.details, hours: e.target.value },
+                      details: { ...config.details, hours },
                     })
                   }
-                  className="w-full bg-[#161619] border border-[#28282a] rounded-xl px-3.5 py-2.5 text-sm text-[#f1f1ee] focus:outline-none focus:border-[#bec8ff]"
                 />
               </div>
             </div>
           </Card>
         </div>
 
-        {/* Columna Derecha: Vista Previa en Vivo (Fondo Blanco + Botones Negros) */}
+        {/* Columna Derecha: Vista Previa en Vivo respetando el orden configurado */}
         <div className="lg:col-span-5 lg:sticky lg:top-24">
           <div className="rounded-[32px] p-5 bg-[#ffffff] border-2 border-black/15 shadow-2xl max-w-xs mx-auto text-[#0c0c0c] space-y-3.5">
             <div className="flex items-center justify-between text-[11px] text-[#52525b] px-1">
@@ -541,161 +565,169 @@ export const HubEditorView: React.FC = () => {
               </div>
             </div>
 
-            {/* 1. COMPROBANTE DE COMPRA (Fijo arriba) */}
-            <div className="p-3.5 rounded-2xl bg-[#f6f6f3] border border-black/10 space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="text-[11px] font-semibold text-[#1f8a4c] flex items-center gap-1.5">
-                  <span className="w-1.5 h-1.5 rounded-full bg-[#2fb36a]" />
-                  <Receipt className="w-3 h-3" /> Comprobante de compra
-                </span>
-                <span className="text-[10px] text-[#52525b]">Recién emitido</span>
-              </div>
-              <div className="flex justify-between items-center pt-1">
-                <span className="text-xs text-[#0c0c0c]">Total cobrado</span>
-                <span className="font-extrabold text-xs font-mono bg-[#0c0c0c] text-[#bec8ff] px-2 py-0.5 rounded-md">
-                  $0
-                </span>
-              </div>
-            </div>
-
-            {/* 2. RESTO DE BLOQUES (Solo visibles si el plan está pago) */}
-            {isPlanPaid &&
-              orderedBlocks
-                .filter((b) => b.key !== 'receipt' && b.enabled)
-                .map((b) => {
-                  if (b.key === 'review') {
-                    return (
-                      <div
-                        key="review"
-                        className="p-3 rounded-full bg-[#0c0c0c] text-[#f1f1ee] text-center font-semibold text-xs flex items-center justify-center gap-1.5 shadow-sm"
-                      >
-                        <Star className="w-3.5 h-3.5 fill-[#bec8ff] text-[#bec8ff]" />
-                        Botón de Google Maps
+            {/* Renderizado dinámico según el orden exacto de orderedBlocks */}
+            {orderedBlocks
+              .filter((b) => b.enabled && (isPlanPaid || b.key === 'receipt'))
+              .map((b) => {
+                if (b.key === 'receipt') {
+                  return (
+                    <div
+                      key="receipt"
+                      className="p-3.5 rounded-2xl bg-[#f6f6f3] border border-black/10 space-y-2"
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="text-[11px] font-semibold text-[#1f8a4c] flex items-center gap-1.5">
+                          <span className="w-1.5 h-1.5 rounded-full bg-[#2fb36a]" />
+                          <Receipt className="w-3 h-3" /> Comprobante completo
+                        </span>
+                        <span className="text-[10px] text-[#52525b]">Recién emitido</span>
                       </div>
-                    );
-                  }
-                  if (b.key === 'club') {
-                    return (
-                      <div key="club" className="pt-1">
-                        <WalletPassCard
-                          businessName={config.businessName || 'Mi Comercio'}
-                          memberName="Socio"
-                          stamps={1}
-                          stampsRequired={config.stampsRequired || 10}
-                          rewardText={config.rewardText || 'Beneficio al completar tus sellos'}
-                          barcodeToken="token-vista-previa-segura-01"
-                          colorPreset={config.colorPreset || 'dark'}
-                          customColor={config.customColor}
-                          logoUrl={config.logoUrl}
-                        />
+                      <div className="flex justify-between items-center pt-1">
+                        <span className="text-xs text-[#0c0c0c]">Ticket troquelado en vivo</span>
+                        <span className="font-extrabold text-xs font-mono bg-[#0c0c0c] text-[#bec8ff] px-2 py-0.5 rounded-md">
+                          Activo
+                        </span>
                       </div>
-                    );
-                  }
-                  if (b.key === 'products' && featuredProducts.length > 0) {
-                    return (
-                      <div
-                        key="products"
-                        className="p-3.5 rounded-2xl bg-[#f6f6f3] border border-black/10 space-y-2"
-                      >
-                        <p className="text-xs font-bold text-[#52525b] flex items-center gap-1">
-                          <ShoppingBag className="w-3 h-3" /> Catálogo
-                        </p>
-                        {featuredProducts.slice(0, 3).map((p) => (
-                          <div key={p.id} className="flex justify-between items-center gap-2 text-xs">
-                            <div className="flex items-center gap-2 min-w-0">
-                              {p.imageUrl && (
-                                <img
-                                  src={p.imageUrl}
-                                  alt={p.title}
-                                  className="w-7 h-7 rounded-lg object-cover border border-black/10 shrink-0"
-                                />
-                              )}
-                              <span className="text-[#0c0c0c] truncate">{p.title}</span>
-                            </div>
-                            {p.price !== undefined && (
-                              <span className="font-mono font-bold text-[#0c0c0c] shrink-0">
-                                {formatCurrency(p.price)}
-                              </span>
+                    </div>
+                  );
+                }
+                if (b.key === 'review') {
+                  if (!isValidReviewLink(config.googleReviewUrl)) return null;
+                  return (
+                    <div
+                      key="review"
+                      className="p-3 rounded-full bg-[#0c0c0c] text-[#f1f1ee] text-center font-semibold text-xs flex items-center justify-center gap-1.5 shadow-sm"
+                    >
+                      <Star className="w-3.5 h-3.5 fill-[#bec8ff] text-[#bec8ff]" />
+                      Botón de Google Maps
+                    </div>
+                  );
+                }
+                if (b.key === 'club') {
+                  return (
+                    <div key="club" className="pt-1">
+                      <WalletPassCard
+                        businessName={config.businessName || 'Mi Comercio'}
+                        memberName="Socio"
+                        stamps={1}
+                        stampsRequired={config.stampsRequired || 10}
+                        rewardText={config.rewardText || 'Beneficio al completar tus sellos'}
+                        barcodeToken="token-vista-previa-segura-01"
+                        colorPreset={config.colorPreset || 'dark'}
+                        customColor={config.customColor}
+                        logoUrl={config.logoUrl}
+                      />
+                    </div>
+                  );
+                }
+                if (b.key === 'products' && featuredProducts.length > 0) {
+                  return (
+                    <div
+                      key="products"
+                      className="p-3.5 rounded-2xl bg-[#f6f6f3] border border-black/10 space-y-2"
+                    >
+                      <p className="text-xs font-bold text-[#52525b] flex items-center gap-1">
+                        <ShoppingBag className="w-3 h-3" /> Catálogo
+                      </p>
+                      {featuredProducts.slice(0, 3).map((p) => (
+                        <div key={p.id} className="flex justify-between items-center gap-2 text-xs">
+                          <div className="flex items-center gap-2 min-w-0">
+                            {p.imageUrl && (
+                              <img
+                                src={p.imageUrl}
+                                alt={p.title}
+                                className="w-7 h-7 rounded-lg object-cover border border-black/10 shrink-0"
+                              />
                             )}
+                            <span className="text-[#0c0c0c] truncate">{p.title}</span>
                           </div>
-                        ))}
-                      </div>
-                    );
-                  }
-                  if (b.key === 'socials') {
-                    const hasIg = Boolean(config.socials.instagram?.trim());
-                    const hasTt = Boolean(config.socials.tiktok?.trim());
-                    const hasWa = Boolean(config.socials.whatsapp?.trim());
-                    const hasWeb = Boolean(config.socials.web?.trim());
+                          {p.price !== undefined && (
+                            <span className="font-mono font-bold text-[#0c0c0c] shrink-0">
+                              {formatCurrency(p.price)}
+                            </span>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  );
+                }
+                if (b.key === 'socials') {
+                  const hasIg = Boolean(config.socials.instagram?.trim());
+                  const hasTt = Boolean(config.socials.tiktok?.trim());
+                  const hasWa = Boolean(config.socials.whatsapp?.trim());
+                  const hasWeb = Boolean(config.socials.web?.trim());
 
-                    if (!hasIg && !hasTt && !hasWa && !hasWeb) return null;
+                  if (!hasIg && !hasTt && !hasWa && !hasWeb) return null;
 
-                    return (
-                      <div key="socials" className="grid grid-cols-2 gap-2">
-                        {hasIg && (
-                          <a
-                            href={normalizeSocialUrl(config.socials.instagram, 'instagram')}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="p-2.5 rounded-full bg-[#0c0c0c] text-[#f1f1ee] text-center text-xs font-semibold flex items-center justify-center gap-1.5"
-                          >
-                            <InstagramLogo className="w-3.5 h-3.5 text-[#bec8ff]" /> Instagram
-                          </a>
-                        )}
-                        {hasTt && (
-                          <a
-                            href={normalizeSocialUrl(config.socials.tiktok, 'tiktok')}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="p-2.5 rounded-full bg-[#0c0c0c] text-[#f1f1ee] text-center text-xs font-semibold flex items-center justify-center gap-1.5"
-                          >
-                            <TikTokLogo className="w-3.5 h-3.5 text-[#bec8ff]" /> TikTok
-                          </a>
-                        )}
-                        {hasWa && (
-                          <a
-                            href={buildWhatsAppWaMeLink(config.socials.whatsapp)}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="p-2.5 rounded-full bg-[#0c0c0c] text-[#f1f1ee] text-center text-xs font-semibold flex items-center justify-center gap-1.5"
-                          >
-                            <WhatsAppLogo className="w-3.5 h-3.5 text-[#2fb36a]" /> WhatsApp
-                          </a>
-                        )}
-                        {hasWeb && (
-                          <a
-                            href={normalizeSocialUrl(config.socials.web)}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="p-2.5 rounded-full bg-[#0c0c0c] text-[#f1f1ee] text-center text-xs font-semibold flex items-center justify-center gap-1.5"
-                          >
-                            <Globe className="w-3.5 h-3.5 text-[#bec8ff]" /> Web
-                          </a>
-                        )}
-                      </div>
-                    );
-                  }
-                  if (b.key === 'details') {
-                    return (
-                      <div
-                        key="details"
-                        className="p-3.5 rounded-2xl bg-[#f6f6f3] border border-black/10 space-y-1.5 text-[11px] text-[#52525b]"
-                      >
-                        {config.details.address && (
-                          <p className="flex items-center gap-1.5">
-                            <MapPin className="w-3.5 h-3.5 text-[#0c0c0c]" /> {config.details.address}
-                          </p>
-                        )}
-                        {config.details.hours && (
-                          <p className="flex items-center gap-1.5">
-                            <Clock className="w-3.5 h-3.5 text-[#0c0c0c]" /> {config.details.hours}
-                          </p>
-                        )}
-                      </div>
-                    );
-                  }
-                  return null;
-                })}
+                  return (
+                    <div key="socials" className="grid grid-cols-2 gap-2">
+                      {hasIg && (
+                        <a
+                          href={normalizeSocialUrl(config.socials.instagram, 'instagram')}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="p-2.5 rounded-full bg-[#0c0c0c] text-[#f1f1ee] text-center text-xs font-semibold flex items-center justify-center gap-1.5"
+                        >
+                          <InstagramLogo className="w-3.5 h-3.5 text-[#bec8ff]" /> Instagram
+                        </a>
+                      )}
+                      {hasTt && (
+                        <a
+                          href={normalizeSocialUrl(config.socials.tiktok, 'tiktok')}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="p-2.5 rounded-full bg-[#0c0c0c] text-[#f1f1ee] text-center text-xs font-semibold flex items-center justify-center gap-1.5"
+                        >
+                          <TikTokLogo className="w-3.5 h-3.5 text-[#bec8ff]" /> TikTok
+                        </a>
+                      )}
+                      {hasWa && (
+                        <a
+                          href={buildWhatsAppWaMeLink(config.socials.whatsapp)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="p-2.5 rounded-full bg-[#0c0c0c] text-[#f1f1ee] text-center text-xs font-semibold flex items-center justify-center gap-1.5"
+                        >
+                          <WhatsAppLogo className="w-3.5 h-3.5 text-[#2fb36a]" /> WhatsApp
+                        </a>
+                      )}
+                      {hasWeb && (
+                        <a
+                          href={normalizeSocialUrl(config.socials.web)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="p-2.5 rounded-full bg-[#0c0c0c] text-[#f1f1ee] text-center text-xs font-semibold flex items-center justify-center gap-1.5"
+                        >
+                          <Globe className="w-3.5 h-3.5 text-[#bec8ff]" /> Web
+                        </a>
+                      )}
+                    </div>
+                  );
+                }
+                if (b.key === 'details') {
+                  if (!config.details.address?.trim() && !config.details.hours?.trim()) return null;
+                  return (
+                    <div
+                      key="details"
+                      className="p-3.5 rounded-2xl bg-[#f6f6f3] border border-black/10 space-y-1.5 text-[11px] text-[#52525b]"
+                    >
+                      {config.details.address?.trim() && (
+                        <p className="flex items-center gap-1.5">
+                          <MapPin className="w-3.5 h-3.5 text-[#0c0c0c] shrink-0" />{' '}
+                          <span>{config.details.address}</span>
+                        </p>
+                      )}
+                      {config.details.hours?.trim() && (
+                        <p className="flex items-center gap-1.5">
+                          <Clock className="w-3.5 h-3.5 text-[#0c0c0c] shrink-0" />{' '}
+                          <span>{config.details.hours}</span>
+                        </p>
+                      )}
+                    </div>
+                  );
+                }
+                return null;
+              })}
           </div>
         </div>
       </div>

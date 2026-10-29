@@ -48,6 +48,8 @@ export function getOrCreateLocalConsumerUser(): ConsumerUser {
   return newUser;
 }
 
+export const getLocalConsumerUser = getOrCreateLocalConsumerUser;
+
 export function saveLocalConsumerUser(user: ConsumerUser): ConsumerUser {
   try {
     localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(user));
@@ -90,6 +92,7 @@ export function addLocalConsumerReceipt(
     discountSavedArs: receiptInput.discountSavedArs,
     category: receiptInput.category || 'Gastronomía',
     receiptNote: receiptInput.receiptNote,
+    items: receiptInput.items,
     createdAt: receiptInput.createdAt || new Date().toISOString(),
   };
 

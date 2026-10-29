@@ -140,6 +140,7 @@ export interface ToqueApi {
     localCode: string;
     memberId: string;
     rotatingToken?: string;
+    receiptId?: string;
   }): Promise<{
     member: ClubMember;
     stampsAdded: number;
@@ -333,6 +334,11 @@ export interface ToqueApi {
     role: CartelRole;
     mode?: HubMode;
     reviewUrl?: string;
+    status?: Cartel['status'];
+    pin?: string;
+    activationPin?: string;
+    tileColor?: Cartel['tileColor'];
+    location?: string;
   }): Promise<Cartel>;
 
   updateCartel(

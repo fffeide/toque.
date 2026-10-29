@@ -99,6 +99,15 @@ const AccountSettingsView = lazy(() =>
 const SuperAdminView = lazy(() =>
   import('./features/admin/SuperAdminView').then((m) => ({ default: m.SuperAdminView }))
 );
+const ReviewsStatsView = lazy(() =>
+  import('./features/panel/ReviewsStatsView').then((m) => ({ default: m.ReviewsStatsView }))
+);
+const ManufacturerView = lazy(() =>
+  import('./features/manufacturer/ManufacturerView').then((m) => ({ default: m.ManufacturerView }))
+);
+const NotFoundView = lazy(() =>
+  import('./features/public/NotFoundView').then((m) => ({ default: m.NotFoundView }))
+);
 
 const PageLoader: React.FC = () => (
   <div className="min-h-screen bg-[#0C0C0E] flex items-center justify-center p-6">
@@ -174,9 +183,10 @@ export const App: React.FC = () => {
                     <Route path="/ingresar" element={<LoginView />} />
                     <Route path="/registro" element={<RegisterView />} />
 
-                    {/* Activación de Cartel Físico */}
+                    {/* Activación de Cartel Físico y Panel de Fabricante */}
                     <Route path="/activar" element={<ActivateCartelView />} />
                     <Route path="/activar/:code" element={<ActivateCartelView />} />
+                    <Route path="/fabricante" element={<ManufacturerView />} />
 
                     {/* Hub Público del Cliente + Tarjeta de Sellos (QR / NFC / Slug) */}
                     <Route path="/u/:code" element={<PublicHubView />} />
@@ -285,6 +295,14 @@ export const App: React.FC = () => {
                         }
                       />
                       <Route
+                        path="resenas"
+                        element={
+                          <RoleRouteGuard allowedRoles={['owner', 'manager', 'superadmin']}>
+                            <ReviewsStatsView />
+                          </RoleRouteGuard>
+                        }
+                      />
+                      <Route
                         path="canales"
                         element={
                           <RoleRouteGuard allowedRoles={['owner', 'manager', 'superadmin']}>
@@ -341,8 +359,8 @@ export const App: React.FC = () => {
                       }
                     />
 
-                    {/* Fallback */}
-                    <Route path="*" element={<Navigate to="/" replace />} />
+                    {/* Pantalla 404 */}
+                    <Route path="*" element={<NotFoundView />} />
                   </>
                 )}
               </Routes>

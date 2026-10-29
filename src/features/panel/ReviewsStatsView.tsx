@@ -40,30 +40,42 @@ export const ReviewsStatsView: React.FC = () => {
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <span className="block text-[11px] uppercase tracking-wider text-[#a1a1aa] font-semibold mb-1">
-            MÉTRICAS 100% REALES · CERO DATOS SIMULADOS
+          <span className="block text-xs text-[#9E9B95] font-medium mb-1">
+            Métricas en vivo de tus carteles físicos
           </span>
           <h1 className="text-2xl font-bold text-[#f1f1ee] tracking-tight">
             Reseñas de Google Maps
           </h1>
           <p className="text-sm text-[#a1a1aa] mt-0.5">
-            Seguimiento real de escaneos y clics al botón de calificación desde tus carteles NFC + QR.
+            Seguimiento de escaneos y clics al botón de calificación desde tus carteles NFC y QR.
           </p>
         </div>
-        <Link to="/panel/hub">
-          <Button variant="outline" size="sm">
-            Configurar link de Google Maps
-          </Button>
-        </Link>
+        <div className="flex flex-wrap items-center gap-2">
+          <Link to="/panel/carteles">
+            <Button variant="outline" size="sm">
+              Mis carteles QR / NFC
+            </Button>
+          </Link>
+          <Link to="/fabricante">
+            <Button variant="outline" size="sm">
+              Panel de fabricante
+            </Button>
+          </Link>
+          <Link to="/panel/hub">
+            <Button variant="primary" size="sm">
+              Configurar link de Google Maps
+            </Button>
+          </Link>
+        </div>
       </div>
 
       {/* KPIs Reales */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <Card>
-          <span className="text-[11px] font-semibold text-[#a1a1aa] uppercase tracking-wider">
-            Clics reales a "Dejar reseña"
+          <span className="text-xs font-semibold text-[#a1a1aa]">
+            Clics a "Dejar reseña"
           </span>
-          <p className="text-3xl font-bold font-mono text-[#bec8ff] mt-2">
+          <p className="text-3xl font-bold font-mono text-[#D95B26] mt-2">
             {summary.reviewButtonClicks}
           </p>
           <p className="text-xs text-[#a1a1aa] mt-1">
@@ -72,7 +84,7 @@ export const ReviewsStatsView: React.FC = () => {
         </Card>
 
         <Card>
-          <span className="text-[11px] font-semibold text-[#a1a1aa] uppercase tracking-wider">
+          <span className="text-xs font-semibold text-[#a1a1aa]">
             Escaneos totales QR / NFC
           </span>
           <p className="text-3xl font-bold font-mono text-[#f1f1ee] mt-2">
@@ -84,14 +96,14 @@ export const ReviewsStatsView: React.FC = () => {
         </Card>
 
         <Card>
-          <span className="text-[11px] font-semibold text-[#a1a1aa] uppercase tracking-wider">
-            Conversión Escaneo → Reseña
+          <span className="text-xs font-semibold text-[#a1a1aa]">
+            Conversión de escaneo a reseña
           </span>
           <p className="text-3xl font-bold font-mono text-[#34d399] mt-2">
             {conversionRate}%
           </p>
           <p className="text-xs text-[#a1a1aa] mt-1">
-            Porcentaje real de visitantes que tocaron calificar
+            Porcentaje de visitantes que tocaron calificar
           </p>
         </Card>
       </div>
@@ -101,10 +113,10 @@ export const ReviewsStatsView: React.FC = () => {
         <div className="flex items-center justify-between mb-4">
           <div>
             <h2 className="text-base font-bold text-[#f1f1ee]">
-              Rendimiento real por cartel
+              Rendimiento por cartel
             </h2>
             <p className="text-xs text-[#a1a1aa]">
-              Cada vez que un cliente abre el Hub o toca el botón de Google Maps se actualiza en Firestore.
+              Cada vez que un cliente apoya su celular o escanea el QR y toca calificar en Google Maps se suma acá al instante.
             </p>
           </div>
         </div>

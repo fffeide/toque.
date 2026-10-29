@@ -8,6 +8,7 @@ import { BrandLogo } from '../../components/ui/Avatar';
 import { RealQrCode } from '../../components/ui/RealQrCode';
 import { getPlanLimits } from '../../config/pricing';
 import { useToast } from '../../components/ui/Toast';
+import { GoogleAddressPicker } from '../../components/maps/GoogleAddressPicker';
 import QRCode from 'qrcode';
 import {
   MapPin,
@@ -16,12 +17,13 @@ import {
   Copy,
   Check,
   Plus,
-  Navigation,
   Store,
   Wifi,
   Smartphone,
   ShoppingBag,
   ExternalLink,
+  QrCode as QrCodeIcon,
+  Factory,
 } from 'lucide-react';
 
 // Ícono vectorial de Ondas NFC Contactless para el Cartel Imprimible
@@ -369,6 +371,20 @@ export const ClubLocalsView: React.FC = () => {
 
           <div className="flex flex-wrap items-center gap-2">
             <Link
+              to="/panel/carteles"
+              className="px-3 py-2 rounded-xl bg-[#141418] hover:bg-[#1C1C22] border border-[#282830] text-xs font-bold text-[#F4F4F6] flex items-center gap-1.5 transition-colors"
+            >
+              <QrCodeIcon className="w-3.5 h-3.5 text-[#D95B26]" />
+              <span>Placas QR / NFC</span>
+            </Link>
+            <Link
+              to="/fabricante"
+              className="px-3 py-2 rounded-xl bg-[#141418] hover:bg-[#1C1C22] border border-[#282830] text-xs font-bold text-[#F4F4F6] flex items-center gap-1.5 transition-colors"
+            >
+              <Factory className="w-3.5 h-3.5 text-amber-400" />
+              <span>Fabricante</span>
+            </Link>
+            <Link
               to="/panel/hub"
               className="px-3 py-2 rounded-xl bg-[#141418] hover:bg-[#1C1C22] border border-[#282830] text-xs font-bold text-[#F4F4F6] flex items-center gap-1.5 transition-colors"
             >
@@ -400,12 +416,12 @@ export const ClubLocalsView: React.FC = () => {
           </div>
         </div>
 
-        {/* Formulario de Nueva Sucursal */}
+        {/* Formulario de Nueva Sucursal con Google Maps Picker */}
         {showNewForm && (
           <Card className="p-5 border-[#D95B26]/40">
             <form onSubmit={handleCreateLocal} className="space-y-4">
               <h2 className="text-sm font-bold text-[#F4F4F6]">Agregar sucursal y cartel NFC/QR</h2>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-4">
                 <div>
                   <label className="block text-xs font-semibold text-[#F4F4F6] mb-1">
                     Nombre de la sucursal
@@ -420,37 +436,31 @@ export const ClubLocalsView: React.FC = () => {
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-[#F4F4F6] mb-1">
-                    Dirección física
+                  <label className="block text-xs font-semibold text-[#F4F4F6] mb-1.5">
+                    Dirección física (buscador integrado con Google Maps)
                   </label>
-                  <input
-                    type="text"
-                    required
+                  <GoogleAddressPicker
                     value={address}
-                    onChange={(e) => setAddress(e.target.value)}
-                    placeholder="Ej: Av. Corrientes 1234, CABA"
-                    className="w-full h-10 px-3.5 rounded-xl border border-[#282830] bg-[#0C0C0E] text-[#F4F4F6] text-xs focus:outline-none focus:border-[#D95B26]"
+                    onChange={(addr, coords) => {
+                      setAddress(addr);
+                      if (coords) {
+                        setLat(Number(coords.lat.toFixed(5)));
+                        setLng(Number(coords.lng.toFixed(5)));
+                        setGeoStatus('Coordenadas de Google Maps guardadas.');
+                      }
+                    }}
                   />
+                  {geoStatus && <p className="text-xs font-bold text-[#2FB36A] mt-1.5">{geoStatus}</p>}
                 </div>
               </div>
 
-              <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
-                <div className="space-y-1">
-                  <Button type="button" variant="secondary" onClick={handleUseCurrentLocation}>
-                    <Navigation className="w-3.5 h-3.5 mr-1.5" />
-                    Guardar coordenadas GPS (opcional)
-                  </Button>
-                  {geoStatus && <p className="text-xs font-bold text-[#2FB36A]">{geoStatus}</p>}
-                </div>
-
-                <div className="flex items-center gap-2">
-                  <Button type="button" variant="secondary" onClick={() => setShowNewForm(false)}>
-                    Cancelar
-                  </Button>
-                  <Button type="submit" disabled={saving}>
-                    {saving ? 'Creando...' : 'Crear sucursal'}
-                  </Button>
-                </div>
+              <div className="flex items-center justify-end gap-2 pt-2">
+                <Button type="button" variant="secondary" onClick={() => setShowNewForm(false)}>
+                  Cancelar
+                </Button>
+                <Button type="submit" disabled={saving}>
+                  {saving ? 'Creando...' : 'Crear sucursal'}
+                </Button>
               </div>
             </form>
           </Card>

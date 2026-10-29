@@ -1,12 +1,13 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { api } from '../../api';
-import { PublicHub, ClubMember, WalletPassResponse } from '../../api/types';
+import { PublicHub, ClubMember, WalletPassResponse, Receipt, HubBlockKey } from '../../api/types';
 import { useToast } from '../../components/ui/Toast';
 import { Skeleton } from '../../components/ui/Skeleton';
 import { BrandLogo } from '../../components/ui/Avatar';
-import { RealQrCode, RealBarcode128 } from '../../components/ui/RealQrCode';
 import { WalletPassCard } from '../../components/wallet/WalletPassCard';
+import { DieCutTicket } from '../../components/ticket/DieCutTicket';
+import { detectWalletOS, getWalletButtonLabel } from '../../lib/walletOs';
 import { formatARS } from '../../lib/format';
 import {
   loadConsumerVault,
@@ -29,7 +30,6 @@ import {
   Phone,
   ExternalLink,
   CheckCircle2,
-  ArrowRight,
   ShoppingBag,
   Wallet,
   Check,
@@ -57,6 +57,21 @@ const MONTHS = [
   { value: 12, label: 'Diciembre' },
 ];
 
+function isConfiguredReviewUrl(url?: string): boolean {
+  if (!url) return false;
+  const trimmed = url.trim();
+  if (!trimmed) return false;
+  // Evitar mostrar el bloque si tiene la URL genérica por defecto sin enlace real del comercio
+  if (
+    trimmed === 'https://maps.google.com' ||
+    trimmed === 'https://maps.google.com/' ||
+    trimmed === 'http://maps.google.com'
+  ) {
+    return false;
+  }
+  return true;
+}
+
 export const PublicHubView: React.FC = () => {
   const { code } = useParams<{ code: string }>();
   const navigate = useNavigate();
@@ -67,6 +82,11 @@ export const PublicHubView: React.FC = () => {
   const [hub, setHub] = useState<PublicHub | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // Comprobante fijado por sesión del cliente para que un 2° cobro en caja a otra persona no le reemplace su ticket al recargar
+  const [pinnedReceipt, setPinnedReceipt] = useState<Receipt | null>(null);
+  const [isReceiptExpired, setIsReceiptExpired] = useState(false);
+  const [pendingRedirectToToquecitos, setPendingRedirectToToquecitos] = useState(false);
 
   // Estado de la Tarjeta de Sellos del Cliente + Verificación OTP de Email
   const [step, setStep] = useState<'form' | 'verify_email' | 'active'>('form');
@@ -93,17 +113,49 @@ export const PublicHubView: React.FC = () => {
   // Modal Legal Ley 25.326
   const [showLegalModal, setShowLegalModal] = useState(false);
 
-  // Modal Simple de Toquecito (Comprobantes, Tarjetas y Cuánto ahorraste)
+  // Modal Simple de Toquecito
   const [showToquecitoModal, setShowToquecitoModal] = useState(false);
 
-  // Tarjeta activa, Auto-Sello (regla estricta de 24 horas) y Pase de Wallet
+  // Tarjeta activa, Auto-Sello y Pase de Wallet
   const [joinedMember, setJoinedMember] = useState<ClubMember | null>(null);
   const [autoStampedThisVisit, setAutoStampedThisVisit] = useState(false);
   const [cooldownRemainingMs, setCooldownRemainingMs] = useState<number>(0);
   const [newlyStampedSlot, setNewlyStampedSlot] = useState<number | null>(null);
-  const [walletPass, setWalletPass] = useState<WalletPassResponse | null>(null);
+  const [, setWalletPass] = useState<WalletPassResponse | null>(null);
   const [showWebPassModal, setShowWebPassModal] = useState(false);
   const [generatingPass, setGeneratingPass] = useState(false);
+
+  const clubSectionRef = useRef<HTMLDivElement>(null);
+  const processedReceiptStampsRef = useRef<Set<string>>(new Set());
+
+  const walletOS = useMemo(() => detectWalletOS(), []);
+  const walletButtonLabel = useMemo(() => getWalletButtonLabel(walletOS), [walletOS]);
+
+  const saveReceiptToConsumerStorage = (rcp: Receipt, currentHub: PublicHub) => {
+    try {
+      addLocalConsumerReceipt({
+        id: rcp.id,
+        tenantId: currentHub.business.id,
+        businessId: currentHub.business.id,
+        merchantName: currentHub.business.name,
+        cartelCode: currentHub.cartel.code,
+        amountArs: rcp.total,
+        total: rcp.total,
+        currency: 'ARS',
+        items: rcp.items || [],
+        method: rcp.method,
+        discountSavedArs: 0,
+        category: 'Comercio',
+        receiptNote:
+          rcp.items && rcp.items.length > 0
+            ? rcp.items.map((i) => `${i.quantity || 1}x ${i.name}`).join(', ')
+            : 'Consumo en mostrador',
+        createdAt: rcp.createdAt,
+      });
+    } catch {
+      // ignore
+    }
+  };
 
   const syncMemberWithToquecitos = (member: ClubMember, currentHub?: PublicHub | null) => {
     const activeHub = currentHub || hub;
@@ -142,7 +194,6 @@ export const PublicHubView: React.FC = () => {
       localStorage.setItem(`toque_member_${bizId}`, JSON.stringify(enrichedMember));
       localStorage.setItem('toque_last_hub_code', localCodeVal);
 
-      // Asegurar que la tarjeta esté en la lista global de miembros locales para Toquecitos
       const rawMembers = localStorage.getItem('toque_club_members_v1');
       const existingMembers: ClubMember[] = rawMembers ? JSON.parse(rawMembers) : [];
       const filtered = Array.isArray(existingMembers)
@@ -191,6 +242,31 @@ export const PublicHubView: React.FC = () => {
     }
   };
 
+  // Resolver la versión más fresca del miembro desde toque_club_members_v1 para reflejar ajustes manuales del panel
+  const resolveLatestMember = (candidate: ClubMember | null, bizId: string): ClubMember | null => {
+    if (!candidate) return null;
+    try {
+      const rawAll = localStorage.getItem('toque_club_members_v1');
+      if (rawAll) {
+        const list: ClubMember[] = JSON.parse(rawAll);
+        if (Array.isArray(list)) {
+          const match = list.find(
+            (m) =>
+              m.id === candidate.id ||
+              (m.email &&
+                candidate.email &&
+                m.email.toLowerCase() === candidate.email.toLowerCase() &&
+                (!m.businessId || m.businessId === bizId))
+          );
+          if (match) return match;
+        }
+      }
+    } catch {
+      // ignore
+    }
+    return candidate;
+  };
+
   const handleOpenToquecitos = () => {
     const localCodeVal = hub?.cartel.code || targetCode;
     try {
@@ -198,22 +274,9 @@ export const PublicHubView: React.FC = () => {
       if (joinedMember) {
         syncMemberWithToquecitos(joinedMember, hub);
       }
-      const activeRcp = hub?.activeReceipt || hub?.receipt;
+      const activeRcp = pinnedReceipt || hub?.activeReceipt || hub?.receipt;
       if (activeRcp && hub) {
-        addLocalConsumerReceipt({
-          id: activeRcp.id,
-          tenantId: hub.business.id,
-          merchantName: hub.business.name,
-          cartelCode: hub.cartel.code,
-          amountArs: activeRcp.total,
-          discountSavedArs: 0,
-          category: 'Comercio',
-          receiptNote:
-            activeRcp.items && activeRcp.items.length > 0
-              ? activeRcp.items.map((i) => `${i.quantity || 1}x ${i.name}`).join(', ')
-              : 'Consumo en mostrador',
-          createdAt: activeRcp.createdAt,
-        });
+        saveReceiptToConsumerStorage(activeRcp, hub);
       }
     } catch {
       // ignore
@@ -221,8 +284,46 @@ export const PublicHubView: React.FC = () => {
     navigate(`/toquecitos?from=${encodeURIComponent(localCodeVal)}`);
   };
 
+  const handleExpiredReceiptCta = () => {
+    const activeRcp = pinnedReceipt || hub?.activeReceipt || hub?.receipt;
+    if (activeRcp && hub) {
+      saveReceiptToConsumerStorage(activeRcp, hub);
+    }
+    if (step === 'active' && joinedMember) {
+      handleOpenToquecitos();
+    } else {
+      setPendingRedirectToToquecitos(true);
+      showToast(
+        'Completá o ingresá tu correo para guardar el comprobante y abrirlo en Toquecitos.',
+        'info'
+      );
+      clubSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  };
+
   useEffect(() => {
     let active = true;
+    const sessionReceiptKey = `toque_session_receipt_${targetCode.toUpperCase()}`;
+
+    const resolveSessionReceipt = (incomingReceipt: Receipt | null | undefined): Receipt | null => {
+      try {
+        const rawPinned = sessionStorage.getItem(sessionReceiptKey);
+        if (rawPinned) {
+          const parsed = JSON.parse(rawPinned) as Receipt;
+          if (parsed && parsed.id) {
+            return parsed;
+          }
+        }
+        if (incomingReceipt) {
+          sessionStorage.setItem(sessionReceiptKey, JSON.stringify(incomingReceipt));
+          return incomingReceipt;
+        }
+      } catch {
+        // ignore
+      }
+      return incomingReceipt || null;
+    };
+
     const loadInitial = async () => {
       try {
         setLoading(true);
@@ -231,11 +332,14 @@ export const PublicHubView: React.FC = () => {
 
         await api.recordHubEvent(targetCode, 'scan');
 
+        const incomingRcp = data.activeReceipt || data.receipt || null;
+        const effectiveReceipt = resolveSessionReceipt(incomingRcp);
+        setPinnedReceipt(effectiveReceipt);
+
         if (
           (data.config.mode === 'direct' || data.config.mode === 'direct_review') &&
-          !data.receipt &&
-          !data.activeReceipt &&
-          data.reviewUrl
+          !effectiveReceipt &&
+          isConfiguredReviewUrl(data.reviewUrl)
         ) {
           window.location.href = data.reviewUrl;
           return;
@@ -243,12 +347,11 @@ export const PublicHubView: React.FC = () => {
 
         setHub(data);
 
-        // Si el comercio terminó la prueba y pasaron 2 días sin pago, no se permite ningún registro ni auto-sello al Club
         if (data.unpaidLockdown) {
           return;
         }
 
-        // Si viene desde el Magic Link del correo de recuperación (?recoverEmail=...&otp=...)
+        // Magic Link (?recoverEmail=...&otp=...)
         const searchParams = new URLSearchParams(window.location.search);
         const magicEmail = searchParams.get('recoverEmail')?.trim().toLowerCase();
         const magicOtp = searchParams.get('otp')?.trim();
@@ -281,7 +384,6 @@ export const PublicHubView: React.FC = () => {
           }
         }
 
-        // Leer localStorage (`toque_member_${businessId}`) para reconocimiento y Auto-Sello en 2da visita
         const storageKey = `toque_member_${data.business.id}`;
         const savedRaw = localStorage.getItem(storageKey);
         let storedMember: ClubMember | null = null;
@@ -293,49 +395,91 @@ export const PublicHubView: React.FC = () => {
           }
         }
 
-        const recognized = storedMember || data.club?.member || null;
+        const recognized = resolveLatestMember(
+          data.club?.member || storedMember || null,
+          data.business.id
+        );
+
         if (recognized) {
           setJoinedMember(recognized);
           setStep('active');
           syncMemberWithToquecitos(recognized, data);
 
-          // Verificar regla estricta de 24 horas (86400000 ms) para sumar sello al visitar el local
-          const cooldownKey = `toque_autostamp_${data.business.id}_${recognized.id}`;
-          const lastStampedIso = recognized.lastStampedAt;
-          const lastStampMs = lastStampedIso
-            ? new Date(lastStampedIso).getTime()
-            : Number(localStorage.getItem(cooldownKey) || '0');
-          const twentyFourHoursMs = 86400000;
-          const elapsedMs = Date.now() - lastStampMs;
+          // Si el usuario ya está registrado y hay un comprobante, se guarda automáticamente sin tocar nada
+          if (effectiveReceipt) {
+            saveReceiptToConsumerStorage(effectiveReceipt, data);
+          }
 
-          if (!lastStampMs || elapsedMs >= twentyFourHoursMs) {
+          // Si hay una nueva compra (incomingRcp) que aún no sumó sello en esta tarjeta, sumar +1 sello por esa compra
+          const receiptForStamp = incomingRcp || effectiveReceipt;
+          const alreadyStampedReceipt =
+            receiptForStamp &&
+            (processedReceiptStampsRef.current.has(receiptForStamp.id) ||
+              recognized.stampHistory?.some(
+                (s) => s.receiptId === receiptForStamp.id && !s.voided
+              ));
+
+          if (receiptForStamp && !alreadyStampedReceipt) {
+            processedReceiptStampsRef.current.add(receiptForStamp.id);
             try {
               const stampRes = await api.claimSelfStamp({
                 localCode: data.cartel.code,
                 memberId: recognized.id,
+                receiptId: receiptForStamp.id,
               });
-              if (active) {
-                if (stampRes.cooldown) {
-                  setCooldownRemainingMs(stampRes.remainingMs || 0);
-                } else {
-                  setJoinedMember(stampRes.member);
-                  setAutoStampedThisVisit(true);
-                  setCooldownRemainingMs(twentyFourHoursMs);
-                  setNewlyStampedSlot(stampRes.member.stamps);
-                  localStorage.setItem(storageKey, JSON.stringify(stampRes.member));
-                  localStorage.setItem(cooldownKey, String(Date.now()));
-                  syncMemberWithToquecitos(stampRes.member, data);
-                  showToast(
-                    `¡Hola de nuevo, ${stampRes.member.name || 'Socio'}! Sumaste +1 sello por tu visita de hoy`,
-                    'success'
-                  );
-                }
+              if (active && stampRes.stampsAdded > 0) {
+                setJoinedMember(stampRes.member);
+                setAutoStampedThisVisit(true);
+                setNewlyStampedSlot(stampRes.member.stamps);
+                localStorage.setItem(storageKey, JSON.stringify(stampRes.member));
+                syncMemberWithToquecitos(stampRes.member, data);
+                showToast(
+                  `¡Sumaste +1 sello por tu compra en ${data.business.name}!`,
+                  'success'
+                );
               }
             } catch {
-              localStorage.setItem(cooldownKey, String(Date.now()));
+              // ignore
             }
           } else {
-            setCooldownRemainingMs(Math.max(0, twentyFourHoursMs - elapsedMs));
+            // Regla estricta de 24 horas para visitas sin nuevo comprobante
+            const cooldownKey = `toque_autostamp_${data.business.id}_${recognized.id}`;
+            const lastStampedIso = recognized.lastStampedAt;
+            const lastStampMs = lastStampedIso
+              ? new Date(lastStampedIso).getTime()
+              : Number(localStorage.getItem(cooldownKey) || '0');
+            const twentyFourHoursMs = 86400000;
+            const elapsedMs = Date.now() - lastStampMs;
+
+            if (!lastStampMs || elapsedMs >= twentyFourHoursMs) {
+              try {
+                const stampRes = await api.claimSelfStamp({
+                  localCode: data.cartel.code,
+                  memberId: recognized.id,
+                });
+                if (active) {
+                  if (stampRes.cooldown) {
+                    setCooldownRemainingMs(stampRes.remainingMs || 0);
+                  } else if (stampRes.stampsAdded > 0) {
+                    setJoinedMember(stampRes.member);
+                    setAutoStampedThisVisit(true);
+                    setCooldownRemainingMs(twentyFourHoursMs);
+                    setNewlyStampedSlot(stampRes.member.stamps);
+                    localStorage.setItem(storageKey, JSON.stringify(stampRes.member));
+                    localStorage.setItem(cooldownKey, String(Date.now()));
+                    syncMemberWithToquecitos(stampRes.member, data);
+                    showToast(
+                      `¡Hola de nuevo, ${stampRes.member.name || 'Socio'}! Sumaste +1 sello por tu visita de hoy`,
+                      'success'
+                    );
+                  }
+                }
+              } catch {
+                localStorage.setItem(cooldownKey, String(Date.now()));
+              }
+            } else {
+              setCooldownRemainingMs(Math.max(0, twentyFourHoursMs - elapsedMs));
+            }
           }
         }
       } catch (err: any) {
@@ -347,24 +491,122 @@ export const PublicHubView: React.FC = () => {
 
     loadInitial();
 
-    const unsubscribe = api.subscribeToCartelHub(targetCode, (liveHub) => {
+    const unsubscribe = api.subscribeToCartelHub(targetCode, async (liveHub) => {
       if (!active) return;
       setHub(liveHub);
-      if (liveHub.club?.member) {
-        setJoinedMember(liveHub.club.member);
+
+      const incomingRcp = liveHub.activeReceipt || liveHub.receipt || null;
+      // Si todavía no había comprobante fijado en esta sesión y llega uno nuevo, lo fijamos
+      setPinnedReceipt((prevPinned) => {
+        if (prevPinned) return prevPinned;
+        if (incomingRcp) {
+          try {
+            sessionStorage.setItem(sessionReceiptKey, JSON.stringify(incomingRcp));
+          } catch {
+            // ignore
+          }
+          return incomingRcp;
+        }
+        return null;
+      });
+
+      const currentMemberCandidate = resolveLatestMember(
+        liveHub.club?.member || joinedMember,
+        liveHub.business.id
+      );
+
+      if (currentMemberCandidate) {
+        setJoinedMember(currentMemberCandidate);
         setStep('active');
-        syncMemberWithToquecitos(liveHub.club.member, liveHub);
+        syncMemberWithToquecitos(currentMemberCandidate, liveHub);
+
+        if (incomingRcp) {
+          saveReceiptToConsumerStorage(incomingRcp, liveHub);
+
+          // Si es una nueva compra en POS para este socio registrado, sumar +1 sello automáticamente
+          const alreadyStamped =
+            processedReceiptStampsRef.current.has(incomingRcp.id) ||
+            currentMemberCandidate.stampHistory?.some(
+              (s) => s.receiptId === incomingRcp.id && !s.voided
+            );
+
+          if (!alreadyStamped) {
+            processedReceiptStampsRef.current.add(incomingRcp.id);
+            try {
+              const stampRes = await api.claimSelfStamp({
+                localCode: liveHub.cartel.code,
+                memberId: currentMemberCandidate.id,
+                receiptId: incomingRcp.id,
+              });
+              if (active && stampRes.stampsAdded > 0) {
+                setJoinedMember(stampRes.member);
+                setAutoStampedThisVisit(true);
+                setNewlyStampedSlot(stampRes.member.stamps);
+                syncMemberWithToquecitos(stampRes.member, liveHub);
+                showToast(
+                  `¡Sumaste +1 sello por tu nueva compra en ${liveHub.business.name}!`,
+                  'success'
+                );
+              }
+            } catch {
+              // ignore
+            }
+          }
+        }
       }
     });
+
+    // Sincronizar también cuando el usuario vuelve a la pestaña o cambia localStorage desde el panel
+    const handleSyncFromPanel = () => {
+      api.getPublicHub(targetCode).then((freshHub) => {
+        if (!active) return;
+        setHub(freshHub);
+        const latest = resolveLatestMember(
+          freshHub.club?.member || joinedMember,
+          freshHub.business.id
+        );
+        if (latest) {
+          setJoinedMember(latest);
+        }
+      }).catch(() => {});
+    };
+
+    window.addEventListener('focus', handleSyncFromPanel);
+    window.addEventListener('storage', handleSyncFromPanel);
 
     return () => {
       active = false;
       unsubscribe();
+      window.removeEventListener('focus', handleSyncFromPanel);
+      window.removeEventListener('storage', handleSyncFromPanel);
     };
   }, [targetCode]);
 
+  // Reloj en vivo para detectar cuando pasan los 2 minutos del comprobante y activar el blur + botón fade-in
+  const displayedReceipt = pinnedReceipt || hub?.activeReceipt || hub?.receipt || null;
+
+  useEffect(() => {
+    if (!displayedReceipt) {
+      setIsReceiptExpired(false);
+      return;
+    }
+
+    const checkExpiration = () => {
+      const expiresMs = new Date(displayedReceipt.expiresAt).getTime();
+      if (!Number.isNaN(expiresMs) && Date.now() >= expiresMs) {
+        setIsReceiptExpired(true);
+      } else {
+        setIsReceiptExpired(false);
+      }
+    };
+
+    checkExpiration();
+    const interval = setInterval(checkExpiration, 1000);
+    return () => clearInterval(interval);
+  }, [displayedReceipt]);
+
   const handleReviewClick = async () => {
-    if (!hub) return;
+    if (!hub || !isConfiguredReviewUrl(hub.reviewUrl)) return;
     await api.recordHubEvent(hub.cartel.code, 'review_click');
     window.location.href = hub.reviewUrl;
   };
@@ -433,6 +675,17 @@ export const PublicHubView: React.FC = () => {
         marketingConsent,
       });
 
+      // Si había un comprobante activo en esta visita, registrar su ID en el 1° sello para que una 2° compra posterior sume el 2° sello
+      if (displayedReceipt) {
+        processedReceiptStampsRef.current.add(displayedReceipt.id);
+        if (reg.member.stampHistory && reg.member.stampHistory[0]) {
+          reg.member.stampHistory[0].receiptId = displayedReceipt.id;
+        }
+        if (hub) {
+          saveReceiptToConsumerStorage(displayedReceipt, hub);
+        }
+      }
+
       const storageKey = `toque_member_${hub?.business.id || 'la-burger'}`;
       const cooldownKey = `toque_autostamp_${hub?.business.id || 'la-burger'}_${reg.member.id}`;
       localStorage.setItem(storageKey, JSON.stringify(reg.member));
@@ -443,6 +696,12 @@ export const PublicHubView: React.FC = () => {
       setNewlyStampedSlot(reg.member.stamps || 1);
       setStep('active');
       showToast('¡Correo verificado! Ya tenés tu 1° sello cargado en la tarjeta.', 'success');
+
+      if (pendingRedirectToToquecitos) {
+        setPendingRedirectToToquecitos(false);
+        const localCodeVal = hub?.cartel.code || targetCode;
+        navigate(`/toquecitos?from=${encodeURIComponent(localCodeVal)}`);
+      }
     } catch (err: any) {
       setFormError(err?.message || 'Código inválido o vencido.');
     } finally {
@@ -458,10 +717,13 @@ export const PublicHubView: React.FC = () => {
       const storageKey = `toque_member_${hub?.business.id || 'la-burger'}`;
       localStorage.setItem(storageKey, JSON.stringify(reg.member));
       syncMemberWithToquecitos(reg.member, hub);
+      if (displayedReceipt && hub) {
+        saveReceiptToConsumerStorage(displayedReceipt, hub);
+      }
       setJoinedMember(reg.member);
       setNewlyStampedSlot(reg.member.stamps || 1);
       setStep('active');
-      showToast('Tarjeta sin datos activada con tu 1° sello.', 'success');
+      showToast('Tarjeta sin datos activada.', 'success');
     } catch (err: any) {
       setFormError(err?.message || 'No se pudo activar la tarjeta.');
     } finally {
@@ -524,6 +786,9 @@ export const PublicHubView: React.FC = () => {
           const storageKey = `toque_member_${hub?.business.id || 'la-burger'}`;
           localStorage.setItem(storageKey, JSON.stringify(existingCard));
           syncMemberWithToquecitos(existingCard, hub);
+          if (displayedReceipt && hub) {
+            saveReceiptToConsumerStorage(displayedReceipt, hub);
+          }
           setJoinedMember(existingCard);
           setStep('active');
 
@@ -531,11 +796,12 @@ export const PublicHubView: React.FC = () => {
             const stampRes = await api.claimSelfStamp({
               localCode: hub?.cartel.code || targetCode,
               memberId: existingCard.id,
+              receiptId: displayedReceipt?.id,
             });
             if (stampRes.cooldown) {
               setCooldownRemainingMs(stampRes.remainingMs || 0);
               showToast(`¡Tarjeta vinculada, ${existingCard.name || 'Socio'}!`, 'success');
-            } else {
+            } else if (stampRes.stampsAdded > 0) {
               setJoinedMember(stampRes.member);
               setAutoStampedThisVisit(true);
               setCooldownRemainingMs(86400000);
@@ -549,6 +815,12 @@ export const PublicHubView: React.FC = () => {
             }
           } catch {
             showToast(`¡Tarjeta vinculada, ${existingCard.name || 'Socio'}!`, 'success');
+          }
+
+          if (pendingRedirectToToquecitos) {
+            setPendingRedirectToToquecitos(false);
+            const localCodeVal = hub?.cartel.code || targetCode;
+            navigate(`/toquecitos?from=${encodeURIComponent(localCodeVal)}`);
           }
         } else {
           setEmail(cleanEmail);
@@ -564,7 +836,7 @@ export const PublicHubView: React.FC = () => {
     }
   };
 
-  // Emitir pase para Apple Wallet / Google Wallet (conectado con WalletWallet + descarga de Pase Digital sin localhost)
+  // Emitir pase para Apple Wallet o Google Wallet según el sistema operativo del usuario
   const handleGenerateWalletPass = async (targetWallet: 'apple' | 'google') => {
     if (!hub || !joinedMember) return;
     try {
@@ -605,7 +877,6 @@ export const PublicHubView: React.FC = () => {
           ? pass.appleWalletUrl || pass.shareUrl
           : pass.googleWalletUrl || pass.shareUrl;
 
-      // Limpiar cualquier referencia a localhost que pudiera venir de un proxy local
       const cleanUrl = (rawUrl || '').replace(/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?/i, '');
 
       if (
@@ -619,7 +890,7 @@ export const PublicHubView: React.FC = () => {
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
-        showToast('Descargando tarjeta para Apple Wallet', 'success');
+        showToast('Descargando tarjeta para tu billetera', 'success');
         return;
       }
 
@@ -646,7 +917,7 @@ export const PublicHubView: React.FC = () => {
   const handleDownloadWalletPassImage = async () => {
     if (!hub || !joinedMember) return;
     try {
-      const codeVal = joinedMember.memberCode || joinedMember.id || 'LB-1001';
+      const codeVal = joinedMember.barcodeToken || joinedMember.memberCode || joinedMember.id || 'LB-1001';
       const canvas = document.createElement('canvas');
       canvas.width = 800;
       canvas.height = 1100;
@@ -662,7 +933,7 @@ export const PublicHubView: React.FC = () => {
 
       ctx.fillStyle = '#FFFFFF';
       ctx.font = 'bold 24px Inter, sans-serif';
-      ctx.fillText('PASE DIGITAL WALLET · TOQUE', 50, 70);
+      ctx.fillText('Tarjeta de sellos · Toque', 50, 70);
 
       ctx.font = 'bold 54px Sora, Inter, sans-serif';
       ctx.fillText(hub.business.name, 50, 145);
@@ -695,14 +966,9 @@ export const PublicHubView: React.FC = () => {
         img.src = qrDataUrl;
       });
 
-      ctx.fillStyle = '#0C0C0E';
-      ctx.font = 'bold 38px "JetBrains Mono", monospace';
-      ctx.textAlign = 'center';
-      ctx.fillText(codeVal, 400, 890);
-
       const a = document.createElement('a');
       a.href = canvas.toDataURL('image/png');
-      a.download = `pase-wallet-${codeVal.toLowerCase()}.png`;
+      a.download = `pase-wallet-${hub.business.name.toLowerCase().replace(/\s+/g, '-')}.png`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
@@ -743,26 +1009,33 @@ export const PublicHubView: React.FC = () => {
     );
   }
 
-  const { business, cartel, receipt, activeReceipt, club, config } = hub;
-  const liveReceipt = activeReceipt || receipt;
-  const enabledBlocks = new Set(hub.blocks.filter((b) => b.enabled).map((b) => b.key));
+  const { business, cartel, club, config } = hub;
+  const orderedEnabledBlocks: HubBlockKey[] = (hub.blocks || [])
+    .filter((b) => b.enabled)
+    .map((b) => b.key);
 
   const clubCfg = club?.config;
   const cardBgColor = clubCfg?.cardThemeColor || clubCfg?.brandColor || '#D95B26';
   const targetStamps = clubCfg?.targetStamps || clubCfg?.stampsRequired || 10;
-  const currentStamps = Math.min(targetStamps, joinedMember?.stamps || 0);
+  const currentStamps = Math.max(0, joinedMember?.stamps ?? 0);
   const remainingStamps = Math.max(0, targetStamps - currentStamps);
   const rewardLabel =
     clubCfg?.loyaltyReward ||
     clubCfg?.rewardText ||
     'Combo aniversario sin cargo en tu visita #10';
-  const memberBarcode = joinedMember?.memberCode || joinedMember?.id || 'LB-1001';
+  const memberBarcode = joinedMember?.barcodeToken || joinedMember?.memberCode || joinedMember?.id || 'LB-1001';
 
-  // Validar si realmente hay redes o datos configurados por el comercio (sin versiones falsas)
+  // Validar estrictamente si el comercio cargó cada información antes de mostrar el bloque en el Hub (Regla #9)
+  const effectiveReviewUrl = config.googleReviewUrl?.trim() || hub.reviewUrl?.trim() || '';
+  const hasRealReview = isConfiguredReviewUrl(effectiveReviewUrl);
+  const featuredProducts = (config.products || []).filter((p) => p.featuredInHub !== false && p.title?.trim());
+  const hasRealProducts = featuredProducts.length > 0;
   const hasRealSocials = Boolean(
     config.socials?.instagram?.trim() ||
       config.socials?.whatsapp?.trim() ||
-      config.socials?.web?.trim()
+      config.socials?.web?.trim() ||
+      config.socials?.tiktok?.trim() ||
+      config.socials?.facebook?.trim()
   );
   const hasRealDetails = Boolean(
     config.details?.address?.trim() ||
@@ -770,17 +1043,658 @@ export const PublicHubView: React.FC = () => {
       config.details?.phone?.trim()
   );
 
-  // Datos de Toquecito para el modal simple (Comprobantes, Tarjetas y Cuánto ahorraste)
   const vault = loadConsumerVault();
   const vaultKpis = computeConsumerKPIs(vault);
   const vaultStampsEntries = Object.entries(vault.stampsByMerchant || {});
 
+  const renderBlock = (key: HubBlockKey) => {
+    switch (key) {
+      case 'receipt': {
+        if (!displayedReceipt) return null;
+        return (
+          <section key="block-receipt" className="pt-1">
+            <DieCutTicket
+              receiptId={displayedReceipt.id}
+              businessName={business.name}
+              total={displayedReceipt.total}
+              createdAt={displayedReceipt.createdAt}
+              items={displayedReceipt.items}
+              method={displayedReceipt.method}
+              stamps={currentStamps || 1}
+              stampsRequired={targetStamps}
+              isExpiredBlur={isReceiptExpired}
+              onOpenToquecitos={handleExpiredReceiptCta}
+              onViewPass={() => {
+                clubSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+              }}
+            />
+          </section>
+        );
+      }
+
+      case 'club': {
+        return (
+          <div key="block-club" ref={clubSectionRef} className="space-y-4">
+            {/* A. TARJETA DIGITAL DE SELLOS */}
+            <section
+              aria-label={`Tarjeta de sellos de ${business.name}`}
+              style={{ backgroundColor: cardBgColor }}
+              className="rounded-3xl p-5 text-white border border-white/15 shadow-2xl space-y-4 relative overflow-hidden"
+            >
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-3 min-w-0">
+                  {business.logoUrl ? (
+                    <img
+                      src={business.logoUrl}
+                      alt={business.name}
+                      className="w-10 h-10 rounded-2xl object-cover border border-white/25 shrink-0"
+                    />
+                  ) : (
+                    <div className="w-10 h-10 rounded-2xl bg-white/15 border border-white/25 flex items-center justify-center font-extrabold text-base text-white shrink-0">
+                      {business.name.charAt(0).toUpperCase()}
+                    </div>
+                  )}
+                  <div className="min-w-0">
+                    <p className="text-xs font-bold text-white truncate">
+                      {clubCfg?.loyaltyTitle || `Tarjeta de sellos de ${business.name}`}
+                    </p>
+                    <p className="text-[11px] text-white/80 truncate">🎁 {rewardLabel}</p>
+                  </div>
+                </div>
+
+                <div className="text-right shrink-0">
+                  <span className="block text-[9px] uppercase tracking-widest text-white/75 font-semibold">
+                    SELLOS
+                  </span>
+                  <span className="text-xl font-extrabold tracking-tight text-white">
+                    {currentStamps} / {targetStamps}
+                  </span>
+                </div>
+              </div>
+
+              {/* Grilla visual de sellos */}
+              <div className="grid grid-cols-5 gap-2 pt-1">
+                {Array.from({ length: targetStamps }).map((_, idx) => {
+                  const slotNumber = idx + 1;
+                  const isEarned = slotNumber <= currentStamps;
+                  const isNext = slotNumber === currentStamps + 1;
+                  const isRewardSlot = slotNumber === targetStamps;
+                  const isJustPopped = newlyStampedSlot === slotNumber;
+
+                  if (isEarned) {
+                    return (
+                      <div
+                        key={slotNumber}
+                        className={`aspect-square rounded-full bg-white text-[#0C0C0E] flex items-center justify-center shadow-md ${
+                          isJustPopped ? 'animate-stamp-pop ring-4 ring-[#2FB36A]' : ''
+                        }`}
+                        title={`Sello ${slotNumber} obtenido`}
+                      >
+                        <Check className="w-4 h-4 stroke-[3]" />
+                      </div>
+                    );
+                  }
+
+                  if (isRewardSlot) {
+                    return (
+                      <div
+                        key={slotNumber}
+                        className={`aspect-square rounded-full flex items-center justify-center transition-all ${
+                          isNext
+                            ? 'bg-white/20 border-2 border-[#fbbf24] text-white shadow-sm'
+                            : 'bg-white/10 border border-white/20 text-white/90'
+                        }`}
+                        title="Meta: Premio"
+                      >
+                        <Gift className="w-4 h-4" />
+                      </div>
+                    );
+                  }
+
+                  if (isNext) {
+                    return (
+                      <div
+                        key={slotNumber}
+                        className="aspect-square rounded-full bg-white/15 border-2 border-[#fbbf24] text-white font-bold text-xs flex items-center justify-center shadow-sm"
+                        title={`Próximo sello: ${slotNumber}`}
+                      >
+                        {slotNumber}
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <div
+                      key={slotNumber}
+                      className="aspect-square rounded-full bg-white/10 border border-white/15 text-white/50 font-semibold text-xs flex items-center justify-center"
+                    >
+                      {slotNumber}
+                    </div>
+                  );
+                })}
+              </div>
+
+              <div className="pt-2 border-t border-white/15 flex items-center justify-between gap-2 text-xs">
+                <span className="font-semibold text-white/95">
+                  {remainingStamps === 0
+                    ? '¡Completaste los sellos! Mostrá tu tarjeta en caja para canjear tu premio'
+                    : `Faltan ${remainingStamps} ${remainingStamps === 1 ? 'sello' : 'sellos'} para tu premio`}
+                </span>
+                <span className="text-[11px] text-white/75 shrink-0">
+                  {clubCfg?.howToEarn || '1 sello por visita'}
+                </span>
+              </div>
+            </section>
+
+            {/* B. PRIMERA VISITA (FORMULARIO CON VERIFICACIÓN DE MAIL OTP) */}
+            {step === 'form' && (
+              <section className="rounded-3xl bg-[#141414] border border-[#242424] p-5 space-y-4">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="space-y-1">
+                    <span className="inline-block text-xs font-bold text-[#D95B26]">
+                      1° visita · Sumá tu primer sello hoy
+                    </span>
+                    <h2 className="text-base font-bold text-[#F4F4F6] leading-snug">
+                      Sumate al Club de {business.name}
+                    </h2>
+                    <p className="text-xs text-[#9E9EA8]">
+                      Completá tus datos, verificá tu correo y recibí tu 1° sello al instante.
+                    </p>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowRecoveryInput((v) => !v);
+                      setFormError(null);
+                    }}
+                    className="shrink-0 text-[11px] font-bold text-[#BEC8FF] hover:text-white underline cursor-pointer"
+                  >
+                    ¿Ya tenés tarjeta? Ingresar →
+                  </button>
+                </div>
+
+                {showRecoveryInput && (
+                  <form
+                    onSubmit={handleRecoverByEmail}
+                    className="p-3.5 rounded-2xl bg-[#1C1C22] border border-[#BEC8FF]/30 space-y-2.5"
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold text-[#BEC8FF]">
+                        Recuperar mi tarjeta existente
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowRecoveryInput(false);
+                          setRecoveryOtpSent(false);
+                        }}
+                        className="text-[11px] text-[#9E9EA8] hover:text-white cursor-pointer"
+                      >
+                        Cerrar ✕
+                      </button>
+                    </div>
+                    <div className="flex gap-2">
+                      <input
+                        type="email"
+                        required
+                        value={recoveryEmail}
+                        onChange={(e) => setRecoveryEmail(e.target.value)}
+                        placeholder="tu@email.com"
+                        className="flex-1 px-3 py-2 rounded-xl bg-[#0C0C0E] border border-[#282830] text-xs text-[#F4F4F6] focus:outline-none focus:border-[#BEC8FF]"
+                      />
+                      {!recoveryOtpSent && (
+                        <button
+                          type="submit"
+                          disabled={recovering}
+                          className="px-3.5 py-2 rounded-xl bg-[#BEC8FF] text-[#0C0C0E] font-bold text-xs cursor-pointer"
+                        >
+                          {recovering ? '...' : 'Recuperar'}
+                        </button>
+                      )}
+                    </div>
+
+                    {recoveryOtpSent && (
+                      <div className="space-y-2 pt-1">
+                        {recoveryOtpHint && (
+                          <p className="text-[11px] text-[#BEC8FF]">
+                            Código enviado a tu correo: <strong>{recoveryOtpHint}</strong>
+                          </p>
+                        )}
+                        <div className="flex gap-2">
+                          <input
+                            type="text"
+                            inputMode="numeric"
+                            maxLength={6}
+                            required
+                            value={recoveryOtpCode}
+                            onChange={(e) =>
+                              setRecoveryOtpCode(e.target.value.replace(/\D/g, '').slice(0, 6))
+                            }
+                            placeholder="Código de verificación"
+                            className="flex-1 px-3 py-2 rounded-xl bg-[#0C0C0E] border border-[#282830] text-xs font-mono tracking-widest text-[#F4F4F6]"
+                          />
+                          <button
+                            type="submit"
+                            disabled={recovering || recoveryOtpCode.length < 4}
+                            className="px-3.5 py-2 rounded-xl bg-[#2FB36A] text-[#06130b] font-bold text-xs cursor-pointer"
+                          >
+                            Confirmar
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </form>
+                )}
+
+                {formError && (
+                  <div
+                    role="alert"
+                    className="p-3 rounded-2xl bg-[#f87171]/10 border border-[#f87171]/30 text-xs text-[#f87171]"
+                  >
+                    {formError}
+                  </div>
+                )}
+
+                <form onSubmit={handleStartEmailVerification} className="space-y-3">
+                  <div>
+                    <label
+                      htmlFor="hub-name-input"
+                      className="block text-xs font-semibold text-[#F4F4F6] mb-1"
+                    >
+                      1. Nombre
+                    </label>
+                    <div className="relative">
+                      <UserIcon className="w-4 h-4 text-[#9E9EA8] absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                      <input
+                        id="hub-name-input"
+                        type="text"
+                        required
+                        value={name}
+                        onChange={(e) => setName(e.target.value)}
+                        placeholder="Tu nombre"
+                        className="w-full pl-10 pr-4 py-2.5 rounded-2xl bg-[#0C0C0E] border border-[#282830] text-xs text-[#F4F4F6] placeholder-[#666672] focus:outline-none focus:border-[#D95B26]"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label
+                      htmlFor="hub-email-input"
+                      className="block text-xs font-semibold text-[#F4F4F6] mb-1"
+                    >
+                      2. Email (te enviaremos un código para verificarlo)
+                    </label>
+                    <div className="relative">
+                      <Mail className="w-4 h-4 text-[#9E9EA8] absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                      <input
+                        id="hub-email-input"
+                        type="email"
+                        required
+                        value={email}
+                        onChange={(e) => setEmail(e.target.value)}
+                        placeholder="tu@email.com"
+                        className="w-full pl-10 pr-4 py-2.5 rounded-2xl bg-[#0C0C0E] border border-[#282830] text-xs text-[#F4F4F6] placeholder-[#666672] focus:outline-none focus:border-[#D95B26]"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-[#F4F4F6] mb-1">
+                      3. Día y mes de cumpleaños (opcional, para tu regalo de cumple)
+                    </label>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div className="relative">
+                        <Calendar className="w-4 h-4 text-[#9E9EA8] absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                        <input
+                          type="number"
+                          min={1}
+                          max={31}
+                          value={birthDay}
+                          onChange={(e) => setBirthDay(e.target.value)}
+                          placeholder="Día (1-31)"
+                          className="w-full pl-10 pr-3 py-2.5 rounded-2xl bg-[#0C0C0E] border border-[#282830] text-xs text-[#F4F4F6] placeholder-[#666672] focus:outline-none focus:border-[#D95B26]"
+                        />
+                      </div>
+                      <select
+                        value={birthMonth}
+                        onChange={(e) => setBirthMonth(e.target.value)}
+                        className="w-full px-3 py-2.5 rounded-2xl bg-[#0C0C0E] border border-[#282830] text-xs text-[#F4F4F6] focus:outline-none focus:border-[#D95B26]"
+                      >
+                        <option value="">Mes (opcional)</option>
+                        {MONTHS.map((m) => (
+                          <option key={m.value} value={m.value}>
+                            {m.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+
+                  <label className="flex items-center gap-2 text-xs text-[#9E9EA8] cursor-pointer pt-0.5">
+                    <input
+                      type="checkbox"
+                      checked={marketingConsent}
+                      onChange={(e) => setMarketingConsent(e.target.checked)}
+                      className="rounded border-[#282830] bg-[#0C0C0E] text-[#D95B26]"
+                    />
+                    <span>Recibir avisos de premios y beneficios de {business.name}</span>
+                  </label>
+
+                  <button
+                    type="submit"
+                    disabled={submitting}
+                    className="w-full py-3 px-5 rounded-2xl bg-[#D95B26] hover:bg-[#e36630] text-white font-bold text-xs transition-colors disabled:opacity-50 cursor-pointer shadow-lg shadow-[#D95B26]/20"
+                  >
+                    {submitting
+                      ? 'Enviando código a tu email...'
+                      : 'Verificar mi email y activar tarjeta'}
+                  </button>
+
+                  <div className="flex items-center justify-between pt-1 text-[11px] text-[#9E9EA8]">
+                    <button
+                      type="button"
+                      onClick={handleAnonymousCard}
+                      className="hover:text-white underline cursor-pointer"
+                    >
+                      Prefiero usar la tarjeta sin dar datos
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setShowLegalModal(true)}
+                      className="hover:text-white underline cursor-pointer"
+                    >
+                      Privacidad (Ley 25.326)
+                    </button>
+                  </div>
+                </form>
+              </section>
+            )}
+
+            {/* B2. PASO DE VERIFICACIÓN DE CÓDIGO ENVIADO AL EMAIL */}
+            {step === 'verify_email' && (
+              <section className="rounded-3xl bg-[#141414] border border-[#D95B26]/50 p-5 space-y-4">
+                <div className="space-y-1">
+                  <span className="text-xs font-bold text-[#D95B26]">
+                    Verificación de correo electrónico
+                  </span>
+                  <h2 className="text-sm font-bold text-[#F4F4F6]">
+                    Ingresá el código que enviamos a {email}
+                  </h2>
+                  <p className="text-xs text-[#9E9EA8]">
+                    Esto confirma que el correo te pertenece para que nunca pierdas tus sellos.
+                  </p>
+                  {emailOtpHint && (
+                    <p className="text-xs font-mono text-[#BEC8FF] bg-[#1C1C22] border border-[#282830] px-3 py-1.5 rounded-xl mt-2">
+                      Código de verificación: <strong>{emailOtpHint}</strong>
+                    </p>
+                  )}
+                </div>
+
+                {formError && (
+                  <div className="p-3 rounded-2xl bg-[#f87171]/10 border border-[#f87171]/30 text-xs text-[#f87171]">
+                    {formError}
+                  </div>
+                )}
+
+                <form onSubmit={handleConfirmEmailAndRegister} className="space-y-3">
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    maxLength={6}
+                    required
+                    autoFocus
+                    value={emailOtpCode}
+                    onChange={(e) => setEmailOtpCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                    placeholder="Ingresá el código de 6 dígitos"
+                    className="w-full px-4 py-3 rounded-2xl bg-[#0C0C0E] border border-[#282830] text-center font-mono text-base tracking-widest text-[#F4F4F6] focus:outline-none focus:border-[#D95B26]"
+                  />
+
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setStep('form');
+                        setFormError(null);
+                      }}
+                      className="px-4 py-2.5 rounded-2xl bg-[#1C1C22] border border-[#282830] text-xs font-bold text-[#9E9EA8] cursor-pointer"
+                    >
+                      Volver
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={submitting || emailOtpCode.length < 4}
+                      className="flex-1 py-2.5 px-4 rounded-2xl bg-[#2FB36A] hover:bg-[#259858] text-[#05150c] font-bold text-xs disabled:opacity-50 cursor-pointer"
+                    >
+                      {submitting ? 'Verificando...' : 'Confirmar y sumar mi 1° sello'}
+                    </button>
+                  </div>
+                </form>
+              </section>
+            )}
+
+            {/* C. TARJETA ACTIVA (ESPEJO WALLETWALLET + BOTÓN SEGÚN SISTEMA OPERATIVO) */}
+            {step === 'active' && joinedMember && (
+              <section className="rounded-3xl bg-[#141414] border border-[#242424] p-5 space-y-4">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-8 h-8 rounded-xl bg-[#2FB36A]/15 border border-[#2FB36A]/30 text-[#2FB36A] flex items-center justify-center shrink-0">
+                      <CheckCircle2 className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <h2 className="text-xs font-bold text-[#F4F4F6]">
+                        ¡Hola, {joinedMember.name || 'Socio'}!
+                      </h2>
+                      <p className="text-[11px] text-[#9E9EA8]">
+                        {autoStampedThisVisit
+                          ? 'Se sumó +1 sello en tu tarjeta.'
+                          : cooldownRemainingMs > 0
+                          ? `Próximo sello por visita disponible en ${Math.floor(
+                              cooldownRemainingMs / 3600000
+                            )} h ${Math.max(1, Math.ceil((cooldownRemainingMs % 3600000) / 60000))} min.`
+                          : 'Guardada en tu cuenta y lista para usar en el local.'}
+                      </p>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      localStorage.removeItem(`toque_member_${business.id}`);
+                      setJoinedMember(null);
+                      setStep('form');
+                    }}
+                    className="text-[11px] text-[#666672] hover:text-[#9E9EA8] underline cursor-pointer shrink-0"
+                  >
+                    Cambiar cuenta
+                  </button>
+                </div>
+
+                {/* Espejo idéntico del Pase WalletWallet */}
+                <WalletPassCard
+                  businessName={clubCfg?.loyaltyTitle || business.name}
+                  memberName={joinedMember.name || 'Socio'}
+                  stamps={currentStamps}
+                  stampsRequired={targetStamps}
+                  rewardText={rewardLabel}
+                  barcodeToken={joinedMember.barcodeToken || memberBarcode}
+                  colorPreset={clubCfg?.colorPreset || 'dark'}
+                  customColor={clubCfg?.customColor || cardBgColor}
+                  logoUrl={clubCfg?.logoUrl || business.logoUrl}
+                />
+
+                {/* Botón único según el sistema operativo del usuario (Apple Wallet en iOS/macOS, Google Wallet en Android) */}
+                <button
+                  type="button"
+                  disabled={generatingPass}
+                  onClick={() => handleGenerateWalletPass(walletOS === 'apple' ? 'apple' : 'google')}
+                  className="w-full py-3 px-4 rounded-2xl bg-[#1C1C22] hover:bg-[#25252d] border border-[#242424] text-xs font-bold text-[#F4F4F6] flex items-center justify-center gap-2 transition-colors cursor-pointer"
+                >
+                  <Wallet className="w-4 h-4 text-[#D95B26]" />
+                  <span>{generatingPass ? 'Preparando pase...' : walletButtonLabel}</span>
+                </button>
+              </section>
+            )}
+          </div>
+        );
+      }
+
+      case 'review': {
+        if (!hasRealReview) return null;
+        return (
+          <div
+            key="block-review"
+            className="rounded-3xl bg-[#141418] border border-[#282830] p-5 space-y-3"
+          >
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-xs font-bold text-[#F4F4F6]">
+                  ¿Qué te pareció tu visita a {business.name}?
+                </h3>
+                <p className="text-[11px] text-[#9E9EA8]">
+                  Calificanos en 1 toque en Google Maps.
+                </p>
+              </div>
+              <div className="flex items-center gap-0.5 text-[#f59e0b] shrink-0">
+                {[1, 2, 3, 4, 5].map((n) => (
+                  <Star key={n} className="w-3.5 h-3.5 fill-[#f59e0b]" />
+                ))}
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={handleReviewClick}
+              className="w-full py-2.5 px-4 rounded-2xl bg-[#1C1C22] hover:bg-[#26262e] border border-[#282830] text-[#F4F4F6] font-bold text-xs flex items-center justify-center gap-2 transition-colors cursor-pointer"
+            >
+              <span>Dejar reseña en Google Maps</span>
+              <ExternalLink className="w-3.5 h-3.5 text-[#D95B26]" />
+            </button>
+          </div>
+        );
+      }
+
+      case 'products': {
+        if (!hasRealProducts) return null;
+        return (
+          <div
+            key="block-products"
+            className="rounded-3xl bg-[#141418] border border-[#282830] p-5 space-y-3"
+          >
+            <div className="flex items-center gap-2">
+              <ShoppingBag className="w-4 h-4 text-[#D95B26]" />
+              <h3 className="text-xs font-bold text-[#F4F4F6]">Catálogo</h3>
+            </div>
+            <div className="space-y-2">
+              {featuredProducts.slice(0, 8).map((prod) => (
+                <div
+                  key={prod.id}
+                  className="p-3 rounded-2xl bg-[#1C1C22] border border-[#282830] flex items-center justify-between gap-3"
+                >
+                  <div className="min-w-0">
+                    <p className="text-xs font-semibold text-[#F4F4F6] truncate">{prod.title}</p>
+                    {prod.description && (
+                      <p className="text-[11px] text-[#9E9EA8] truncate">{prod.description}</p>
+                    )}
+                  </div>
+                  {prod.price !== undefined && (
+                    <span className="text-xs font-bold text-[#BEC8FF] shrink-0">
+                      {formatARS(prod.price)}
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      }
+
+      case 'socials': {
+        if (!hasRealSocials) return null;
+        return (
+          <div
+            key="block-socials"
+            className="rounded-3xl bg-[#141418] border border-[#282830] p-5 space-y-3"
+          >
+            <div className="grid grid-cols-2 gap-2">
+              {config.socials.instagram?.trim() && (
+                <a
+                  href={`https://instagram.com/${config.socials.instagram.replace('@', '').trim()}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="flex items-center gap-2 p-2.5 rounded-xl bg-[#1C1C22] border border-[#282830] text-xs font-medium text-[#F4F4F6]"
+                >
+                  <Instagram className="w-3.5 h-3.5 text-[#D95B26]" />
+                  <span className="truncate">
+                    @{config.socials.instagram.replace('@', '').trim()}
+                  </span>
+                </a>
+              )}
+              {config.socials.whatsapp?.trim() && (
+                <a
+                  href={`https://wa.me/${config.socials.whatsapp.replace(/\D/g, '')}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="flex items-center gap-2 p-2.5 rounded-xl bg-[#1C1C22] border border-[#282830] text-xs font-medium text-[#F4F4F6]"
+                >
+                  <MessageCircle className="w-3.5 h-3.5 text-[#2FB36A]" />
+                  <span>WhatsApp</span>
+                </a>
+              )}
+              {config.socials.web?.trim() && (
+                <a
+                  href={config.socials.web.trim()}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="flex items-center gap-2 p-2.5 rounded-xl bg-[#1C1C22] border border-[#282830] text-xs font-medium text-[#F4F4F6] col-span-2"
+                >
+                  <Globe className="w-3.5 h-3.5 text-[#BEC8FF]" />
+                  <span className="truncate">{config.socials.web.trim()}</span>
+                </a>
+              )}
+            </div>
+          </div>
+        );
+      }
+
+      case 'details': {
+        if (!hasRealDetails) return null;
+        return (
+          <div
+            key="block-details"
+            className="rounded-3xl bg-[#141418] border border-[#282830] p-5 space-y-2 text-xs text-[#9E9EA8]"
+          >
+            {config.details.address?.trim() && (
+              <div className="flex items-center gap-2.5">
+                <MapPin className="w-3.5 h-3.5 text-[#D95B26] shrink-0" />
+                <span>{config.details.address.trim()}</span>
+              </div>
+            )}
+            {config.details.hours?.trim() && (
+              <div className="flex items-center gap-2.5">
+                <Clock className="w-3.5 h-3.5 text-[#D95B26] shrink-0" />
+                <span>{config.details.hours.trim()}</span>
+              </div>
+            )}
+            {config.details.phone?.trim() && (
+              <div className="flex items-center gap-2.5">
+                <Phone className="w-3.5 h-3.5 text-[#D95B26] shrink-0" />
+                <span>{config.details.phone.trim()}</span>
+              </div>
+            )}
+          </div>
+        );
+      }
+
+      default:
+        return null;
+    }
+  };
+
   return (
     <div className="min-h-screen bg-[#0A0A0A] text-[#F4F4F6] py-5 px-4 flex flex-col items-center">
       <div className="max-w-md w-full space-y-4">
-        {/* ================================================================= */}
-        {/* CABECERA DEL HUB: IDENTIDAD DEL COMERCIO + BOTÓN TOQUECITOS       */}
-        {/* ================================================================= */}
+        {/* CABECERA DEL HUB: IDENTIDAD DEL COMERCIO + BOTÓN TOQUECITOS */}
         <header className="flex items-center justify-between px-4 py-3 rounded-2xl bg-[#141414] border border-[#242424] gap-2">
           <div className="flex items-center gap-3 min-w-0">
             {business.logoUrl ? (
@@ -820,55 +1734,21 @@ export const PublicHubView: React.FC = () => {
           </div>
         </header>
 
-        {/* ================================================================= */}
-        {/* MODO SOLO COMPROBANTE (PRUEBA FINALIZADA + 2 DÍAS SIN PAGO)       */}
-        {/* ================================================================= */}
+        {/* MODO SOLO COMPROBANTE (PRUEBA FINALIZADA + 2 DÍAS SIN PAGO) */}
         {hub.unpaidLockdown ? (
-          liveReceipt ? (
-            <section className="rounded-3xl bg-[#F4F4F6] text-[#0C0C0E] p-5 shadow-2xl border-2 border-[#2FB36A] space-y-3">
-              <div className="flex items-center justify-between border-b border-dashed border-[#0C0C0E]/25 pb-2.5">
-                <div className="flex items-center gap-1.5 text-xs font-extrabold text-[#0C0C0E]">
-                  <ReceiptIcon className="w-4 h-4 text-[#D95B26]" />
-                  <span>Ticket digital {business.name}</span>
-                </div>
-                <span className="px-2 py-0.5 rounded bg-[#2FB36A] text-[#05180d] text-[10px] font-extrabold">
-                  Recién emitido
-                </span>
-              </div>
-
-              <div className="font-receipt space-y-1.5 text-xs">
-                {liveReceipt.items && liveReceipt.items.length > 0 ? (
-                  liveReceipt.items.map((item, i) => (
-                    <div key={i} className="flex justify-between">
-                      <span>
-                        {item.quantity || 1}x {item.name}
-                      </span>
-                      <span className="font-bold">
-                        {formatARS(item.price * (item.quantity || 1))}
-                      </span>
-                    </div>
-                  ))
-                ) : (
-                  <div className="flex justify-between">
-                    <span>1x Consumo en mostrador</span>
-                    <span className="font-bold">{formatARS(liveReceipt.total)}</span>
-                  </div>
-                )}
-                <div className="border-t border-dashed border-[#0C0C0E]/30 pt-2 flex items-baseline justify-between">
-                  <span className="font-bold">Total abonado</span>
-                  <span className="text-xl font-extrabold">{formatARS(liveReceipt.total)}</span>
-                </div>
-              </div>
-
-              <button
-                type="button"
-                onClick={() => navigate(`/r/${liveReceipt.id}`)}
-                className="w-full py-2.5 px-4 rounded-xl bg-[#0C0C0E] hover:bg-[#1C1C22] text-white font-bold text-xs flex items-center justify-center gap-2 transition-colors cursor-pointer"
-              >
-                <span>Abrir comprobante completo</span>
-                <ArrowRight className="w-3.5 h-3.5 text-[#D95B26]" />
-              </button>
-            </section>
+          displayedReceipt ? (
+            <DieCutTicket
+              receiptId={displayedReceipt.id}
+              businessName={business.name}
+              total={displayedReceipt.total}
+              createdAt={displayedReceipt.createdAt}
+              items={displayedReceipt.items}
+              method={displayedReceipt.method}
+              stamps={currentStamps || 1}
+              stampsRequired={targetStamps}
+              isExpiredBlur={isReceiptExpired}
+              onOpenToquecitos={handleExpiredReceiptCta}
+            />
           ) : (
             <section className="rounded-3xl bg-[#141418] border border-[#282830] p-6 text-center space-y-2.5">
               <div className="w-10 h-10 rounded-2xl bg-[#1C1C22] border border-[#282830] text-[#D95B26] flex items-center justify-center mx-auto">
@@ -881,677 +1761,7 @@ export const PublicHubView: React.FC = () => {
             </section>
           )
         ) : (
-          <>
-            {/* ================================================================= */}
-            {/* RECIBO DIGITAL ESTILO TICKET TÉRMICO (SI HAY COMPRA EN CAJA)      */}
-            {/* ================================================================= */}
-            {enabledBlocks.has('receipt') && liveReceipt && (
-              <section className="rounded-3xl bg-[#F4F4F6] text-[#0C0C0E] p-5 shadow-2xl border-2 border-[#2FB36A] space-y-3">
-                <div className="flex items-center justify-between border-b border-dashed border-[#0C0C0E]/25 pb-2.5">
-                  <div className="flex items-center gap-1.5 text-xs font-extrabold text-[#0C0C0E]">
-                    <ReceiptIcon className="w-4 h-4 text-[#D95B26]" />
-                    <span>Ticket digital {business.name}</span>
-                  </div>
-                  <span className="px-2 py-0.5 rounded bg-[#2FB36A] text-[#05180d] text-[10px] font-extrabold">
-                    Recién emitido
-                  </span>
-                </div>
-
-                <div className="font-receipt space-y-1.5 text-xs">
-                  {liveReceipt.items && liveReceipt.items.length > 0 ? (
-                    liveReceipt.items.map((item, i) => (
-                      <div key={i} className="flex justify-between">
-                        <span>
-                          {item.quantity || 1}x {item.name}
-                        </span>
-                        <span className="font-bold">
-                          {formatARS(item.price * (item.quantity || 1))}
-                        </span>
-                      </div>
-                    ))
-                  ) : (
-                    <div className="flex justify-between">
-                      <span>1x Consumo en mostrador</span>
-                      <span className="font-bold">{formatARS(liveReceipt.total)}</span>
-                    </div>
-                  )}
-                  <div className="border-t border-dashed border-[#0C0C0E]/30 pt-2 flex items-baseline justify-between">
-                    <span className="font-bold">Total abonado</span>
-                    <span className="text-xl font-extrabold">{formatARS(liveReceipt.total)}</span>
-                  </div>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() => navigate(`/r/${liveReceipt.id}`)}
-                  className="w-full py-2.5 px-4 rounded-xl bg-[#0C0C0E] hover:bg-[#1C1C22] text-white font-bold text-xs flex items-center justify-center gap-2 transition-colors cursor-pointer"
-                >
-                  <span>Abrir comprobante completo</span>
-                  <ArrowRight className="w-3.5 h-3.5 text-[#D95B26]" />
-                </button>
-              </section>
-            )}
-
-            {/* ================================================================= */}
-            {/* A. TARJETA DIGITAL DE SELLOS                                      */}
-            {/* ================================================================= */}
-        <section
-          aria-label={`Tarjeta de sellos de ${business.name}`}
-          style={{ backgroundColor: cardBgColor }}
-          className="rounded-3xl p-5 text-white border border-white/15 shadow-2xl space-y-4 relative overflow-hidden"
-        >
-          {/* Cabecera de la tarjeta */}
-          <div className="flex items-center justify-between gap-3">
-            <div className="flex items-center gap-3 min-w-0">
-              <div className="w-10 h-10 rounded-2xl bg-white/15 border border-white/25 flex items-center justify-center font-extrabold text-base text-white shrink-0">
-                {business.name.charAt(0).toUpperCase()}
-              </div>
-              <div className="min-w-0">
-                <p className="text-xs font-bold text-white truncate">
-                  {clubCfg?.loyaltyTitle || `Tarjeta de sellos de ${business.name}`}
-                </p>
-                <p className="text-[11px] text-white/80 truncate">🎁 {rewardLabel}</p>
-              </div>
-            </div>
-
-            <div className="text-right shrink-0">
-              <span className="block text-[9px] uppercase tracking-widest text-white/75 font-semibold">
-                SELLOS
-              </span>
-              <span className="text-xl font-extrabold tracking-tight text-white">
-                {currentStamps} / {targetStamps}
-              </span>
-            </div>
-          </div>
-
-          {/* Grilla visual de sellos */}
-          <div className="grid grid-cols-5 gap-2 pt-1">
-            {Array.from({ length: targetStamps }).map((_, idx) => {
-              const slotNumber = idx + 1;
-              const isEarned = slotNumber <= currentStamps;
-              const isNext = slotNumber === currentStamps + 1;
-              const isRewardSlot = slotNumber === targetStamps;
-              const isJustPopped = newlyStampedSlot === slotNumber;
-
-              if (isEarned) {
-                return (
-                  <div
-                    key={slotNumber}
-                    className={`aspect-square rounded-full bg-white text-[#0C0C0E] flex items-center justify-center shadow-md ${
-                      isJustPopped ? 'animate-stamp-pop ring-4 ring-[#2FB36A]' : ''
-                    }`}
-                    title={`Sello ${slotNumber} obtenido`}
-                  >
-                    <Check className="w-4 h-4 stroke-[3]" />
-                  </div>
-                );
-              }
-
-              if (isRewardSlot) {
-                return (
-                  <div
-                    key={slotNumber}
-                    className={`aspect-square rounded-full flex items-center justify-center transition-all ${
-                      isNext
-                        ? 'bg-white/20 border-2 border-[#fbbf24] text-white shadow-sm'
-                        : 'bg-white/10 border border-white/20 text-white/90'
-                    }`}
-                    title="Meta: Premio"
-                  >
-                    <Gift className="w-4 h-4" />
-                  </div>
-                );
-              }
-
-              if (isNext) {
-                return (
-                  <div
-                    key={slotNumber}
-                    className="aspect-square rounded-full bg-white/15 border-2 border-[#fbbf24] text-white font-bold text-xs flex items-center justify-center shadow-sm"
-                    title={`Próximo sello: ${slotNumber}`}
-                  >
-                    {slotNumber}
-                  </div>
-                );
-              }
-
-              return (
-                <div
-                  key={slotNumber}
-                  className="aspect-square rounded-full bg-white/10 border border-white/15 text-white/50 font-semibold text-xs flex items-center justify-center"
-                >
-                  {slotNumber}
-                </div>
-              );
-            })}
-          </div>
-
-          {/* Pie de la tarjeta */}
-          <div className="pt-2 border-t border-white/15 flex items-center justify-between gap-2 text-xs">
-            <span className="font-semibold text-white/95">
-              {remainingStamps === 0
-                ? '¡Completaste los sellos! Mostrá tu tarjeta en caja para canjear tu premio'
-                : `Faltan ${remainingStamps} ${remainingStamps === 1 ? 'sello' : 'sellos'} para tu premio`}
-            </span>
-            <span className="text-[11px] text-white/75 shrink-0">
-              {clubCfg?.howToEarn || '1 sello por visita'}
-            </span>
-          </div>
-        </section>
-
-        {/* ============================================================= */}
-        {/* B. PRIMERA VISITA (FORMULARIO CON VERIFICACIÓN DE MAIL OTP)   */}
-        {/* ============================================================= */}
-        {step === 'form' && (
-          <section className="rounded-3xl bg-[#141414] border border-[#242424] p-5 space-y-4">
-            <div className="flex items-start justify-between gap-2">
-              <div className="space-y-1">
-                <span className="inline-block text-xs font-bold text-[#D95B26]">
-                  1° visita · Sumá tu primer sello hoy
-                </span>
-                <h2 className="text-base font-bold text-[#F4F4F6] leading-snug">
-                  Sumate al Club de {business.name}
-                </h2>
-                <p className="text-xs text-[#9E9EA8]">
-                  Completá tus datos, verificá tu correo y recibí tu 1° sello al instante.
-                </p>
-              </div>
-
-              <button
-                type="button"
-                onClick={() => {
-                  setShowRecoveryInput((v) => !v);
-                  setFormError(null);
-                }}
-                className="shrink-0 text-[11px] font-bold text-[#BEC8FF] hover:text-white underline cursor-pointer"
-              >
-                ¿Ya tenés tarjeta? Ingresar →
-              </button>
-            </div>
-
-            {showRecoveryInput && (
-              <form
-                onSubmit={handleRecoverByEmail}
-                className="p-3.5 rounded-2xl bg-[#1C1C22] border border-[#BEC8FF]/30 space-y-2.5"
-              >
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-[#BEC8FF]">
-                    Recuperar mi tarjeta existente
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setShowRecoveryInput(false);
-                      setRecoveryOtpSent(false);
-                    }}
-                    className="text-[11px] text-[#9E9EA8] hover:text-white cursor-pointer"
-                  >
-                    Cerrar ✕
-                  </button>
-                </div>
-                <div className="flex gap-2">
-                  <input
-                    type="email"
-                    required
-                    value={recoveryEmail}
-                    onChange={(e) => setRecoveryEmail(e.target.value)}
-                    placeholder="tu@email.com"
-                    className="flex-1 px-3 py-2 rounded-xl bg-[#0C0C0E] border border-[#282830] text-xs text-[#F4F4F6] focus:outline-none focus:border-[#BEC8FF]"
-                  />
-                  {!recoveryOtpSent && (
-                    <button
-                      type="submit"
-                      disabled={recovering}
-                      className="px-3.5 py-2 rounded-xl bg-[#BEC8FF] text-[#0C0C0E] font-bold text-xs cursor-pointer"
-                    >
-                      {recovering ? '...' : 'Recuperar'}
-                    </button>
-                  )}
-                </div>
-
-                {recoveryOtpSent && (
-                  <div className="space-y-2 pt-1">
-                    {recoveryOtpHint && (
-                      <p className="text-[11px] text-[#BEC8FF]">
-                        Código enviado a tu correo: <strong>{recoveryOtpHint}</strong>
-                      </p>
-                    )}
-                    <div className="flex gap-2">
-                      <input
-                        type="text"
-                        inputMode="numeric"
-                        maxLength={6}
-                        required
-                        value={recoveryOtpCode}
-                        onChange={(e) =>
-                          setRecoveryOtpCode(e.target.value.replace(/\D/g, '').slice(0, 6))
-                        }
-                        placeholder="Código de verificación"
-                        className="flex-1 px-3 py-2 rounded-xl bg-[#0C0C0E] border border-[#282830] text-xs font-mono tracking-widest text-[#F4F4F6]"
-                      />
-                      <button
-                        type="submit"
-                        disabled={recovering || recoveryOtpCode.length < 4}
-                        className="px-3.5 py-2 rounded-xl bg-[#2FB36A] text-[#06130b] font-bold text-xs cursor-pointer"
-                      >
-                        Confirmar
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </form>
-            )}
-
-            {formError && (
-              <div
-                role="alert"
-                className="p-3 rounded-2xl bg-[#f87171]/10 border border-[#f87171]/30 text-xs text-[#f87171]"
-              >
-                {formError}
-              </div>
-            )}
-
-            <form onSubmit={handleStartEmailVerification} className="space-y-3">
-              {/* 1. Nombre */}
-              <div>
-                <label
-                  htmlFor="hub-name-input"
-                  className="block text-xs font-semibold text-[#F4F4F6] mb-1"
-                >
-                  1. Nombre
-                </label>
-                <div className="relative">
-                  <UserIcon className="w-4 h-4 text-[#9E9EA8] absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-                  <input
-                    id="hub-name-input"
-                    type="text"
-                    required
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    placeholder="Tu nombre"
-                    className="w-full pl-10 pr-4 py-2.5 rounded-2xl bg-[#0C0C0E] border border-[#282830] text-xs text-[#F4F4F6] placeholder-[#666672] focus:outline-none focus:border-[#D95B26]"
-                  />
-                </div>
-              </div>
-
-              {/* 2. Email */}
-              <div>
-                <label
-                  htmlFor="hub-email-input"
-                  className="block text-xs font-semibold text-[#F4F4F6] mb-1"
-                >
-                  2. Email (te enviaremos un código para verificarlo)
-                </label>
-                <div className="relative">
-                  <Mail className="w-4 h-4 text-[#9E9EA8] absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-                  <input
-                    id="hub-email-input"
-                    type="email"
-                    required
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    placeholder="tu@email.com"
-                    className="w-full pl-10 pr-4 py-2.5 rounded-2xl bg-[#0C0C0E] border border-[#282830] text-xs text-[#F4F4F6] placeholder-[#666672] focus:outline-none focus:border-[#D95B26]"
-                  />
-                </div>
-              </div>
-
-              {/* 3. Día y Mes de cumpleaños (opcional, sin año) */}
-              <div>
-                <label className="block text-xs font-semibold text-[#F4F4F6] mb-1">
-                  3. Día y mes de cumpleaños (opcional, para tu regalo de cumple)
-                </label>
-                <div className="grid grid-cols-2 gap-2">
-                  <div className="relative">
-                    <Calendar className="w-4 h-4 text-[#9E9EA8] absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-                    <input
-                      type="number"
-                      min={1}
-                      max={31}
-                      value={birthDay}
-                      onChange={(e) => setBirthDay(e.target.value)}
-                      placeholder="Día (1-31)"
-                      className="w-full pl-10 pr-3 py-2.5 rounded-2xl bg-[#0C0C0E] border border-[#282830] text-xs text-[#F4F4F6] placeholder-[#666672] focus:outline-none focus:border-[#D95B26]"
-                    />
-                  </div>
-                  <select
-                    value={birthMonth}
-                    onChange={(e) => setBirthMonth(e.target.value)}
-                    className="w-full px-3 py-2.5 rounded-2xl bg-[#0C0C0E] border border-[#282830] text-xs text-[#F4F4F6] focus:outline-none focus:border-[#D95B26]"
-                  >
-                    <option value="">Mes (opcional)</option>
-                    {MONTHS.map((m) => (
-                      <option key={m.value} value={m.value}>
-                        {m.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
-              {/* Checkbox de novedades desmarcado por defecto */}
-              <label className="flex items-center gap-2 text-xs text-[#9E9EA8] cursor-pointer pt-0.5">
-                <input
-                  type="checkbox"
-                  checked={marketingConsent}
-                  onChange={(e) => setMarketingConsent(e.target.checked)}
-                  className="rounded border-[#282830] bg-[#0C0C0E] text-[#D95B26]"
-                />
-                <span>Recibir avisos de premios y beneficios de {business.name}</span>
-              </label>
-
-              <button
-                type="submit"
-                disabled={submitting}
-                className="w-full py-3 px-5 rounded-2xl bg-[#D95B26] hover:bg-[#e36630] text-white font-bold text-xs transition-colors disabled:opacity-50 cursor-pointer shadow-lg shadow-[#D95B26]/20"
-              >
-                {submitting ? 'Enviando código a tu email...' : 'Verificar mi email y activar tarjeta'}
-              </button>
-
-              <div className="flex items-center justify-between pt-1 text-[11px] text-[#9E9EA8]">
-                <button
-                  type="button"
-                  onClick={handleAnonymousCard}
-                  className="hover:text-white underline cursor-pointer"
-                >
-                  Prefiero usar la tarjeta sin dar datos
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setShowLegalModal(true)}
-                  className="hover:text-white underline cursor-pointer"
-                >
-                  Privacidad (Ley 25.326)
-                </button>
-              </div>
-            </form>
-          </section>
-        )}
-
-        {/* ============================================================= */}
-        {/* B2. PASO DE VERIFICACIÓN DE CÓDIGO ENVIADO AL EMAIL           */}
-        {/* ============================================================= */}
-        {step === 'verify_email' && (
-          <section className="rounded-3xl bg-[#141414] border border-[#D95B26]/50 p-5 space-y-4">
-            <div className="space-y-1">
-              <span className="text-xs font-bold text-[#D95B26]">
-                Verificación de correo electrónico
-              </span>
-              <h2 className="text-sm font-bold text-[#F4F4F6]">
-                Ingresá el código que enviamos a {email}
-              </h2>
-              <p className="text-xs text-[#9E9EA8]">
-                Esto confirma que el correo te pertenece para que nunca pierdas tus sellos.
-              </p>
-              {emailOtpHint && (
-                <p className="text-xs font-mono text-[#BEC8FF] bg-[#1C1C22] border border-[#282830] px-3 py-1.5 rounded-xl mt-2">
-                  Código de verificación: <strong>{emailOtpHint}</strong>
-                </p>
-              )}
-            </div>
-
-            {formError && (
-              <div className="p-3 rounded-2xl bg-[#f87171]/10 border border-[#f87171]/30 text-xs text-[#f87171]">
-                {formError}
-              </div>
-            )}
-
-            <form onSubmit={handleConfirmEmailAndRegister} className="space-y-3">
-              <input
-                type="text"
-                inputMode="numeric"
-                maxLength={6}
-                required
-                autoFocus
-                value={emailOtpCode}
-                onChange={(e) => setEmailOtpCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
-                placeholder="Ingresá el código de 6 dígitos"
-                className="w-full px-4 py-3 rounded-2xl bg-[#0C0C0E] border border-[#282830] text-center font-mono text-base tracking-widest text-[#F4F4F6] focus:outline-none focus:border-[#D95B26]"
-              />
-
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setStep('form');
-                    setFormError(null);
-                  }}
-                  className="px-4 py-2.5 rounded-2xl bg-[#1C1C22] border border-[#282830] text-xs font-bold text-[#9E9EA8] cursor-pointer"
-                >
-                  Volver
-                </button>
-                <button
-                  type="submit"
-                  disabled={submitting || emailOtpCode.length < 4}
-                  className="flex-1 py-2.5 px-4 rounded-2xl bg-[#2FB36A] hover:bg-[#259858] text-[#05150c] font-bold text-xs disabled:opacity-50 cursor-pointer"
-                >
-                  {submitting ? 'Verificando...' : 'Confirmar y sumar mi 1° sello'}
-                </button>
-              </div>
-            </form>
-          </section>
-        )}
-
-        {/* ============================================================= */}
-        {/* C. TARJETA ACTIVA (ESPEJO WALLETWALLET + RELOJ 24H)           */}
-        {/* ============================================================= */}
-        {step === 'active' && joinedMember && (
-          <section className="rounded-3xl bg-[#141414] border border-[#242424] p-5 space-y-4">
-            <div className="flex items-center justify-between gap-2">
-              <div className="flex items-center gap-2.5">
-                <div className="w-8 h-8 rounded-xl bg-[#2FB36A]/15 border border-[#2FB36A]/30 text-[#2FB36A] flex items-center justify-center shrink-0">
-                  <CheckCircle2 className="w-4 h-4" />
-                </div>
-                <div>
-                  <h2 className="text-xs font-bold text-[#F4F4F6]">
-                    ¡Hola, {joinedMember.name || 'Socio'}!
-                  </h2>
-                  <p className="text-[11px] text-[#9E9EA8]">
-                    {autoStampedThisVisit
-                      ? 'Se sumó +1 sello por tu visita de hoy.'
-                      : cooldownRemainingMs > 0
-                      ? `Próximo sello disponible en ${Math.floor(
-                          cooldownRemainingMs / 3600000
-                        )} h ${Math.max(1, Math.ceil((cooldownRemainingMs % 3600000) / 60000))} min.`
-                      : 'Guardada en tu cuenta y lista para usar en el local.'}
-                  </p>
-                </div>
-              </div>
-
-              <button
-                type="button"
-                onClick={() => {
-                  localStorage.removeItem(`toque_member_${business.id}`);
-                  setJoinedMember(null);
-                  setStep('form');
-                }}
-                className="text-[11px] text-[#666672] hover:text-[#9E9EA8] underline cursor-pointer shrink-0"
-              >
-                Cambiar cuenta
-              </button>
-            </div>
-
-            {/* Espejo idéntico del Pase WalletWallet */}
-            <WalletPassCard
-              businessName={clubCfg?.loyaltyTitle || business.name}
-              memberName={joinedMember.name || 'Socio'}
-              stamps={currentStamps}
-              stampsRequired={targetStamps}
-              rewardText={rewardLabel}
-              barcodeToken={joinedMember.barcodeToken || memberBarcode}
-              colorPreset={clubCfg?.colorPreset || 'dark'}
-              customColor={clubCfg?.customColor || cardBgColor}
-              logoUrl={clubCfg?.logoUrl || business.logoUrl}
-            />
-
-            {/* Botones de Apple Wallet y Google Wallet */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              <button
-                type="button"
-                disabled={generatingPass}
-                onClick={() => handleGenerateWalletPass('apple')}
-                className="w-full py-2.5 px-4 rounded-2xl bg-[#1C1C22] hover:bg-[#25252d] border border-[#242424] text-xs font-bold text-[#F4F4F6] flex items-center justify-center gap-2 transition-colors cursor-pointer"
-              >
-                <Wallet className="w-4 h-4 text-[#D95B26]" />
-                <span>Guardar en Apple Wallet</span>
-              </button>
-
-              <button
-                type="button"
-                disabled={generatingPass}
-                onClick={() => handleGenerateWalletPass('google')}
-                className="w-full py-2.5 px-4 rounded-2xl bg-[#1C1C22] hover:bg-[#25252d] border border-[#242424] text-xs font-bold text-[#F4F4F6] flex items-center justify-center gap-2 transition-colors cursor-pointer"
-              >
-                <Wallet className="w-4 h-4 text-[#2FB36A]" />
-                <span>Guardar en Google Wallet</span>
-              </button>
-            </div>
-
-            <button
-              type="button"
-              onClick={handleOpenToquecitos}
-              className="w-full py-2.5 px-4 rounded-2xl bg-[#0A0A0A] hover:bg-[#1C1C22] border border-[#242424] text-xs font-semibold text-[#F4F4F6] flex items-center justify-center gap-2 transition-colors cursor-pointer"
-            >
-              <CreditCard className="w-4 h-4 text-[#D95B26]" />
-              <span>Ver todas mis tarjetas en Toquecitos</span>
-              <ArrowRight className="w-3.5 h-3.5 text-[#D95B26]" />
-            </button>
-          </section>
-        )}
-
-        {/* ================================================================= */}
-        {/* MÓDULOS COMPLEMENTARIOS DEL HUB: RESEÑAS, CATÁLOGO Y REDES REALES */}
-        {/* ================================================================= */}
-        {enabledBlocks.has('review') && (
-          <div className="rounded-3xl bg-[#141418] border border-[#282830] p-5 space-y-3">
-            <div className="flex items-center justify-between">
-              <div>
-                <h3 className="text-xs font-bold text-[#F4F4F6]">
-                  ¿Qué te pareció tu visita a {business.name}?
-                </h3>
-                <p className="text-[11px] text-[#9E9EA8]">
-                  Calificanos en 1 toque en Google Maps.
-                </p>
-              </div>
-              <div className="flex items-center gap-0.5 text-[#f59e0b] shrink-0">
-                {[1, 2, 3, 4, 5].map((n) => (
-                  <Star key={n} className="w-3.5 h-3.5 fill-[#f59e0b]" />
-                ))}
-              </div>
-            </div>
-
-            <button
-              type="button"
-              onClick={handleReviewClick}
-              className="w-full py-2.5 px-4 rounded-2xl bg-[#1C1C22] hover:bg-[#26262e] border border-[#282830] text-[#F4F4F6] font-bold text-xs flex items-center justify-center gap-2 transition-colors cursor-pointer"
-            >
-              <span>Dejar reseña en Google Maps</span>
-              <ExternalLink className="w-3.5 h-3.5 text-[#D95B26]" />
-            </button>
-          </div>
-        )}
-
-        {enabledBlocks.has('products') && config.products && config.products.length > 0 && (
-          <div className="rounded-3xl bg-[#141418] border border-[#282830] p-5 space-y-3">
-            <div className="flex items-center gap-2">
-              <ShoppingBag className="w-4 h-4 text-[#D95B26]" />
-              <h3 className="text-xs font-bold text-[#F4F4F6]">Catálogo</h3>
-            </div>
-            <div className="space-y-2">
-              {config.products
-                .filter((p) => p.featuredInHub !== false)
-                .slice(0, 8)
-                .map((prod) => (
-                  <div
-                    key={prod.id}
-                    className="p-3 rounded-2xl bg-[#1C1C22] border border-[#282830] flex items-center justify-between gap-3"
-                  >
-                    <div className="min-w-0">
-                      <p className="text-xs font-semibold text-[#F4F4F6] truncate">{prod.title}</p>
-                      {prod.description && (
-                        <p className="text-[11px] text-[#9E9EA8] truncate">{prod.description}</p>
-                      )}
-                    </div>
-                    {prod.price !== undefined && (
-                      <span className="text-xs font-bold text-[#BEC8FF] shrink-0">
-                        {formatARS(prod.price)}
-                      </span>
-                    )}
-                  </div>
-                ))}
-            </div>
-          </div>
-        )}
-
-        {/* Solo se muestra si el comercio realmente completó algún dato de redes o ubicación */}
-        {((enabledBlocks.has('socials') && hasRealSocials) ||
-          (enabledBlocks.has('details') && hasRealDetails)) && (
-          <div className="rounded-3xl bg-[#141418] border border-[#282830] p-5 space-y-4">
-            {enabledBlocks.has('socials') && hasRealSocials && (
-              <div className="grid grid-cols-2 gap-2">
-                {config.socials.instagram?.trim() && (
-                  <a
-                    href={`https://instagram.com/${config.socials.instagram.replace('@', '').trim()}`}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="flex items-center gap-2 p-2.5 rounded-xl bg-[#1C1C22] border border-[#282830] text-xs font-medium text-[#F4F4F6]"
-                  >
-                    <Instagram className="w-3.5 h-3.5 text-[#D95B26]" />
-                    <span className="truncate">
-                      @{config.socials.instagram.replace('@', '').trim()}
-                    </span>
-                  </a>
-                )}
-                {config.socials.whatsapp?.trim() && (
-                  <a
-                    href={`https://wa.me/${config.socials.whatsapp.replace(/\D/g, '')}`}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="flex items-center gap-2 p-2.5 rounded-xl bg-[#1C1C22] border border-[#282830] text-xs font-medium text-[#F4F4F6]"
-                  >
-                    <MessageCircle className="w-3.5 h-3.5 text-[#2FB36A]" />
-                    <span>WhatsApp</span>
-                  </a>
-                )}
-                {config.socials.web?.trim() && (
-                  <a
-                    href={config.socials.web.trim()}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="flex items-center gap-2 p-2.5 rounded-xl bg-[#1C1C22] border border-[#282830] text-xs font-medium text-[#F4F4F6] col-span-2"
-                  >
-                    <Globe className="w-3.5 h-3.5 text-[#BEC8FF]" />
-                    <span className="truncate">{config.socials.web.trim()}</span>
-                  </a>
-                )}
-              </div>
-            )}
-
-            {enabledBlocks.has('details') && hasRealDetails && (
-              <div className="space-y-2 text-xs text-[#9E9EA8]">
-                {config.details.address?.trim() && (
-                  <div className="flex items-center gap-2.5">
-                    <MapPin className="w-3.5 h-3.5 text-[#D95B26] shrink-0" />
-                    <span>{config.details.address.trim()}</span>
-                  </div>
-                )}
-                {config.details.hours?.trim() && (
-                  <div className="flex items-center gap-2.5">
-                    <Clock className="w-3.5 h-3.5 text-[#D95B26] shrink-0" />
-                    <span>{config.details.hours.trim()}</span>
-                  </div>
-                )}
-                {config.details.phone?.trim() && (
-                  <div className="flex items-center gap-2.5">
-                    <Phone className="w-3.5 h-3.5 text-[#D95B26] shrink-0" />
-                    <span>{config.details.phone.trim()}</span>
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-            )}
-          </>
+          <>{orderedEnabledBlocks.map((blockKey) => renderBlock(blockKey))}</>
         )}
 
         {/* Pie del Hub con insignia oficial Toque */}
@@ -1562,9 +1772,7 @@ export const PublicHubView: React.FC = () => {
         </footer>
       </div>
 
-      {/* =================================================================== */}
-      {/* PANTALLA SIMPLE DE TOQUECITO: COMPROBANTES, TARJETAS Y AHORRO       */}
-      {/* =================================================================== */}
+      {/* PANTALLA SIMPLE DE TOQUECITO */}
       {showToquecitoModal && (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm p-4 flex items-center justify-center">
           <div className="max-w-md w-full rounded-3xl bg-[#141418] border border-[#282830] p-5 space-y-4 max-h-[85vh] overflow-y-auto">
@@ -1587,7 +1795,6 @@ export const PublicHubView: React.FC = () => {
               </button>
             </div>
 
-            {/* 1. Cuánto ahorraste */}
             <div className="p-4 rounded-2xl bg-[#1C1C22] border border-[#282830] flex items-center justify-between">
               <div>
                 <span className="text-[11px] text-[#9E9EA8] block">Cuánto ahorraste</span>
@@ -1600,11 +1807,10 @@ export const PublicHubView: React.FC = () => {
               </span>
             </div>
 
-            {/* 2. Mis Tarjetas */}
             <div className="space-y-2">
               <div className="flex items-center gap-1.5 text-xs font-bold text-[#F4F4F6]">
                 <CreditCard className="w-3.5 h-3.5 text-[#D95B26]" />
-                <span>Mis Tarjetas</span>
+                <span>Mis tarjetas</span>
               </div>
 
               <div className="space-y-2">
@@ -1638,56 +1844,6 @@ export const PublicHubView: React.FC = () => {
                       </span>
                     </div>
                   ))}
-
-                {!joinedMember && vaultStampsEntries.length === 0 && (
-                  <p className="text-xs text-[#9E9EA8] p-3 rounded-xl bg-[#0C0C0E] border border-[#282830]">
-                    Todavía no tenés tarjetas activas en este dispositivo.
-                  </p>
-                )}
-              </div>
-            </div>
-
-            {/* 3. Mis Comprobantes */}
-            <div className="space-y-2">
-              <div className="flex items-center gap-1.5 text-xs font-bold text-[#F4F4F6]">
-                <ReceiptIcon className="w-3.5 h-3.5 text-[#BEC8FF]" />
-                <span>Mis Comprobantes ({vault.receipts.length + (liveReceipt ? 1 : 0)})</span>
-              </div>
-
-              <div className="space-y-2">
-                {liveReceipt && (
-                  <div className="p-3 rounded-xl bg-[#0C0C0E] border border-[#2FB36A]/40 flex items-center justify-between">
-                    <div>
-                      <p className="text-xs font-bold text-[#F4F4F6]">{business.name}</p>
-                      <p className="text-[11px] text-[#9E9EA8]">Ticket recién emitido</p>
-                    </div>
-                    <span className="font-mono text-xs font-bold text-[#2FB36A]">
-                      {formatARS(liveReceipt.total)}
-                    </span>
-                  </div>
-                )}
-
-                {vault.receipts.slice(0, 5).map((r) => (
-                  <div
-                    key={r.id}
-                    className="p-3 rounded-xl bg-[#0C0C0E] border border-[#282830] flex items-center justify-between"
-                  >
-                    <div>
-                      <p className="text-xs font-bold text-[#F4F4F6]">{r.merchantName}</p>
-                      <p className="text-[11px] text-[#9E9EA8]">{r.receiptNote}</p>
-                    </div>
-                    <span className="font-mono text-xs font-bold text-[#F4F4F6]">
-                      {formatARS(r.amountArs)}
-                    </span>
-                  </div>
-                ))}
-
-                {!liveReceipt && vault.receipts.length === 0 && (
-                  <p className="text-xs text-[#9E9EA8] p-3 rounded-xl bg-[#0C0C0E] border border-[#282830]">
-                    Tus comprobantes digitales aparecerán acá cada vez que compres en un local con
-                    Toque.
-                  </p>
-                )}
               </div>
             </div>
 
@@ -1702,9 +1858,7 @@ export const PublicHubView: React.FC = () => {
         </div>
       )}
 
-      {/* =================================================================== */}
-      {/* MODAL DE PASE DIGITAL WALLET (QR LIMPIO + DESCARGA)                 */}
-      {/* =================================================================== */}
+      {/* MODAL DE PASE DIGITAL WALLET */}
       {showWebPassModal && joinedMember && (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm p-4 flex items-center justify-center">
           <div className="max-w-sm w-full rounded-3xl overflow-hidden bg-[#141414] border border-[#242424] shadow-2xl p-4 space-y-3">
@@ -1741,9 +1895,7 @@ export const PublicHubView: React.FC = () => {
         </div>
       )}
 
-      {/* =================================================================== */}
-      {/* MODAL DE PRIVACIDAD LEY 25.326                                      */}
-      {/* =================================================================== */}
+      {/* MODAL DE PRIVACIDAD LEY 25.326 */}
       {showLegalModal && (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm p-4 flex items-center justify-center">
           <div className="max-w-md w-full rounded-3xl bg-[#141418] border border-[#282830] p-5 space-y-3.5 text-xs text-[#9E9EA8]">

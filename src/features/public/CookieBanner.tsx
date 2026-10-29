@@ -4,6 +4,7 @@ import { getConsentPreferences, saveConsentPreferences } from '../../config/lega
 
 export const CookieBanner: React.FC = () => {
   const [visible, setVisible] = useState(false);
+  const [fadingOut, setFadingOut] = useState(false);
 
   useEffect(() => {
     const existing = getConsentPreferences();
@@ -18,14 +19,19 @@ export const CookieBanner: React.FC = () => {
 
   const handleAccept = () => {
     saveConsentPreferences(true);
-    setVisible(false);
+    setFadingOut(true);
+    window.setTimeout(() => {
+      setVisible(false);
+    }, 320);
   };
 
   return (
     <aside
       role="region"
       aria-label="Aviso de privacidad y cookies"
-      className="fixed bottom-3 left-3 right-3 z-50 max-w-xl mx-auto h-[42px] max-h-[44px] px-3.5 rounded-full bg-[#141418]/95 backdrop-blur-md border border-[#282830] text-[#F4F4F6] shadow-xl flex items-center justify-between gap-3"
+      className={`fixed bottom-3 left-3 right-3 z-50 max-w-xl mx-auto h-[42px] max-h-[44px] px-3.5 rounded-full bg-[#141418]/95 backdrop-blur-md border border-[#282830] text-[#F4F4F6] shadow-xl flex items-center justify-between gap-3 transition-all duration-300 ease-out ${
+        fadingOut ? 'opacity-0 translate-y-2 pointer-events-none' : 'opacity-100 translate-y-0'
+      }`}
     >
       <p className="text-xs text-[#9E9EA8] truncate">
         Usamos cookies propias para recordar tu tarjeta. Al continuar aceptás nuestra{' '}

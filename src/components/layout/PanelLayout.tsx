@@ -20,6 +20,8 @@ import {
   Moon,
   Lock,
   Smartphone,
+  Star,
+  Factory,
 } from 'lucide-react';
 
 interface NavItem {
@@ -55,6 +57,12 @@ const ALL_NAV_ITEMS: NavItem[] = [
     to: '/panel/hub',
     label: 'Hub',
     icon: Smartphone,
+    roles: ['owner', 'manager', 'superadmin'],
+  },
+  {
+    to: '/panel/resenas',
+    label: 'Reseñas',
+    icon: Star,
     roles: ['owner', 'manager', 'superadmin'],
   },
   {
@@ -190,6 +198,20 @@ export const PanelLayout: React.FC = () => {
               </NavLink>
             );
           })}
+
+          <NavLink
+            to="/fabricante"
+            className={({ isActive }) =>
+              `flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-semibold transition-colors duration-150 mt-2 border border-[#242424] ${
+                isActive
+                  ? 'bg-[#D95B26] text-white'
+                  : 'bg-[#0A0A0A] text-[#9E9EA8] hover:text-[#F4F4F6] hover:border-[#D95B26]/50'
+              }`
+            }
+          >
+            <Factory className="w-4 h-4 shrink-0 text-[#D95B26]" />
+            <span>Panel de fabricante</span>
+          </NavLink>
 
           {isVerifiedSuperAdmin && (
             <NavLink
@@ -349,10 +371,10 @@ export const PanelLayout: React.FC = () => {
         </main>
       </div>
 
-      {/* Barra Inferior Móvil (7 secciones) */}
+      {/* Barra Inferior Móvil */}
       <nav
         aria-label="Navegación principal móvil"
-        className="panel-chrome-dark md:hidden fixed bottom-0 left-0 right-0 z-30 h-15 bg-[#141418]/95 backdrop-blur-md border-t border-[#282830] grid grid-cols-7 items-center px-1"
+        className="panel-chrome-dark md:hidden fixed bottom-0 left-0 right-0 z-30 h-15 bg-[#141418]/95 backdrop-blur-md border-t border-[#282830] grid grid-cols-8 items-center px-1"
       >
         {ALL_NAV_ITEMS.map((item) => {
           const Icon = item.icon;

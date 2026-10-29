@@ -228,6 +228,7 @@ class HttpApi implements ToqueApi {
     localCode: string;
     memberId: string;
     rotatingToken?: string;
+    receiptId?: string;
   }) {
     return this.request<{
       member: ClubMember;
@@ -532,6 +533,11 @@ class HttpApi implements ToqueApi {
     role: CartelRole;
     mode?: HubMode;
     reviewUrl?: string;
+    status?: Cartel['status'];
+    pin?: string;
+    activationPin?: string;
+    tileColor?: Cartel['tileColor'];
+    location?: string;
   }): Promise<Cartel> {
     return this.request('/carteles', {
       method: 'POST',

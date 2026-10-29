@@ -29,6 +29,7 @@
   "exclude": [
     "worker",
     "src/db",
+    "public",
     "node_modules",
     "dist"
   ]

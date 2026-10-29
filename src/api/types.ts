@@ -4,7 +4,7 @@
  * Verificación por código de 6 dígitos (OTP), Importación CSV y Super Admin.
  */
 
-export type CartelRole = 'resena' | 'caja';
+export type CartelRole = 'resena' | 'caja' | 'mostrador' | 'mesa';
 export type CartelStatus = 'sin_activar' | 'active' | 'inactive' | 'trash';
 
 export type HubMode = 'direct' | 'hub' | 'direct_review' | 'smart_hub';
@@ -143,14 +143,17 @@ export interface Cartel {
   uuid?: string;
   code: string;
   pin: string;
+  activationPin?: string;
   businessId?: string;
   name: string;
+  location?: string;
   role: CartelRole;
   status: CartelStatus;
   reviewUrl?: string;
   mode: HubMode;
   tileColor?: TileColor;
   claimStatus?: ClaimStatus;
+  scans?: number;
   scansCount?: number;
   reviewClicksCount?: number;
   activeReceiptId?: string | null;
@@ -275,6 +278,7 @@ export interface ClubStampEntry {
   count: number;
   source: 'cashier' | 'self' | 'adjustment';
   amountArs?: number;
+  receiptId?: string;
   actorName: string;
   createdAt: string;
   voided?: boolean;
@@ -548,13 +552,19 @@ export interface ConsumerReceipt {
   uuid?: string;
   consumerId: string;
   tenantId: string;
+  businessId?: string;
   merchantName: string;
   cartelCode?: string;
   amountArs: number;
+  total?: number;
+  currency?: string;
   discountSavedArs: number;
   category: string;
   receiptNote: string;
+  method?: PaymentMethod;
+  items?: SaleItem[];
   createdAt: string;
+  savedAt?: string;
 }
 
 export interface PublicHub {
