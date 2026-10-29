@@ -6,6 +6,7 @@ import { Button } from '../../components/ui/Button';
 import { Skeleton } from '../../components/ui/Skeleton';
 import { useToast } from '../../components/ui/Toast';
 import { formatCurrency } from '../../lib/formatters';
+import { WalletPassCard } from '../../components/wallet/WalletPassCard';
 import {
   Smartphone,
   ArrowUp,
@@ -88,15 +89,33 @@ function ensureReceiptAlwaysFirst(blocks: HubConfig['blocks']): HubConfig['block
 export const HubEditorView: React.FC = () => {
   const { showToast } = useToast();
   const [config, setConfig] = useState<HubConfig | null>(null);
+  const [activeCartelCode, setActiveCartelCode] = useState<string>('BURGER01');
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
 
   useEffect(() => {
-    api
-      .getHubConfig()
-      .then((data) => {
+    Promise.all([
+      api.getHubConfig(),
+      api.getBusinessProfile().catch(() => null),
+      api.getClubConfig().catch(() => null),
+      api.listCarteles().catch(() => []),
+    ])
+      .then(([data, biz, clubCfg, carteles]) => {
+        const firstCode = carteles?.[0]?.code || 'BURGER01';
+        setActiveCartelCode(firstCode);
         setConfig({
           ...data,
+          businessName: data.businessName || biz?.name || clubCfg?.organizationName || 'La Burger',
+          rewardText:
+            data.rewardText ||
+            clubCfg?.loyaltyReward ||
+            clubCfg?.rewardText ||
+            'Beneficio al completar tus sellos',
+          stampsRequired:
+            data.stampsRequired || clubCfg?.targetStamps || clubCfg?.stampsRequired || 10,
+          colorPreset: data.colorPreset || clubCfg?.colorPreset || 'dark',
+          customColor: data.customColor || clubCfg?.customColor,
+          logoUrl: data.logoUrl || clubCfg?.logoUrl,
           blocks: ensureReceiptAlwaysFirst(data.blocks),
         });
       })
@@ -181,13 +200,13 @@ export const HubEditorView: React.FC = () => {
 
         <div className="flex flex-wrap items-center gap-2.5">
           <Link
-            to="/h/CAJA01"
+            to={`/u/${activeCartelCode}`}
             target="_blank"
             rel="noopener noreferrer"
             className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-[#18181b] hover:bg-[#242429] text-xs font-medium text-[#f1f1ee] border border-[#28282a] transition-colors"
           >
-            <span>Ver cartel</span>
-            <ExternalLink className="w-3.5 h-3.5 text-[#bec8ff]" />
+            <span>Ver Hub en vivo</span>
+            <ExternalLink className="w-3.5 h-3.5 text-[#D95B26]" />
           </Link>
 
           <Button
@@ -503,7 +522,7 @@ export const HubEditorView: React.FC = () => {
                 <Smartphone className="w-3.5 h-3.5 text-[#1f8a4c]" /> Vista previa del Hub
               </span>
               <span className="font-mono font-bold text-[#0c0c0c] bg-[#f1f1ee] px-2.5 py-0.5 rounded-full border border-black/10">
-                CAJA01
+                {activeCartelCode}
               </span>
             </div>
 
@@ -511,10 +530,12 @@ export const HubEditorView: React.FC = () => {
             <div className="flex items-center justify-between pb-3 border-b border-black/10">
               <div className="flex items-center gap-2.5">
                 <div className="w-7 h-7 rounded-lg bg-[#0c0c0c] text-[#bec8ff] flex items-center justify-center font-bold text-xs">
-                  C
+                  {(config.businessName || 'M').charAt(0).toUpperCase()}
                 </div>
                 <div>
-                  <h3 className="font-bold text-xs text-[#0c0c0c]">Café & Panadería La Esquina</h3>
+                  <h3 className="font-bold text-xs text-[#0c0c0c]">
+                    {config.businessName || 'Mi Comercio'}
+                  </h3>
                   <p className="text-[10px] text-[#52525b]">Cartel inteligente activo</p>
                 </div>
               </div>
@@ -527,12 +548,12 @@ export const HubEditorView: React.FC = () => {
                   <span className="w-1.5 h-1.5 rounded-full bg-[#2fb36a]" />
                   <Receipt className="w-3 h-3" /> Comprobante de compra
                 </span>
-                <span className="text-[10px] text-[#52525b]">2 min</span>
+                <span className="text-[10px] text-[#52525b]">Recién emitido</span>
               </div>
               <div className="flex justify-between items-center pt-1">
                 <span className="text-xs text-[#0c0c0c]">Total cobrado</span>
                 <span className="font-extrabold text-xs font-mono bg-[#0c0c0c] text-[#bec8ff] px-2 py-0.5 rounded-md">
-                  $3.800
+                  $0
                 </span>
               </div>
             </div>
@@ -555,16 +576,18 @@ export const HubEditorView: React.FC = () => {
                   }
                   if (b.key === 'club') {
                     return (
-                      <div
-                        key="club"
-                        className="p-3.5 rounded-2xl bg-[#f6f6f3] border border-black/10 space-y-1.5 text-center"
-                      >
-                        <div className="flex items-center justify-center gap-1.5 text-xs font-bold text-[#0c0c0c]">
-                          <Award className="w-3.5 h-3.5 text-[#1f8a4c]" /> Club de Beneficios
-                        </div>
-                        <p className="text-[11px] text-[#52525b]">
-                          Sumate en 1 toque y acumulá sellos
-                        </p>
+                      <div key="club" className="pt-1">
+                        <WalletPassCard
+                          businessName={config.businessName || 'Mi Comercio'}
+                          memberName="Socio"
+                          stamps={1}
+                          stampsRequired={config.stampsRequired || 10}
+                          rewardText={config.rewardText || 'Beneficio al completar tus sellos'}
+                          barcodeToken="token-vista-previa-segura-01"
+                          colorPreset={config.colorPreset || 'dark'}
+                          customColor={config.customColor}
+                          logoUrl={config.logoUrl}
+                        />
                       </div>
                     );
                   }
@@ -574,8 +597,8 @@ export const HubEditorView: React.FC = () => {
                         key="products"
                         className="p-3.5 rounded-2xl bg-[#f6f6f3] border border-black/10 space-y-2"
                       >
-                        <p className="text-[10px] font-bold uppercase tracking-wider text-[#52525b] flex items-center gap-1">
-                          <ShoppingBag className="w-3 h-3" /> Destacados
+                        <p className="text-xs font-bold text-[#52525b] flex items-center gap-1">
+                          <ShoppingBag className="w-3 h-3" /> Catálogo
                         </p>
                         {featuredProducts.slice(0, 3).map((p) => (
                           <div key={p.id} className="flex justify-between items-center gap-2 text-xs">

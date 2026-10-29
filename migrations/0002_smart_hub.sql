@@ -27,16 +27,15 @@ CREATE TABLE IF NOT EXISTS hub_configs (
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
--- 3. Tabla loyalty_members (Fidelización por Tarjeta de Sellos Digital y Pases de Wallet)
+-- 3. Tabla loyalty_members (Minimización de datos Ley 25.326: solo día y mes de cumpleaños sin año, sin teléfono)
 CREATE TABLE IF NOT EXISTS loyalty_members (
   id TEXT PRIMARY KEY,
   tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
   member_code TEXT NOT NULL,
   customer_name TEXT,
   customer_email TEXT NOT NULL,
-  customer_phone TEXT,
-  birth_date TEXT,
-  customer_phone_or_email TEXT NOT NULL,
+  birth_day INTEGER,
+  birth_month INTEGER,
   stamps INTEGER NOT NULL DEFAULT 0,
   stamps_required INTEGER NOT NULL DEFAULT 10,
   rewards_redeemed INTEGER NOT NULL DEFAULT 0,
@@ -48,17 +47,14 @@ CREATE TABLE IF NOT EXISTS loyalty_members (
 );
 
 CREATE INDEX IF NOT EXISTS idx_loyalty_members_tenant ON loyalty_members(tenant_id);
-CREATE INDEX IF NOT EXISTS idx_loyalty_members_contact ON loyalty_members(tenant_id, customer_phone_or_email);
+CREATE INDEX IF NOT EXISTS idx_loyalty_members_email ON loyalty_members(tenant_id, customer_email);
 CREATE INDEX IF NOT EXISTS idx_loyalty_members_code ON loyalty_members(tenant_id, member_code);
 
--- 4. Tabla stamp_logs (Historial auditable de sellos y premios para CSV y Panel)
+-- 4. Tabla stamp_logs (Historial auditable referenciando solo member_id sin duplicar PII)
 CREATE TABLE IF NOT EXISTS stamp_logs (
   id TEXT PRIMARY KEY,
   tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
   member_id TEXT NOT NULL,
-  member_name TEXT,
-  member_email TEXT,
-  member_phone TEXT,
   action TEXT NOT NULL CHECK(action IN ('stamp_added', 'reward_redeemed')),
   stamps_delta INTEGER NOT NULL,
   staff_email TEXT,

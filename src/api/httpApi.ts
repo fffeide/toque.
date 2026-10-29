@@ -233,7 +233,9 @@ class HttpApi implements ToqueApi {
       member: ClubMember;
       stampsAdded: number;
       rewardReady: boolean;
-      toquecito: ToquecitoItem;
+      toquecito?: ToquecitoItem;
+      cooldown?: boolean;
+      remainingMs?: number;
     }>('/club/stamps/self', {
       method: 'POST',
       body: JSON.stringify(data),
@@ -325,6 +327,12 @@ class HttpApi implements ToqueApi {
     await this.request(`/club/members/${encodeURIComponent(id)}`, { method: 'DELETE' });
   }
 
+  async revokeMemberCard(memberId: string): Promise<{ revoked: boolean; walletRevoked?: boolean }> {
+    return this.request(`/club/members/${encodeURIComponent(memberId)}/revoke`, {
+      method: 'DELETE',
+    });
+  }
+
   async getClubConfig(): Promise<ClubConfig> {
     return this.request('/club/config');
   }
@@ -333,6 +341,51 @@ class HttpApi implements ToqueApi {
     return this.request('/club/config', {
       method: 'PATCH',
       body: JSON.stringify(patch),
+    });
+  }
+
+  async listClubCards(): Promise<ClubConfig[]> {
+    return this.request('/club/cards');
+  }
+
+  async createClubCard(data: {
+    name?: string;
+    loyaltyTitle?: string;
+    rewardText: string;
+    targetStamps?: number;
+    stampsRequired?: number;
+    brandColor: string;
+    howToEarn?: string;
+    expirationPolicy?: string;
+    logoText?: string;
+    organizationName?: string;
+    barcodeFormat?: 'QR' | 'CODE128' | 'PDF417' | 'AZTEC';
+    barcodeValue?: string;
+    barcodeAltText?: string;
+    colorPreset?: 'dark' | 'blue' | 'green' | 'red' | 'purple' | 'orange';
+    customColor?: string;
+    logoUrl?: string;
+    wideLogoUrl?: string;
+    iconUrl?: string;
+    headerFields?: Array<{ label: string; value: string }>;
+    primaryFields?: Array<{ label: string; value: string }>;
+    secondaryFields?: Array<{ label: string; value: string }>;
+  }): Promise<ClubConfig> {
+    return this.request('/club/cards', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async selectClubCard(cardId: string): Promise<ClubConfig> {
+    return this.request(`/club/cards/${encodeURIComponent(cardId)}/select`, {
+      method: 'POST',
+    });
+  }
+
+  async deleteClubCard(cardId: string): Promise<ClubConfig[]> {
+    return this.request(`/club/cards/${encodeURIComponent(cardId)}`, {
+      method: 'DELETE',
     });
   }
 
@@ -410,7 +463,7 @@ class HttpApi implements ToqueApi {
     return this.request('/subscription/state');
   }
 
-  async startTrial(planId: 'free' | 'mensual' | 'anual' = 'anual'): Promise<PlanState> {
+  async startTrial(planId: 'free' | 'mensual' | 'anual' | 'a_consultar' = 'anual'): Promise<PlanState> {
     return this.request('/subscription/start-trial', {
       method: 'POST',
       body: JSON.stringify({ planId }),
@@ -750,6 +803,19 @@ class HttpApi implements ToqueApi {
     });
   }
 
+  async updateAccountEmail(newEmail: string): Promise<{ user: User; business: BusinessProfile }> {
+    return this.request('/account/email', {
+      method: 'PATCH',
+      body: JSON.stringify({ email: newEmail }),
+    });
+  }
+
+  async deleteAccount(): Promise<{ deleted: boolean }> {
+    return this.request('/account', {
+      method: 'DELETE',
+    });
+  }
+
   async getSuperAdminSummary(): Promise<SuperAdminSummary> {
     return this.request('/admin/summary');
   }
@@ -769,7 +835,8 @@ class HttpApi implements ToqueApi {
   async addToqueAdmin(data: {
     email: string;
     name: string;
-    level: import('./types').ToqueAdminLevel;
+    level?: import('./types').ToqueAdminLevel;
+    role?: import('./types').ToqueAdminLevel;
   }): Promise<import('./types').ToqueAdminStaff> {
     return this.request('/admin/toque-team', {
       method: 'POST',
@@ -785,3 +852,4 @@ class HttpApi implements ToqueApi {
 }
 
 export const httpApi = new HttpApi();
+

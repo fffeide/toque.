@@ -30,7 +30,7 @@ export interface ConsentPreferences {
   updatedAt: string;
 }
 
-// Estado de consentimiento en memoria + cookie técnica de primera parte (toque_cookie_consent)
+// Estado de consentimiento en memoria + cookie técnica de primera parte (toque_cookie_consent, 180 días)
 let memoryConsentPrefs: ConsentPreferences | null = null;
 
 function readConsentCookie(): ConsentPreferences | null {
@@ -65,7 +65,6 @@ function applyClarityConsentState(analyticsClarity: boolean): void {
       w.clarity('consent', true);
     }
   } else {
-    // Si el usuario rechaza ("Solo necesarias"), informamos a Clarity que detenga cookies y borramos _clck / _clsk
     if (typeof w.clarity === 'function') {
       try {
         w.clarity('consent', false);
@@ -89,8 +88,8 @@ export const LEGAL_DOCUMENTS: Record<LegalDocKey, LegalDocument> = {
     lastUpdated: 'Octubre 2026',
     normativeBadge: 'Ley 24.240 · Código Civil y Comercial de la Nación',
     summaryPoints: [
-      'El ingreso para comercios, equipo y clientes funciona exclusivamente mediante código de verificación de 6 dígitos enviado por correo electrónico (sin contraseñas).',
-      'Los roles del equipo (Dueño, Encargado y Cajero) tienen permisos diferenciados; el Cajero no puede anular ni borrar movimientos.',
+      'El ingreso y alta de tarjeta con datos funciona mediante código de verificación enviado por correo electrónico.',
+      'Los roles del equipo (Dueño, Encargado y Cajero) tienen permisos diferenciados; el Cajero opera desde el POS local sin acceso fuera del comercio.',
       'Toda anulación o ajuste realizado por un Dueño o Encargado exige un motivo obligatorio y queda asentado en el registro inmutable de Correcciones.',
       'Si vence la suscripción del comercio, el Cartel QR y las tarjetas de los clientes siguen funcionando.',
     ],
@@ -98,20 +97,20 @@ export const LEGAL_DOCUMENTS: Record<LegalDocKey, LegalDocument> = {
       {
         title: '1. Objeto del servicio Toque',
         paragraphs: [
-          'Toque brinda una plataforma de Carteles Inteligentes (QR + NFC), Comprobantes Digitales y Fidelización por Tarjeta de Sellos Digital para comercios en la República Argentina. Permite que los clientes sumen sellos en sus visitas, reciban su comprobante digital y canjeen premios desde su celular sin instalar aplicaciones.',
+          'Toque brinda una plataforma de Carteles QR + NFC, Comprobantes Digitales y Fidelización por Tarjeta de Sellos Digital para comercios en la República Argentina. Permite que los clientes sumen sellos en sus visitas, reciban su comprobante digital y canjeen premios desde su celular sin instalar aplicaciones.',
         ],
       },
       {
-        title: '2. Ingreso sin contraseñas (Código de 6 dígitos por correo)',
+        title: '2. Verificación por correo electrónico',
         paragraphs: [
-          'Para proteger la seguridad de las cuentas, Toque no solicita ni almacena contraseñas. Cada ingreso o alta de tarjeta se valida mediante un código numérico de 6 dígitos enviado al correo electrónico del titular, con vencimiento a los 10 minutos, de uso único y un máximo de 5 intentos.',
+          'Cada alta de tarjeta nominada o ingreso se valida mediante un código numérico enviado al correo electrónico del titular, con vencimiento a los 10 minutos y de uso único.',
         ],
       },
       {
         title: '3. Roles del equipo y registro de Correcciones',
         paragraphs: [
-          'El Dueño del comercio puede invitar por correo electrónico a integrantes con rol Dueño, Encargado o Cajero y asignarlos a uno o varios locales.',
-          'El Cajero accede a la pantalla Escanear y Caja para sumar sellos, emitir cobros y canjear premios. Las anulaciones o ajustes de saldo requieren rol de Encargado o Dueño y un motivo obligatorio de al menos 10 caracteres que queda guardado de forma permanente en la sección Correcciones.',
+          'El Dueño del comercio puede crear perfiles de Dueño, Encargado o Cajero y asignarlos a su local.',
+          'El Cajero opera la pantalla de Caja POS y Escanear dentro del comercio sin necesidad de correo externo. Las anulaciones o ajustes de saldo requieren rol de Encargado o Dueño y un motivo obligatorio de al menos 10 caracteres que queda guardado en Correcciones.',
         ],
       },
     ],
@@ -126,9 +125,9 @@ export const LEGAL_DOCUMENTS: Record<LegalDocKey, LegalDocument> = {
     lastUpdated: 'Octubre 2026',
     normativeBadge: 'Ley 25.326 · Agencia de Acceso a la Información Pública (AAIP)',
     summaryPoints: [
-      'Para activar la tarjeta de sellos digital solo pedimos tu correo electrónico (y opcionalmente cómo te llaman). No existen contraseñas en toda la plataforma.',
-      'No recolectamos datos personales de menores de 18 años: ofrecemos la opción "Prefiero no dar mis datos" para usar la tarjeta de forma anónima.',
-      'No pedimos ni guardamos la dirección IP ni rastreamos la ubicación GPS del cliente.',
+      'Para activar la tarjeta de sellos digital con datos pedimos tu correo electrónico verificado, nombre y opcionalmente día y mes de cumpleaños (sin año).',
+      'No pedimos datos a menores. Si sos menor de 18, usá la tarjeta sin datos.',
+      'No guardamos la IP en nuestra base de datos (Cloudflare procesa la IP para enrutar el tráfico).',
       'El comercio solo accede a los datos de su propio programa de fidelización y nunca a los de otros comercios.',
     ],
     sections: [
@@ -138,24 +137,24 @@ export const LEGAL_DOCUMENTS: Record<LegalDocKey, LegalDocument> = {
           'Aplicamos el principio de minimización de datos (Art. 4 Ley 25.326). Recolectamos únicamente la información indispensable para cada funcionalidad:',
         ],
         bullets: [
-          'Clientes de la Tarjeta de Sellos: Correo electrónico (obligatorio para enviar el código de verificación de 6 dígitos y recuperar la tarjeta), nombre o apodo (opcional), día y mes de cumpleaños sin año (opcional, solo si el cliente desea recibir un saludo del local), saldo de sellos, premios canjeados y preferencia de consentimiento para recibir novedades del comercio.',
-          'Modo Anónimo ("Prefiero no dar mis datos"): Genera únicamente un identificador al azar (código corto) sin correo, nombre ni cumpleaños. Pensado para menores de 18 años o clientes que prefieren privacidad total.',
-          'Comercios y Equipo (Dueño, Encargado, Cajero): Correo electrónico laboral, nombre, rol asignado, nombre del comercio, configuración del Cartel QR/NFC y catálogo de productos.',
-          'Operaciones de Caja y Sellos: Monto del comprobante digital, método de pago referencial (efectivo, QR o tarjeta), fecha/hora del movimiento y correo del colaborador que registró el sello o cobro.',
-          'Pases de Billetera (Apple Wallet / Google Wallet): Al tocar "Agregar a Apple Wallet" o "Agregar a Google Wallet", se envía al proveedor técnico WalletWallet (api.walletwallet.dev) el nombre del comercio, el contador de sellos, el beneficio y el código QR del socio para generar el archivo del pase.',
+          'Clientes de la Tarjeta de Sellos: Correo electrónico (para enviar el código de verificación y recuperar la tarjeta), nombre o apodo, día y mes de cumpleaños sin año (birthDay y birthMonth), saldo de sellos, premios canjeados y preferencia de consentimiento (desmarcada por defecto) para recibir novedades del comercio.',
+          'Tarjeta sin datos (Pensada para quien prefiere no dar datos): Genera únicamente un identificador al azar (código corto) sin correo, nombre ni cumpleaños. No pedimos datos a menores. Si sos menor de 18, usá la tarjeta sin datos.',
+          'Comercios y Equipo (Dueño, Encargado, Cajero): Nombre, rol asignado, correo electrónico (solo para Dueño y Encargado), nombre del comercio, configuración del Cartel QR/NFC y catálogo de productos.',
+          'Operaciones de Caja y Sellos: Monto del comprobante digital, método de pago referencial, fecha/hora del movimiento e identificador del socio (member_id) sin duplicar su nombre, correo ni teléfono en la bitácora de sellos.',
         ],
       },
       {
-        title: '2. Datos que NUNCA recolectamos',
+        title: '2. Proveedores técnicos (Encargados de tratamiento)',
         paragraphs: [
-          'Por diseño de seguridad y privacidad, Toque NO solicita ni almacena en ningún caso:',
+          'Para prestar el servicio utilizamos los siguientes proveedores de infraestructura:',
         ],
         bullets: [
-          'Contraseñas o claves de acceso (toda autenticación es mediante código temporal de 6 dígitos por correo).',
-          'Dirección IP de los clientes ni huella digital del dispositivo (fingerprinting).',
-          'Ubicación geográfica (GPS) de los clientes.',
-          'Datos de tarjetas de crédito, débito o cuentas bancarias de los clientes que compran en el local.',
-          'Año de nacimiento ni documento de identidad (DNI) de los clientes.',
+          'Cloudflare (Workers y D1): Aloja la aplicación y la base de datos. No guardamos la IP en nuestra base de datos (Cloudflare procesa la IP para enrutar el tráfico).',
+          'Google Fonts y Font Awesome (Cloudflare CDN): Tipografías e íconos de interfaz.',
+          'WalletWallet (api.walletwallet.dev): Al tocar "Guardar en Wallet", recibe el nombre del comercio, el contador de sellos, el beneficio y el código del socio para generar el pase.',
+          'Resend (api.resend.com): Envía los códigos de verificación por correo electrónico y los avisos a socios que dieron su consentimiento expreso.',
+          'Microsoft Clarity (clarity.ms): Analítica de uso cargada únicamente si el usuario acepta las cookies de analítica.',
+          'Mercado Pago: Procesamiento de pagos de suscripción de comercios.',
         ],
       },
       {
@@ -171,35 +170,36 @@ export const LEGAL_DOCUMENTS: Record<LegalDocKey, LegalDocument> = {
   cookies: {
     key: 'cookies',
     slug: '/cookies',
-    title: 'Política de Cookies',
+    title: 'Política de Cookies y Almacenamiento Local',
     subtitle:
-      'Detalle técnico de cookies estrictamente necesarias y analítica opcional con bloqueo previo.',
+      'Detalle técnico de cookies propias, claves en localStorage y analítica opcional con bloqueo previo.',
     lastUpdated: 'Octubre 2026',
     normativeBadge: 'Consentimiento Previo · Transparencia Digital',
     summaryPoints: [
+      'La cookie propia toque_cookie_consent dura 180 días y guarda tu elección ("essential" o "all").',
       'Si elegís "Solo necesarias", Microsoft Clarity NO se carga ni ejecuta, y se eliminan inmediatamente sus cookies (_clck y _clsk).',
-      'La sesión de usuario se gestiona mediante cookie técnica del servidor y memoria de ejecución, sin guardar roles ni sesiones en localStorage.',
-      'No utilizamos cookies publicitarias ni compartimos perfiles de navegación con redes de anuncios.',
+      'En tu navegador (localStorage) guardamos tu tarjeta activa para que no tengas que volver a cargar tus datos en cada visita.',
     ],
     sections: [
       {
-        title: '1. Cookies estrictamente necesarias (Siempre activas)',
+        title: '1. Cookies y claves en tu dispositivo (Siempre activas para el funcionamiento)',
         paragraphs: [
-          'Son indispensables para que la plataforma funcione y para recordar tu decisión sobre el uso de cookies:',
+          'Son indispensables para recordar tu tarjeta de sellos y tu preferencia de privacidad:',
         ],
         bullets: [
-          'toque_cookie_consent (Duración: 180 días, Propia): Guarda tu elección en el banner de cookies ("essential" cuando rechazás analítica o "all" cuando aceptás) para no volver a cargarte scripts no autorizados.',
-          'Cookie de sesión del servidor (Propia, HttpOnly): Mantiene activa la sesión luego de verificar el código de 6 dígitos enviado por correo electrónico.',
+          'toque_cookie_consent (Cookie propia, Duración: 180 días): Guarda tu elección sobre cookies ("essential" o "all").',
+          'toque_member_<idComercio> (localStorage): Conserva tu tarjeta de sellos activa en ese comercio para reconocer tu visita.',
+          'toque_client_cards_v2 y toque_opened_receipts_v1 (localStorage): Guardan en tu teléfono el listado de tus tarjetas y comprobantes abiertos en Toquecito.',
         ],
       },
       {
         title: '2. Cookies de analítica opcional (Microsoft Clarity — Bloqueadas por defecto)',
         paragraphs: [
-          'Solo se activan si hacés clic expresamente en el botón "Aceptar todo". Si elegís "Solo necesarias" o cerrás el aviso con la X, el script de Microsoft Clarity no se descarga ni se ejecuta en tu navegador.',
+          'Solo se activan si aceptás las cookies de analítica:',
         ],
         bullets: [
-          '_clck (Duración: 1 año, Microsoft Clarity): Conserva el identificador anónimo de usuario de Clarity entre visitas para distinguir sesiones recurrentes con datos de texto enmascarados.',
-          '_clsk (Duración: 1 día, Microsoft Clarity): Conecta múltiples vistas de página de un usuario dentro de una única grabación de sesión anónima para detectar errores de interfaz.',
+          '_clck (Duración: 1 año, Microsoft Clarity): Identificador anónimo de sesión recurrente.',
+          '_clsk (Duración: 1 día, Microsoft Clarity): Agrupa vistas de página dentro de una misma sesión anónima.',
         ],
       },
     ],
@@ -210,19 +210,19 @@ export const LEGAL_DOCUMENTS: Record<LegalDocKey, LegalDocument> = {
     slug: '/reembolso',
     title: 'Política de Suscripción y Cancelación',
     subtitle:
-      'Condiciones sobre los 30 días de prueba gratis, planes mensual y anual, y continuidad de las tarjetas.',
+      'Condiciones sobre los planes Gratuito, Pago y A consultar, y continuidad de las tarjetas.',
     lastUpdated: 'Octubre 2026',
     normativeBadge: 'Ley 24.240 · Defensa del Consumidor',
     summaryPoints: [
-      '30 días de prueba gratuita sin tarjeta de crédito.',
-      'Todos los locales del comercio están incluidos en la suscripción.',
+      'Plan Gratuito con 1 tarjeta, 1 local y hasta 3 usuarios sin costo.',
+      'Plan Pago con hasta 3 sucursales, hasta 3 tarjetas, Caja POS y equipo ilimitado.',
       'Si vence la suscripción, el Cartel QR y las tarjetas de los clientes siguen funcionando.',
     ],
     sections: [
       {
-        title: '1. Prueba gratis y continuidad del servicio',
+        title: '1. Continuidad del servicio',
         paragraphs: [
-          'Todo comercio nuevo cuenta con 30 días de prueba sin cargo. Si al finalizar la prueba o un período pago el comercio no renueva, el Cartel QR del mostrador y las tarjetas de los clientes continúan activos para no perjudicar a los clientes; únicamente se pausan el panel de administración y los avisos.',
+          'Si un comercio pasa al plan Gratuito o no renueva su período pago, el Cartel QR del mostrador y las tarjetas emitidas continúan funcionando para no perjudicar a los clientes.',
         ],
       },
     ],

@@ -1,14 +1,27 @@
 /**
- * Toque — Configuración Centralizada de Planes y Suscripción
- * - Plan Gratuito (free): $0 — Solo Hub básico ("Hub pelado", enlaces y reseñas).
- * - Plan Pago Pro (pro): $34.999 ARS / mes — Todo habilitado (Hub completo, Tarjetas, Wallet, POS Caja, Lector de Barras, Avisos Resend, Equipo).
- * - Prueba Gratuita: 14 días (Exclusiva al seleccionar el Plan Anual). Si vence sin pago confirmado, baja a Plan Gratuito sin borrar datos históricos.
+ * Toque — Configuración Centralizada de Planes y Límites de Funciones
+ * - Gratuito (free): 1 sola tarjeta, sin POS, solo 1 local, y hasta 2 usuarios en el panel + el creador (3 en total).
+ * - Pago (pago / mensual / anual): Hub + tarjetas + POS, hasta 3 sucursales, hasta 3 tarjetas, equipo ilimitado, mayores estadísticas.
+ * - A consultar (a_consultar): Hub + tarjetas + POS, sucursales ilimitadas, tarjetas ilimitadas, equipo ilimitado, y todo a su medida necesaria.
  */
 
+export type PlanId = 'free' | 'mensual' | 'anual' | 'a_consultar';
+export type PlanTier = 'free' | 'pro' | 'custom';
+
+export interface PlanLimits {
+  label: string;
+  maxCards: number;
+  posEnabled: boolean;
+  maxLocals: number;
+  maxTeamTotal: number; // Incluye al creador
+  advancedStats: boolean;
+}
+
 export interface PlanDefinition {
-  id: 'free' | 'mensual' | 'anual';
-  tier: 'free' | 'pro';
+  id: PlanId;
+  tier: PlanTier;
   name: string;
+  shortName: string;
   periodLabel: string;
   priceMonthlyArs: number;
   totalPriceArs: number;
@@ -18,6 +31,7 @@ export interface PlanDefinition {
   savingsBadge?: string;
   badge?: string;
   trialDays: number;
+  limits: PlanLimits;
   features: string[];
 }
 
@@ -27,63 +41,132 @@ export const ANNUAL_MONTHS_CHARGED = 10;
 export const ANNUAL_TOTAL_PRICE_ARS = BASE_MONTHLY_PRICE_ARS * ANNUAL_MONTHS_CHARGED;
 export const ANNUAL_EFFECTIVE_MONTHLY_ARS = Math.round(ANNUAL_TOTAL_PRICE_ARS / 12);
 
-export const TOQUE_PLANS: Record<'free' | 'mensual' | 'anual', PlanDefinition> = {
+export const PLAN_LIMITS_BY_ID: Record<PlanId, PlanLimits> = {
+  free: {
+    label: 'Gratuito',
+    maxCards: 1,
+    posEnabled: false,
+    maxLocals: 1,
+    maxTeamTotal: 3, // 2 usuarios en el panel + el creador
+    advancedStats: false,
+  },
+  mensual: {
+    label: 'Pago',
+    maxCards: 3,
+    posEnabled: true,
+    maxLocals: 3,
+    maxTeamTotal: 9999,
+    advancedStats: true,
+  },
+  anual: {
+    label: 'Pago',
+    maxCards: 3,
+    posEnabled: true,
+    maxLocals: 3,
+    maxTeamTotal: 9999,
+    advancedStats: true,
+  },
+  a_consultar: {
+    label: 'A consultar',
+    maxCards: 9999,
+    posEnabled: true,
+    maxLocals: 9999,
+    maxTeamTotal: 9999,
+    advancedStats: true,
+  },
+};
+
+export function getPlanLimits(planId?: string): PlanLimits {
+  if (planId === 'free') return PLAN_LIMITS_BY_ID.free;
+  if (planId === 'a_consultar') return PLAN_LIMITS_BY_ID.a_consultar;
+  return PLAN_LIMITS_BY_ID.anual;
+}
+
+export const TOQUE_PLANS: Record<PlanId, PlanDefinition> = {
   free: {
     id: 'free',
     tier: 'free',
-    name: 'Plan Gratuito (Hub Básico)',
+    name: 'Plan Gratuito',
+    shortName: 'Gratuito',
     periodLabel: 'sin cargo',
     priceMonthlyArs: 0,
     totalPriceArs: 0,
     priceArs: 0,
-    description: 'Solo Hub pelado con enlaces básicos y reseñas del comercio.',
-    billingNote: 'Sin costo mensual. Funciones Pro bloqueadas.',
+    description: '1 sola tarjeta, sin POS, 1 local y hasta 2 usuarios + el creador (3 en total).',
+    billingNote: 'Sin costo mensual.',
     trialDays: 0,
+    limits: PLAN_LIMITS_BY_ID.free,
     features: [
-      'Hub básico con enlaces de contacto y redes sociales',
-      'Acceso directo a reseñas de Google Maps',
-      'Conserva todos tus datos históricos de clientes y sellos',
+      '1 tarjeta de sellos con Wallet',
+      'Sin terminal POS de caja',
+      '1 solo local habilitado',
+      'Hasta 2 usuarios en el panel + el creador (3 en total)',
     ],
   },
   mensual: {
     id: 'mensual',
     tier: 'pro',
-    name: 'Plan Pro Mensual',
+    name: 'Plan Pago (Mensual)',
+    shortName: 'Pago',
     periodLabel: 'por mes',
     priceMonthlyArs: BASE_MONTHLY_PRICE_ARS,
     totalPriceArs: BASE_MONTHLY_PRICE_ARS,
     priceArs: BASE_MONTHLY_PRICE_ARS,
-    description: 'Activación inmediata mes a mes. Cancelás cuando quieras.',
-    billingNote: 'Activación directa a $34.999/mes (sin período de prueba).',
+    description: 'Hub + tarjetas + POS, hasta 3 sucursales, hasta 3 tarjetas, equipo ilimitado y mayores estadísticas.',
+    billingNote: 'Suscripción mensual activa.',
     trialDays: 0,
+    limits: PLAN_LIMITS_BY_ID.mensual,
     features: [
-      'Smart Hub completo + Comprobantes térmicos digitales en vivo',
-      'Tarjeta de sellos interactiva + Auto-sello inteligente en 2° visita',
-      'Pases para Apple Wallet, Google Wallet y Tarjeta con Código de Barras/QR real',
-      'Terminal Caja (POS) con calculadora matemática por teclado',
-      'Lector rápido de código de barras USB/Bluetooth en Tarjetas',
-      'Envío de Avisos por correo (Resend) y gestión de Equipo y Locales',
+      'Hub + Tarjetas + Caja POS habilitados',
+      'Hasta 3 sucursales',
+      'Hasta 3 tarjetas de fidelidad activas',
+      'Equipo ilimitado (Dueño, Encargados y Cajeros)',
+      'Mayores estadísticas y métricas de retorno',
     ],
   },
   anual: {
     id: 'anual',
     tier: 'pro',
-    name: 'Plan Pro Anual',
-    periodLabel: 'por año (14 días de prueba gratis)',
+    name: 'Plan Pago (Anual)',
+    shortName: 'Pago',
+    periodLabel: 'por año (14 días de prueba)',
     priceMonthlyArs: ANNUAL_EFFECTIVE_MONTHLY_ARS,
     totalPriceArs: ANNUAL_TOTAL_PRICE_ARS,
     priceArs: ANNUAL_TOTAL_PRICE_ARS,
-    description: `Incluye ${TRIAL_DAYS} días de prueba gratis. Pagás 10 meses ($${ANNUAL_TOTAL_PRICE_ARS.toLocaleString('es-AR')}/año).`,
-    billingNote: `Exclusivo Plan Anual: ${TRIAL_DAYS} días de prueba sin cargo. Si vence sin pago, baja a Plan Gratuito sin perder datos.`,
-    savingsBadge: '14 días gratis + 2 meses sin cargo',
-    badge: '14 días de prueba gratis',
+    description: 'Hub + tarjetas + POS, hasta 3 sucursales, hasta 3 tarjetas, equipo ilimitado y mayores estadísticas.',
+    billingNote: `Incluye ${TRIAL_DAYS} días de prueba y 2 meses bonificados.`,
+    savingsBadge: '14 días de prueba + 2 meses sin cargo',
+    badge: '14 días de prueba',
     trialDays: TRIAL_DAYS,
+    limits: PLAN_LIMITS_BY_ID.anual,
     features: [
-      '14 días de prueba gratuita con todas las funciones Pro destrabadas',
-      '2 meses bonificados (pagás 10 meses y usás los 12 meses del año)',
-      'Smart Hub completo, Tarjeta de Sellos, Auto-sello y Wallet',
-      'Terminal Caja (POS) por teclado + Lector de código de barras en menos de 1 seg',
-      'Avisos por email vía Resend, Kit de Carteles A5/Sticker y Equipo ilimitado',
+      'Hub + Tarjetas + Caja POS habilitados',
+      'Hasta 3 sucursales',
+      'Hasta 3 tarjetas de fidelidad activas',
+      'Equipo ilimitado (Dueño, Encargados y Cajeros)',
+      'Mayores estadísticas y métricas de retorno',
+    ],
+  },
+  a_consultar: {
+    id: 'a_consultar',
+    tier: 'custom',
+    name: 'Plan A Consultar',
+    shortName: 'A consultar',
+    periodLabel: 'a medida',
+    priceMonthlyArs: 0,
+    totalPriceArs: 0,
+    priceArs: 0,
+    description: 'Hub + tarjetas + POS, sucursales ilimitadas, tarjetas ilimitadas, equipo ilimitado y todo a su medida.',
+    billingNote: 'Plan corporativo a medida.',
+    badge: 'A medida',
+    trialDays: 0,
+    limits: PLAN_LIMITS_BY_ID.a_consultar,
+    features: [
+      'Hub + Tarjetas + Caja POS completos',
+      'Sucursales ilimitadas',
+      'Tarjetas ilimitadas',
+      'Equipo ilimitado',
+      'Configuración y soporte todo a su medida necesaria',
     ],
   },
 };
@@ -91,12 +174,14 @@ export const TOQUE_PLANS: Record<'free' | 'mensual' | 'anual', PlanDefinition> =
 export const TOQUE_PLANS_LIST: PlanDefinition[] = [
   TOQUE_PLANS.mensual,
   TOQUE_PLANS.anual,
+  TOQUE_PLANS.a_consultar,
 ];
 
 export const PLANS: PlanDefinition[] = [
   TOQUE_PLANS.free,
   TOQUE_PLANS.mensual,
   TOQUE_PLANS.anual,
+  TOQUE_PLANS.a_consultar,
 ];
 
 export function formatArsPrice(amount: number): string {

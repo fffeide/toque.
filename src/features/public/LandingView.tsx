@@ -20,9 +20,9 @@ export const LandingView: React.FC = () => {
   const [showWaitlistModal, setShowWaitlistModal] = useState(false);
 
   return (
-    <div className="min-h-screen bg-[#0C0C0E] text-[#F4F4F6] flex flex-col justify-between selection:bg-[#D95B26] selection:text-white">
+    <div className="min-h-screen bg-[#0A0A0A] text-[#F4F4F6] flex flex-col justify-between selection:bg-[#D95B26] selection:text-white">
       {/* Top Navbar */}
-      <header className="w-full max-w-6xl mx-auto px-4 sm:px-6 py-5 flex items-center justify-between border-b border-[#282830]/70">
+      <header className="w-full max-w-6xl mx-auto px-4 sm:px-6 py-5 flex items-center justify-between border-b border-[#242424]">
         <Link to="/" aria-label="Inicio Toque">
           <BrandLogo variant="full" size="md" />
         </Link>
@@ -30,14 +30,14 @@ export const LandingView: React.FC = () => {
         <div className="flex items-center gap-3">
           <Link
             to="/u/BURGER01"
-            className="hidden sm:inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-[#141418] hover:bg-[#1C1C22] border border-[#282830] text-xs font-semibold text-[#9E9EA8] hover:text-white transition-colors"
+            className="hidden sm:inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-[#141414] hover:bg-[#1C1C22] border border-[#242424] text-xs font-semibold text-[#9E9EA8] hover:text-white transition-colors"
           >
             <span>Demo Hub en vivo</span>
             <ArrowRight className="w-3.5 h-3.5 text-[#D95B26]" />
           </Link>
           <Link
             to="/ingresar"
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-[#1C1C22] hover:bg-[#24242C] border border-[#282830] text-xs sm:text-sm font-bold text-[#F4F4F6] transition-colors"
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-[#141414] hover:bg-[#1C1C22] border border-[#242424] text-xs sm:text-sm font-bold text-[#F4F4F6] transition-colors"
           >
             <Lock className="w-3.5 h-3.5 text-[#D95B26]" />
             <span>Ingresar a mi cuenta</span>
@@ -49,10 +49,10 @@ export const LandingView: React.FC = () => {
       <main className="flex-1 flex flex-col justify-center px-4 sm:px-6 py-12 sm:py-20">
         <div className="max-w-4xl mx-auto text-center space-y-8">
           {/* Badge de Beta Privada */}
-          <div className="inline-flex items-center gap-2.5 px-4 py-1.5 rounded-full bg-[#141418] border border-[#D95B26]/40 text-xs font-bold text-[#F4F4F6] shadow-lg">
+          <div className="inline-flex items-center gap-2.5 px-4 py-1.5 rounded-full bg-[#141414] border border-[#D95B26]/40 text-xs font-bold text-[#F4F4F6] shadow-lg">
             <span className="w-2 h-2 rounded-full bg-[#D95B26] animate-pulse" />
-            <span className="tracking-wide uppercase text-[11px] text-[#D95B26] font-extrabold">
-              Plataforma en Beta Privada
+            <span className="text-xs text-[#D95B26] font-extrabold">
+              Plataforma en beta privada
             </span>
             <span className="text-[#666672]">—</span>
             <span className="text-[#9E9EA8]">Próximamente disponible</span>
@@ -94,10 +94,10 @@ export const LandingView: React.FC = () => {
 
           {/* Formulario de Lista de Espera Desplegable o Directo */}
           {showWaitlistModal && (
-            <div className="max-w-md mx-auto mt-6 p-6 rounded-3xl bg-[#141418] border border-[#282830] text-left shadow-2xl">
+            <div className="max-w-md mx-auto mt-6 p-6 rounded-3xl bg-[#141414] border border-[#242424] text-left shadow-2xl">
               <div className="flex items-center justify-between mb-3">
-                <span className="text-xs font-bold uppercase tracking-wider text-[#D95B26]">
-                  Acceso Anticipado · Lista de Espera
+                <span className="text-xs font-bold text-[#D95B26]">
+                  Acceso anticipado · Lista de espera
                 </span>
                 <button
                   type="button"
@@ -114,9 +114,9 @@ export const LandingView: React.FC = () => {
             </div>
           )}
 
-          {/* 3 Pilares Técnicos Tactile Hardware */}
+          {/* 3 Pilares */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-8 text-left">
-            <div className="p-5 rounded-2xl bg-[#141418] border border-[#282830] space-y-2.5">
+            <div className="p-5 rounded-2xl bg-[#141414] border border-[#242424] space-y-2.5">
               <div className="w-9 h-9 rounded-xl bg-[#D95B26]/15 border border-[#D95B26]/30 text-[#D95B26] flex items-center justify-center">
                 <Receipt className="w-4 h-4" />
               </div>
@@ -127,35 +127,33 @@ export const LandingView: React.FC = () => {
               </p>
             </div>
 
-            <div className="p-5 rounded-2xl bg-[#141418] border border-[#282830] space-y-2.5">
+            <div className="p-5 rounded-2xl bg-[#141414] border border-[#242424] space-y-2.5">
               <div className="w-9 h-9 rounded-xl bg-[#2FB36A]/15 border border-[#2FB36A]/30 text-[#2FB36A] flex items-center justify-center">
                 <Award className="w-4 h-4" />
               </div>
-              <h2 className="text-base font-bold text-[#F4F4F6]">Auto-Sello y Wallet</h2>
+              <h2 className="text-base font-bold text-[#F4F4F6]">Tarjetas y Wallet</h2>
               <p className="text-xs text-[#9E9EA8] leading-relaxed">
-                Registro de 1 sola vez en 10 segundos. En la 2° visita el cliente apoya el celular y
-                suma su sello automáticamente.
+                Registro de 1 sola vez en segundos. El cliente guarda su tarjeta en Apple o Google Wallet y suma 1 sello por día al visitar el local.
               </p>
             </div>
 
-            <div className="p-5 rounded-2xl bg-[#141418] border border-[#282830] space-y-2.5">
+            <div className="p-5 rounded-2xl bg-[#141414] border border-[#242424] space-y-2.5">
               <div className="w-9 h-9 rounded-xl bg-[#BEC8FF]/15 border border-[#BEC8FF]/30 text-[#BEC8FF] flex items-center justify-center">
                 <Star className="w-4 h-4" />
               </div>
-              <h2 className="text-base font-bold text-[#F4F4F6]">Reseñas y Lector Pistola</h2>
+              <h2 className="text-base font-bold text-[#F4F4F6]">Reseñas y lector rápido</h2>
               <p className="text-xs text-[#9E9EA8] leading-relaxed">
-                Compatible con lectores de código de barras USB/Bluetooth (CODE128) y QR reales para
-                sumar sellos en menos de 1 segundo.
+                Compatible con lectores de mostrador y cámara del celular para validar premios y sumar sellos en menos de 1 segundo.
               </p>
             </div>
           </div>
 
           {/* Vista Previa de Planes Pro ($34.999 y Trial 14 días en Anual) */}
-          <div className="pt-10 border-t border-[#282830]/80 text-left space-y-6">
+          <div className="pt-10 border-t border-[#242424] text-left space-y-6">
             <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3">
               <div>
-                <span className="text-[11px] font-bold uppercase tracking-wider text-[#D95B26]">
-                  Modelo de Suscripción Comercios
+                <span className="text-xs font-bold text-[#D95B26]">
+                  Suscripciones para comercios
                 </span>
                 <h2 className="text-xl sm:text-2xl font-bold text-[#F4F4F6] mt-0.5">
                   Planes transparentes · {TRIAL_DAYS} días de prueba en el Plan Anual

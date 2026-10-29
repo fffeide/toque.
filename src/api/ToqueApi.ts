@@ -130,7 +130,10 @@ export interface ToqueApi {
     member: ClubMember;
     stampsAdded: number;
     rewardReady: boolean;
-    toquecito: ToquecitoItem;
+    toquecito?: ToquecitoItem;
+    cooldown?: boolean;
+    remainingMs?: number;
+    message?: string;
   }>;
 
   claimSelfStamp(data: {
@@ -141,7 +144,10 @@ export interface ToqueApi {
     member: ClubMember;
     stampsAdded: number;
     rewardReady: boolean;
-    toquecito: ToquecitoItem;
+    toquecito?: ToquecitoItem;
+    cooldown?: boolean;
+    remainingMs?: number;
+    message?: string;
   }>;
 
   getRotatingCode(localId: string): Promise<{
@@ -201,9 +207,41 @@ export interface ToqueApi {
 
   deleteClubMember(id: string): Promise<void>;
 
+  revokeMemberCard(memberId: string): Promise<{ revoked: boolean; walletRevoked?: boolean }>;
+
   getClubConfig(): Promise<ClubConfig>;
 
   updateClubConfig(patch: Partial<ClubConfig>): Promise<ClubConfig>;
+
+  listClubCards(): Promise<ClubConfig[]>;
+
+  createClubCard(data: {
+    name?: string;
+    loyaltyTitle?: string;
+    rewardText: string;
+    targetStamps?: number;
+    stampsRequired?: number;
+    brandColor: string;
+    howToEarn?: string;
+    expirationPolicy?: string;
+    logoText?: string;
+    organizationName?: string;
+    barcodeFormat?: 'QR' | 'CODE128' | 'PDF417' | 'AZTEC';
+    barcodeValue?: string;
+    barcodeAltText?: string;
+    colorPreset?: 'dark' | 'blue' | 'green' | 'red' | 'purple' | 'orange';
+    customColor?: string;
+    logoUrl?: string;
+    wideLogoUrl?: string;
+    iconUrl?: string;
+    headerFields?: Array<{ label: string; value: string }>;
+    primaryFields?: Array<{ label: string; value: string }>;
+    secondaryFields?: Array<{ label: string; value: string }>;
+  }): Promise<ClubConfig>;
+
+  selectClubCard(cardId: string): Promise<ClubConfig>;
+
+  deleteClubCard(cardId: string): Promise<ClubConfig[]>;
 
   // Locales del Comercio
   listLocals(): Promise<ClubLocal[]>;
@@ -249,7 +287,7 @@ export interface ToqueApi {
 
   getPlanState(): Promise<PlanState>;
 
-  startTrial(planId?: 'free' | 'mensual' | 'anual'): Promise<PlanState>;
+  startTrial(planId?: 'free' | 'mensual' | 'anual' | 'a_consultar'): Promise<PlanState>;
 
   // Lista de Espera (Waitlist)
   joinWaitlist(data: {
@@ -349,7 +387,25 @@ export interface ToqueApi {
     customerContact?: string;
     contact?: string;
     stamps?: number;
+    stampsRequired?: number;
     points?: number;
+    serialNumber?: string;
+    isUpdate?: boolean;
+    logoText?: string;
+    organizationName?: string;
+    rewardText?: string;
+    barcodeFormat?: 'QR' | 'CODE128' | 'PDF417' | 'AZTEC';
+    barcodeValue?: string;
+    barcodeAltText?: string;
+    colorPreset?: 'dark' | 'blue' | 'green' | 'red' | 'purple' | 'orange';
+    color?: string;
+    logoURL?: string;
+    wideLogoURL?: string;
+    iconURL?: string;
+    headerFields?: { label: string; value: string }[];
+    primaryFields?: { label: string; value: string }[];
+    secondaryFields?: { label: string; value: string }[];
+    locations?: { latitude: number; longitude: number; relevantText?: string }[];
   }): Promise<WalletPassResponse>;
 
   // Caja y Cobros
@@ -441,10 +497,14 @@ export interface ToqueApi {
   // Resumen del Panel
   getDashboardSummary(period?: '30d' | '3m' | '12m' | 'all'): Promise<DashboardSummary>;
 
-  // Perfil del Negocio
+  // Perfil del Negocio y Cuenta
   getBusinessProfile(): Promise<BusinessProfile>;
 
   updateBusinessProfile(patch: Partial<BusinessProfile>): Promise<BusinessProfile>;
+
+  updateAccountEmail(newEmail: string): Promise<{ user: User; business: BusinessProfile }>;
+
+  deleteAccount(): Promise<{ deleted: boolean }>;
 
   // Super Admin & Equipo Toque (toque_admins)
   getSuperAdminSummary(): Promise<SuperAdminSummary>;
@@ -464,4 +524,5 @@ export interface ToqueApi {
 
   removeToqueAdmin(idOrEmail: string): Promise<void>;
 }
+
 

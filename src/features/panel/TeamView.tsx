@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { api, TeamMember, Cartel } from '../../api';
-import { ClubLocal } from '../../api/types';
+import { ClubLocal, PlanState } from '../../api/types';
+import { getPlanLimits } from '../../config/pricing';
 import { useAuth } from '../../lib/authContext';
 import { Card } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
@@ -24,6 +25,7 @@ export const TeamView: React.FC = () => {
   const [members, setMembers] = useState<TeamMember[]>([]);
   const [carteles, setCarteles] = useState<Cartel[]>([]);
   const [locals, setLocals] = useState<ClubLocal[]>([]);
+  const [planState, setPlanState] = useState<PlanState | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
   const [showAddModal, setShowAddModal] = useState(false);
@@ -37,14 +39,16 @@ export const TeamView: React.FC = () => {
   const loadData = async () => {
     setIsLoading(true);
     try {
-      const [teamList, cartelesList, localsList] = await Promise.all([
+      const [teamList, cartelesList, localsList, plan] = await Promise.all([
         api.listTeamMembers(),
         api.listCarteles(),
         api.listLocals(),
+        api.getPlanState(),
       ]);
       setMembers(teamList);
       setCarteles(cartelesList);
       setLocals(localsList);
+      setPlanState(plan);
     } catch {
       showToast('No se pudo cargar el equipo', 'error');
     } finally {
@@ -55,6 +59,9 @@ export const TeamView: React.FC = () => {
   useEffect(() => {
     loadData();
   }, []);
+
+  const limits = getPlanLimits(planState?.planId);
+  const isTeamLimitReached = members.length >= limits.maxTeamTotal;
 
   const toggleLocalSelection = (localId: string) => {
     setSelectedLocalIds((prev) =>
@@ -73,13 +80,14 @@ export const TeamView: React.FC = () => {
     try {
       const created = await api.addTeamMember({
         name: name.trim(),
-        email: email.trim() ? email.trim().toLowerCase() : undefined,
+        // Cajeros NO llevan mail para evitar accesos fuera del comercio
+        email: role === 'cashier' ? undefined : email.trim().toLowerCase(),
         role,
         assignedCartelId: assignedCartelId || undefined,
         assignedLocalIds: selectedLocalIds.length > 0 ? selectedLocalIds : locals.map((l) => l.id),
       });
       setMembers((prev) => [...prev, created]);
-      showToast(`${created.name} sumado al equipo`, 'success');
+      showToast(`${created.name} sumado al equipo y sincronizado con Caja POS`, 'success');
       setShowAddModal(false);
       setName('');
       setEmail('');
@@ -129,11 +137,11 @@ export const TeamView: React.FC = () => {
 
   if (isLoading) {
     return (
-      <div className="space-y-6">
-        <Skeleton className="h-10 w-64" />
-        <div className="space-y-3">
+      <div className="space-y-4">
+        <Skeleton className="h-8 w-48" />
+        <div className="space-y-2.5">
           {[1, 2, 3].map((i) => (
-            <Skeleton key={i} className="h-24 w-full rounded-xl" />
+            <Skeleton key={i} className="h-20 w-full rounded-xl" />
           ))}
         </div>
       </div>
@@ -141,21 +149,22 @@ export const TeamView: React.FC = () => {
   }
 
   return (
-    <div className="space-y-6">
-      {/* Encabezado */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+    <div className="space-y-5 text-sm">
+      {/* Encabezado compacto */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold text-[#f1f1ee] tracking-tight">
-            Equipo del comercio
+          <h1 className="text-lg font-bold text-[#f1f1ee] tracking-tight">
+            Equipo
           </h1>
           <p className="text-xs text-[#a1a1aa] mt-0.5">
-            Sumá cajeros o encargados por mail y definí el nivel de acceso y locales de cada integrante.
+            Enlazado en tiempo real con Caja POS. Los cajeros no llevan correo ni contraseña para operar únicamente dentro del local.
           </p>
         </div>
 
         <Button
           variant="ultramar"
           size="sm"
+          disabled={isTeamLimitReached}
           icon={<UserPlus className="w-4 h-4" />}
           onClick={() => {
             setName('');
@@ -166,44 +175,44 @@ export const TeamView: React.FC = () => {
             setShowAddModal(true);
           }}
         >
-          Sumar colaborador
+          {isTeamLimitReached ? 'Límite de plan alcanzado' : 'Sumar integrante'}
         </Button>
       </div>
 
-      {/* Explicación rápida de roles */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <div className="p-4 rounded-xl bg-[#111113] border border-[#242426] flex items-start gap-3">
-          <div className="w-8 h-8 rounded-lg bg-[#bec8ff]/15 text-[#bec8ff] flex items-center justify-center shrink-0">
-            <ShieldCheck className="w-4 h-4" />
+      {/* Explicación compacta de roles */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <div className="p-3.5 rounded-xl bg-[#141418] border border-[#282830] flex items-start gap-2.5">
+          <div className="w-7 h-7 rounded-lg bg-[#bec8ff]/15 text-[#bec8ff] flex items-center justify-center shrink-0">
+            <ShieldCheck className="w-3.5 h-3.5" />
           </div>
           <div>
-            <p className="text-xs font-bold text-[#f1f1ee]">Dueño</p>
-            <p className="text-xs text-[#a1a1aa] mt-0.5">
-              Acceso total al panel, métricas, productos, carteles, club, correcciones, equipo y caja.
+            <p className="text-xs font-bold text-[#f1f1ee]">Dueño (con contraseña)</p>
+            <p className="text-[11px] text-[#a1a1aa] mt-0.5">
+              Acceso completo al panel y requiere clave en Caja POS.
             </p>
           </div>
         </div>
 
-        <div className="p-4 rounded-xl bg-[#111113] border border-[#242426] flex items-start gap-3">
-          <div className="w-8 h-8 rounded-lg bg-[#2fb36a]/15 text-[#34d399] flex items-center justify-center shrink-0">
-            <Users className="w-4 h-4" />
+        <div className="p-3.5 rounded-xl bg-[#141418] border border-[#282830] flex items-start gap-2.5">
+          <div className="w-7 h-7 rounded-lg bg-[#2fb36a]/15 text-[#34d399] flex items-center justify-center shrink-0">
+            <Users className="w-3.5 h-3.5" />
           </div>
           <div>
-            <p className="text-xs font-bold text-[#f1f1ee]">Encargado</p>
-            <p className="text-xs text-[#a1a1aa] mt-0.5">
-              Gestiona el resumen, carteles, club, avisos, correcciones con motivo y opera la caja.
+            <p className="text-xs font-bold text-[#f1f1ee]">Encargado (con contraseña)</p>
+            <p className="text-[11px] text-[#a1a1aa] mt-0.5">
+              Gestiona el panel operativo y requiere clave al seleccionarse en POS.
             </p>
           </div>
         </div>
 
-        <div className="p-4 rounded-xl bg-[#111113] border border-[#242426] flex items-start gap-3">
-          <div className="w-8 h-8 rounded-lg bg-[#18181b] text-[#f1f1ee] flex items-center justify-center shrink-0">
-            <CreditCard className="w-4 h-4" />
+        <div className="p-3.5 rounded-xl bg-[#141418] border border-[#282830] flex items-start gap-2.5">
+          <div className="w-7 h-7 rounded-lg bg-[#1C1C22] text-[#f1f1ee] flex items-center justify-center shrink-0">
+            <CreditCard className="w-3.5 h-3.5" />
           </div>
           <div>
-            <p className="text-xs font-bold text-[#f1f1ee]">Cajero</p>
-            <p className="text-xs text-[#a1a1aa] mt-0.5">
-              Opera la caja y suma sellos / canjea premios en Escanear sin poder anular ni borrar.
+            <p className="text-xs font-bold text-[#f1f1ee]">Cajero (sin mail ni contraseña)</p>
+            <p className="text-[11px] text-[#a1a1aa] mt-0.5">
+              Solo opera desde la Caja del comercio; no puede iniciar sesión desde afuera.
             </p>
           </div>
         </div>
@@ -211,20 +220,22 @@ export const TeamView: React.FC = () => {
 
       {/* Lista de Miembros */}
       <Card padding="none" className="overflow-hidden">
-        <div className="p-5 border-b border-[#242426] flex items-center justify-between">
-          <h2 className="font-bold text-sm text-[#f1f1ee]">
-            Integrantes activos ({members.length})
+        <div className="p-4 border-b border-[#282830] flex items-center justify-between">
+          <h2 className="font-bold text-xs text-[#f1f1ee]">
+            Integrantes activos ({members.length}
+            {limits.maxTeamTotal < 999 ? ` / ${limits.maxTeamTotal}` : ''})
           </h2>
-          <span className="text-xs text-[#a1a1aa]">
-            Sincronización en tiempo real con Caja y Club
+          <span className="text-[11px] text-[#a1a1aa]">
+            Sincronizado con el selector de perfil en Caja POS
           </span>
         </div>
 
-        <div className="divide-y divide-[#242426]">
+        <div className="divide-y divide-[#282830]">
           {members.map((member) => {
             const isSelfOwner =
               member.id === 'team-owner-default' ||
               (Boolean(user?.email) &&
+                member.email &&
                 member.email.toLowerCase() === user?.email.toLowerCase() &&
                 member.role === 'owner');
 
@@ -238,17 +249,19 @@ export const TeamView: React.FC = () => {
             return (
               <div
                 key={member.id}
-                className="p-4 sm:p-5 flex flex-col lg:flex-row lg:items-center justify-between gap-4 hover:bg-[#161619] transition-colors"
+                className="p-3.5 sm:p-4 flex flex-col lg:flex-row lg:items-center justify-between gap-3 hover:bg-[#161619] transition-colors"
               >
-                <div className="flex items-center gap-3.5">
-                  <div className="w-10 h-10 rounded-xl bg-[#18181b] border border-[#28282a] flex items-center justify-center font-bold text-sm text-[#bec8ff] shrink-0">
+                <div className="flex items-center gap-3">
+                  <div className="w-8 h-8 rounded-xl bg-[#18181b] border border-[#28282a] flex items-center justify-center font-bold text-xs text-[#bec8ff] shrink-0">
                     {member.name.charAt(0).toUpperCase()}
                   </div>
                   <div>
                     <div className="flex items-center gap-2 flex-wrap">
-                      <p className="text-sm font-bold text-[#f1f1ee]">{member.name}</p>
+                      <p className="text-xs font-bold text-[#f1f1ee]">
+                        {member.name.replace(/\s*\([^)]*\)/g, '').trim()}
+                      </p>
                       <span
-                        className={`text-[11px] font-semibold px-2.5 py-0.5 rounded-full ${
+                        className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${
                           member.role === 'owner'
                             ? 'bg-[#bec8ff]/15 text-[#bec8ff]'
                             : member.role === 'manager'
@@ -259,21 +272,20 @@ export const TeamView: React.FC = () => {
                         {roleLabel}
                       </span>
                     </div>
-                    <p className="text-xs text-[#a1a1aa] mt-0.5">
-                      {member.email} · Alta: {formatDate(member.addedAt)}
+                    <p className="text-[11px] text-[#a1a1aa] mt-0.5">
+                      {member.role === 'cashier'
+                        ? 'Perfil de Caja POS (sin correo ni acceso externo)'
+                        : member.email}{' '}
+                      · Alta: {formatDate(member.addedAt)}
                     </p>
                   </div>
                 </div>
 
-                <div className="flex flex-wrap items-center gap-3">
+                <div className="flex flex-wrap items-center gap-2.5">
                   {isSelfOwner ? (
                     <div className="flex items-center gap-2">
-                      <span className="px-3 py-1.5 rounded-xl bg-[#161619] border border-[#28282a] text-xs font-semibold text-[#f1f1ee]">
-                        Dueño
-                      </span>
-                      <span className="px-3 py-1.5 rounded-xl bg-[#161619] border border-[#28282a] text-xs font-semibold text-[#a1a1aa] flex items-center gap-1.5">
-                        <QrCode className="w-3.5 h-3.5 text-[#bec8ff]" />
-                        Todos los locales y cajas
+                      <span className="px-2.5 py-1 rounded-xl bg-[#161619] border border-[#28282a] text-[11px] font-semibold text-[#f1f1ee]">
+                        Creador / Dueño
                       </span>
                     </div>
                   ) : (
@@ -287,14 +299,14 @@ export const TeamView: React.FC = () => {
                           )
                         }
                         aria-label="Rol del integrante"
-                        className="bg-[#161619] border border-[#28282a] rounded-xl px-3 py-1.5 text-xs font-semibold text-[#f1f1ee] focus:outline-none focus:border-[#bec8ff] cursor-pointer"
+                        className="bg-[#161619] border border-[#28282a] rounded-xl px-2.5 py-1.5 text-xs font-semibold text-[#f1f1ee] focus:outline-none focus:border-[#bec8ff] cursor-pointer"
                       >
                         <option value="cashier">Cajero</option>
                         <option value="manager">Encargado</option>
                         <option value="owner">Dueño</option>
                       </select>
 
-                      <div className="flex items-center gap-1.5 bg-[#161619] border border-[#28282a] rounded-xl px-3 py-1.5">
+                      <div className="flex items-center gap-1.5 bg-[#161619] border border-[#28282a] rounded-xl px-2.5 py-1.5">
                         <QrCode className="w-3.5 h-3.5 text-[#bec8ff]" />
                         <select
                           value={member.assignedCartelId || ''}
@@ -317,7 +329,7 @@ export const TeamView: React.FC = () => {
                         type="button"
                         onClick={() => handleRemove(member)}
                         title="Quitar del equipo"
-                        className="p-2 rounded-lg text-[#a1a1aa] hover:text-red-400 hover:bg-red-500/10 transition-colors cursor-pointer"
+                        className="p-1.5 rounded-lg text-[#a1a1aa] hover:text-red-400 hover:bg-red-500/10 transition-colors cursor-pointer"
                       >
                         <Trash2 className="w-4 h-4" />
                       </button>
@@ -330,19 +342,19 @@ export const TeamView: React.FC = () => {
         </div>
       </Card>
 
-      {/* Modal para sumar colaborador */}
+      {/* Modal para sumar integrante */}
       {showAddModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80">
-          <div className="w-full max-w-md rounded-2xl bg-[#111113] border border-[#242426] p-6 space-y-5 shadow-2xl">
+          <div className="w-full max-w-md rounded-2xl bg-[#141418] border border-[#282830] p-5 space-y-4 shadow-2xl">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2.5">
-                <div className="w-9 h-9 rounded-xl bg-[#bec8ff]/15 text-[#bec8ff] flex items-center justify-center">
-                  <UserPlus className="w-5 h-5" />
+                <div className="w-8 h-8 rounded-xl bg-[#bec8ff]/15 text-[#bec8ff] flex items-center justify-center">
+                  <UserPlus className="w-4 h-4" />
                 </div>
                 <div>
-                  <h2 className="font-bold text-base text-[#f1f1ee]">Sumar al equipo</h2>
-                  <p className="text-xs text-[#a1a1aa]">
-                    Ingresá nombre, mail y asignale su rol y locales.
+                  <h2 className="font-bold text-sm text-[#f1f1ee]">Sumar integrante</h2>
+                  <p className="text-[11px] text-[#a1a1aa]">
+                    Los cajeros se vinculan directo con Caja POS sin correo electrónico.
                   </p>
                 </div>
               </div>
@@ -355,37 +367,10 @@ export const TeamView: React.FC = () => {
               </button>
             </div>
 
-            <form onSubmit={handleAddMember} className="space-y-4">
-              <div>
-                <label className="block text-xs font-semibold text-[#a1a1aa] mb-1.5">
-                  Nombre y apellido
-                </label>
-                <input
-                  type="text"
-                  required
-                  placeholder="Ej: Lucas Martínez"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  className="w-full bg-[#161619] border border-[#28282a] rounded-xl px-3.5 py-2.5 text-sm text-[#f1f1ee] focus:outline-none focus:border-[#bec8ff]"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-[#a1a1aa] mb-1.5">
-                  Mail de acceso (para recibir código de 6 dígitos)
-                </label>
-                <input
-                  type="email"
-                  placeholder="Ej: lucas@comercio.ar"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  className="w-full bg-[#161619] border border-[#28282a] rounded-xl px-3.5 py-2.5 text-sm text-[#f1f1ee] focus:outline-none focus:border-[#bec8ff]"
-                />
-              </div>
-
+            <form onSubmit={handleAddMember} className="space-y-3.5">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-semibold text-[#a1a1aa] mb-1.5">
+                  <label className="block text-xs font-semibold text-[#a1a1aa] mb-1">
                     Rol
                   </label>
                   <select
@@ -393,22 +378,22 @@ export const TeamView: React.FC = () => {
                     onChange={(e) =>
                       setRole(e.target.value as 'cashier' | 'manager' | 'owner')
                     }
-                    className="w-full bg-[#161619] border border-[#28282a] rounded-xl px-3.5 py-2.5 text-xs font-medium text-[#f1f1ee] focus:outline-none focus:border-[#bec8ff]"
+                    className="w-full bg-[#1C1C22] border border-[#282830] rounded-xl px-3 py-2 text-xs font-medium text-[#f1f1ee] focus:outline-none focus:border-[#bec8ff]"
                   >
-                    <option value="cashier">Cajero</option>
-                    <option value="manager">Encargado</option>
-                    <option value="owner">Dueño</option>
+                    <option value="cashier">Cajero (sin contraseña ni mail)</option>
+                    <option value="manager">Encargado (con contraseña)</option>
+                    <option value="owner">Dueño (con contraseña)</option>
                   </select>
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold text-[#a1a1aa] mb-1.5">
+                  <label className="block text-xs font-semibold text-[#a1a1aa] mb-1">
                     Caja asignada
                   </label>
                   <select
                     value={assignedCartelId}
                     onChange={(e) => setAssignedCartelId(e.target.value)}
-                    className="w-full bg-[#161619] border border-[#28282a] rounded-xl px-3.5 py-2.5 text-xs font-medium text-[#f1f1ee] focus:outline-none focus:border-[#bec8ff]"
+                    className="w-full bg-[#1C1C22] border border-[#282830] rounded-xl px-3 py-2 text-xs font-medium text-[#f1f1ee] focus:outline-none focus:border-[#bec8ff]"
                   >
                     <option value="">Todas las cajas</option>
                     {carteles.map((c) => (
@@ -420,12 +405,42 @@ export const TeamView: React.FC = () => {
                 </div>
               </div>
 
+              <div>
+                <label className="block text-xs font-semibold text-[#a1a1aa] mb-1">
+                  Nombre y apellido
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="Nombre del integrante"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  className="w-full bg-[#1C1C22] border border-[#282830] rounded-xl px-3 py-2 text-xs text-[#f1f1ee] focus:outline-none focus:border-[#bec8ff]"
+                />
+              </div>
+
+              {role !== 'cashier' && (
+                <div>
+                  <label className="block text-xs font-semibold text-[#a1a1aa] mb-1">
+                    Correo electrónico (requerido para Encargado / Dueño)
+                  </label>
+                  <input
+                    type="email"
+                    required
+                    placeholder="encargado@comercio.com"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    className="w-full bg-[#1C1C22] border border-[#282830] rounded-xl px-3 py-2 text-xs text-[#f1f1ee] focus:outline-none focus:border-[#bec8ff]"
+                  />
+                </div>
+              )}
+
               {locals.length > 0 && (
                 <div>
-                  <span className="block text-xs font-semibold text-[#a1a1aa] mb-1.5">
+                  <span className="block text-xs font-semibold text-[#a1a1aa] mb-1">
                     Locales habilitados
                   </span>
-                  <div className="space-y-1.5">
+                  <div className="space-y-1">
                     {locals.map((loc) => (
                       <label
                         key={loc.id}
@@ -446,7 +461,7 @@ export const TeamView: React.FC = () => {
                 </div>
               )}
 
-              <div className="flex gap-2.5 pt-2">
+              <div className="flex gap-2 pt-2">
                 <Button
                   type="button"
                   variant="secundario"
@@ -464,7 +479,7 @@ export const TeamView: React.FC = () => {
                   loading={isSaving}
                   icon={<CheckCircle2 className="w-4 h-4" />}
                 >
-                  Guardar integrante
+                  Guardar
                 </Button>
               </div>
             </form>

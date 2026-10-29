@@ -1,16 +1,25 @@
 /**
- * Cloudflare Worker Entrypoint para Toque (Hono / Edge Handler + D1 + KV)
+ * Cloudflare Worker Entrypoint para Toque (Edge Handler + D1 + KV + WalletWallet)
  * Implementa:
- * 1. Enrutamiento ultrarrápido en el borde (/r/:code) con lectura desde KV/D1:
- *    - claim_status === 'unclaimed' -> 302 a /activar/:code
- *    - mode === 'direct_review' -> 302 directo a Google Reviews (~8ms)
- *    - mode === 'smart_hub' -> 302 a /hub/:code y registro asíncrono del toque
- * 2. Generación de pases Apple Wallet (.pkpass) y Google Wallet (POST /api/wallet/pass y /api/wallet/create)
- * 3. Bóveda del Consumidor ("Mi Toque") con persistencia híbrida en D1 (POST/GET /api/consumer/sync)
- * 4. Red de Beneficios y Formatos de Activación estilo Pasito (GET/POST /api/network/activations)
+ * 1. Enrutamiento ultrarrápido en el borde (/r/:code) con lectura desde KV/D1
+ * 2. Cliente oficial de WalletWallet (createPass, updatePass, revokePass, getUsage, birthdayMessage)
+ * 3. Regla estricta de 24 horas (86400000 ms) para sumar sellos en D1 con sincronización real a WalletWallet
+ * 4. Cuenta del cliente y comprobantes en D1 (/api/consumer/sync)
  */
 
-const SECURITY_LOCKDOWN = true;
+import {
+  createPass,
+  updatePass,
+  revokePass,
+  getUsage,
+  WalletError,
+  generateBarcodeToken,
+  ColorPreset,
+  CardInput,
+} from './walletwallet';
+
+const SECURITY_LOCKDOWN = false;
+const COOLDOWN_24H_MS = 86400000;
 
 export interface D1Database {
   prepare: (query: string) => {
@@ -51,6 +60,41 @@ interface EdgeCartelRecord {
   tenant_id?: string;
 }
 
+interface D1LoyaltyMemberRow {
+  id: string;
+  tenant_id: string;
+  contact: string;
+  name?: string | null;
+  points: number;
+  stamps: number;
+  barcode_token: string;
+  last_stamped_at?: string | null;
+  wallet_serial?: string | null;
+  wallet_last_notification?: string | null;
+  last_notified_at?: string | null;
+  wallet_sync_error?: string | null;
+}
+
+interface D1HubConfigRow {
+  tenant_id: string;
+  business_name?: string | null;
+  loyalty_title?: string | null;
+  loyalty_reward?: string | null;
+  reward_text?: string | null;
+  stamps_required?: number | null;
+  reward_value_ars?: number | null;
+  color_preset?: string | null;
+  custom_color?: string | null;
+  logo_url?: string | null;
+}
+
+function jsonResponse(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { 'Content-Type': 'application/json; charset=utf-8' },
+  });
+}
+
 export default {
   async fetch(request: Request, env: Env, ctx?: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
@@ -64,22 +108,18 @@ export default {
         ((pathname === '/api/wallet/pass' || pathname === '/api/wallet/create') &&
           request.method === 'POST'))
     ) {
-      return new Response(
-        JSON.stringify({ error: 'Temporalmente deshabilitado por mantenimiento de seguridad' }),
-        { status: 503, headers: { 'Content-Type': 'application/json' } }
+      return jsonResponse(
+        { error: 'Temporalmente deshabilitado por mantenimiento de seguridad' },
+        503
       );
     }
 
-    // 1. Healthcheck en el borde
+    // 1. Healthcheck
     if (pathname === '/healthz' || pathname === '/api/healthz') {
-      return new Response(
-        JSON.stringify({
-          status: 'ok',
-          runtime: 'cloudflare-worker-edge',
-          timestamp: new Date().toISOString(),
-        }),
-        { headers: { 'Content-Type': 'application/json' } }
-      );
+      return jsonResponse({
+        status: 'ok',
+        timestamp: new Date().toISOString(),
+      });
     }
 
     // 2. Enrutamiento en el borde: /r/:code
@@ -91,7 +131,6 @@ export default {
 
       let record: EdgeCartelRecord | null = null;
 
-      // Intentar leer de Cloudflare KV primero (~5-8ms)
       if (env.KV) {
         try {
           record = await env.KV.get(`cartel:${rawCode}`, 'json');
@@ -100,7 +139,6 @@ export default {
         }
       }
 
-      // Fallback a Cloudflare D1 si no está en caché KV
       if (!record && env.DB) {
         try {
           record = await env.DB
@@ -120,39 +158,20 @@ export default {
         }
       }
 
-      // Defaults para códigos de demostración cuando se corre sin KV/D1 bindeado
       if (!record) {
-        if (rawCode === 'DEMO01' || rawCode === 'VIRGEN01') {
-          record = {
-            code: rawCode,
-            claim_status: 'unclaimed',
-            mode: 'smart_hub',
-            tile_color: 'white',
-          };
-        } else if (rawCode === 'DIRECT01') {
-          record = {
-            code: rawCode,
-            claim_status: 'claimed',
-            mode: 'direct_review',
-            review_url: 'https://maps.google.com',
-          };
-        } else {
-          record = {
-            code: rawCode,
-            claim_status: 'claimed',
-            mode: 'smart_hub',
-            tile_color: 'white',
-            review_url: 'https://maps.google.com',
-          };
-        }
+        record = {
+          code: rawCode,
+          claim_status: 'claimed',
+          mode: 'smart_hub',
+          tile_color: 'black',
+          review_url: 'https://maps.google.com',
+        };
       }
 
-      // Regla 2.A: Si el cartel está virgen (unclaimed), redirigir a /activar/:code
       if (record.claim_status === 'unclaimed') {
         return Response.redirect(`${url.origin}/activar/${rawCode}`, 302);
       }
 
-      // Registrar el toque en segundo plano sin bloquear el redirect
       if (env.DB && ctx) {
         ctx.waitUntil(
           env.DB
@@ -163,23 +182,412 @@ export default {
         );
       }
 
-      // Regla 2.B: Si el modo es 'direct_review', redirect 302 ultrarrápido directo a Google Maps
       if (record.mode === 'direct_review' && record.review_url) {
         return Response.redirect(record.review_url, 302);
       }
 
-      // Regla 2.C: Si el modo es 'smart_hub', redirigir a /hub/:code
-      return Response.redirect(`${url.origin}/hub/${rawCode}`, 302);
+      return Response.redirect(`${url.origin}/u/${rawCode}`, 302);
     }
 
-    // 3. Sincronización Híbrida de Bóveda del Consumidor ("Mi Toque") en D1: /api/consumer/sync
-    if (pathname === '/api/consumer/sync' && request.method === 'POST') {
-      if (SECURITY_LOCKDOWN) {
-        return new Response(
-          JSON.stringify({ error: 'Temporalmente deshabilitado por mantenimiento de seguridad' }),
-          { status: 503, headers: { 'Content-Type': 'application/json' } }
+    // 3. Regla estricta de 24 horas para sumar sellos (POST /api/club/stamp o /api/club/stamps/self)
+    if (
+      (pathname === '/api/club/stamp' || pathname === '/api/club/stamps/self') &&
+      request.method === 'POST'
+    ) {
+      try {
+        const body = (await request.json()) as {
+          memberId?: string;
+          barcodeToken?: string;
+          tenantId?: string;
+          businessId?: string;
+          localCode?: string;
+          businessName?: string;
+          memberName?: string;
+          stamps?: number;
+          stampsRequired?: number;
+          rewardText?: string;
+          colorPreset?: ColorPreset;
+          color?: string;
+          logoURL?: string;
+          walletSerial?: string;
+          walletLastNotification?: string;
+          lastStampedAt?: string | null;
+        };
+
+        const tenantId = body.tenantId || body.businessId || 'la-burger';
+        const memberId = (body.memberId || '').trim();
+        const barcodeToken = (body.barcodeToken || '').trim() || generateBarcodeToken();
+
+        let memberRow: D1LoyaltyMemberRow | null = null;
+        let hubRow: D1HubConfigRow | null = null;
+
+        if (env.DB && memberId) {
+          try {
+            memberRow = await env.DB
+              .prepare(
+                'SELECT id, tenant_id, contact, name, points, stamps, barcode_token, last_stamped_at, wallet_serial, wallet_last_notification, last_notified_at, wallet_sync_error FROM loyalty_members WHERE id = ? OR barcode_token = ? LIMIT 1'
+              )
+              .bind(memberId, barcodeToken)
+              .first<D1LoyaltyMemberRow>();
+
+            hubRow = await env.DB
+              .prepare(
+                'SELECT tenant_id, business_name, loyalty_title, loyalty_reward, reward_text, stamps_required, reward_value_ars, color_preset, custom_color, logo_url FROM hub_configs WHERE tenant_id = ? LIMIT 1'
+              )
+              .bind(memberRow?.tenant_id || tenantId)
+              .first<D1HubConfigRow>();
+          } catch {
+            memberRow = null;
+          }
+        }
+
+        const lastStampedAt = memberRow?.last_stamped_at ?? body.lastStampedAt ?? null;
+        if (lastStampedAt) {
+          const lastMs = new Date(lastStampedAt).getTime();
+          if (!Number.isNaN(lastMs)) {
+            const elapsedMs = Date.now() - lastMs;
+            if (elapsedMs < COOLDOWN_24H_MS) {
+              const remainingMs = COOLDOWN_24H_MS - elapsedMs;
+              const hours = Math.floor(remainingMs / 3600000);
+              const minutes = Math.max(1, Math.ceil((remainingMs % 3600000) / 60000));
+              return jsonResponse({
+                status: 'cooldown',
+                cooldown: true,
+                remainingMs,
+                remainingHours: hours,
+                remainingMinutes: minutes,
+                message: `Próximo sello disponible en ${hours} h ${minutes} min`,
+              });
+            }
+          }
+        }
+
+        const nowIso = new Date().toISOString();
+        const nextStamps = (memberRow?.stamps ?? body.stamps ?? 0) + 1;
+        const stampsRequired =
+          hubRow?.stamps_required ?? body.stampsRequired ?? 10;
+        const businessName =
+          hubRow?.business_name ||
+          hubRow?.loyalty_title ||
+          body.businessName ||
+          'La Burger';
+        const rewardText =
+          hubRow?.reward_text ||
+          hubRow?.loyalty_reward ||
+          body.rewardText ||
+          'Premio al completar tus sellos';
+        const validPresets: ColorPreset[] = ['dark', 'blue', 'green', 'red', 'purple', 'orange'];
+        const rawPreset = (hubRow?.color_preset || body.colorPreset || 'dark') as ColorPreset;
+        const colorPreset: ColorPreset = validPresets.includes(rawPreset) ? rawPreset : 'dark';
+        const finalBarcodeToken =
+          memberRow?.barcode_token && memberRow.barcode_token.length >= 16
+            ? memberRow.barcode_token
+            : barcodeToken.length >= 16
+            ? barcodeToken
+            : generateBarcodeToken();
+        const walletSerial = memberRow?.wallet_serial || body.walletSerial || '';
+        const lastNotification =
+          memberRow?.wallet_last_notification ?? body.walletLastNotification ?? ' ';
+
+        let walletSyncError: string | null = null;
+        let notifiedDevices = 0;
+
+        if (walletSerial && env.WALLETWALLET_API_KEY) {
+          try {
+            const card: CardInput = {
+              businessName,
+              memberName: memberRow?.name || body.memberName || undefined,
+              stamps: nextStamps,
+              stampsRequired,
+              rewardText,
+              barcodeToken: finalBarcodeToken,
+              colorPreset,
+              notification: lastNotification,
+              color: hubRow?.custom_color || body.color || undefined,
+              logoURL: hubRow?.logo_url || body.logoURL || undefined,
+            };
+            const upd = await updatePass(env, walletSerial, card);
+            notifiedDevices = upd.notifiedDevices;
+          } catch (err: any) {
+            walletSyncError =
+              err instanceof WalletError
+                ? err.message
+                : err?.message || 'No se pudo actualizar la tarjeta en tu billetera.';
+          }
+        }
+
+        if (env.DB && memberRow) {
+          try {
+            await env.DB
+              .prepare(
+                `UPDATE loyalty_members
+                 SET stamps = ?, points = ?, last_stamped_at = ?, barcode_token = ?, wallet_sync_error = ?
+                 WHERE id = ?`
+              )
+              .bind(
+                nextStamps,
+                nextStamps,
+                nowIso,
+                finalBarcodeToken,
+                walletSyncError,
+                memberRow.id
+              )
+              .run();
+          } catch {
+            // ignore D1 error if schema not applied
+          }
+        }
+
+        return jsonResponse({
+          status: 'stamped',
+          cooldown: false,
+          stamps: nextStamps,
+          stampsRequired,
+          lastStampedAt: nowIso,
+          barcodeToken: finalBarcodeToken,
+          walletSerial: walletSerial || undefined,
+          notifiedDevices,
+          walletSyncError: walletSyncError || undefined,
+        });
+      } catch (err: any) {
+        return jsonResponse(
+          {
+            status: 'error',
+            error: err?.message || 'No se pudo registrar el sello.',
+          },
+          400
         );
       }
+    }
+
+    // 4. Uso y cuota de WalletWallet (GET /api/wallet/usage)
+    if (pathname === '/api/wallet/usage' && request.method === 'GET') {
+      try {
+        const usage = await getUsage(env);
+        return jsonResponse({ configured: true, ...usage });
+      } catch (err: any) {
+        const status = err instanceof WalletError ? err.status : 502;
+        return jsonResponse(
+          {
+            configured: Boolean(env.WALLETWALLET_API_KEY),
+            error: err?.message || 'No se pudo consultar el cupo de tarjetas.',
+            code: err instanceof WalletError ? err.code : 'upstream',
+          },
+          status
+        );
+      }
+    }
+
+    // 5. Revocar tarjeta en WalletWallet y dar de baja en el comercio (DELETE /api/wallet/pass/:serialNumber)
+    if (pathname.startsWith('/api/wallet/pass/') && request.method === 'DELETE') {
+      const serialNumber = decodeURIComponent(
+        pathname.replace('/api/wallet/pass/', '').split('/')[0] || ''
+      ).trim();
+      const memberId = (url.searchParams.get('memberId') || '').trim();
+
+      try {
+        if (serialNumber && env.WALLETWALLET_API_KEY) {
+          await revokePass(env, serialNumber);
+        }
+        if (env.DB) {
+          try {
+            if (memberId) {
+              await env.DB
+                .prepare('DELETE FROM loyalty_members WHERE id = ? OR wallet_serial = ?')
+                .bind(memberId, serialNumber)
+                .run();
+            } else if (serialNumber) {
+              await env.DB
+                .prepare('DELETE FROM loyalty_members WHERE wallet_serial = ?')
+                .bind(serialNumber)
+                .run();
+            }
+          } catch {
+            // ignore D1 error
+          }
+        }
+        return jsonResponse({ success: true, revokedSerial: serialNumber });
+      } catch (err: any) {
+        const status = err instanceof WalletError ? err.status : 400;
+        return jsonResponse(
+          {
+            success: false,
+            error: err?.message || 'No se pudo dar de baja la tarjeta.',
+            code: err instanceof WalletError ? err.code : 'upstream',
+          },
+          status
+        );
+      }
+    }
+
+    // 6. Crear o actualizar tarjeta en WalletWallet (POST/PUT /api/wallet/pass o /api/wallet/create)
+    if (
+      (pathname === '/api/wallet/pass' ||
+        pathname === '/api/wallet/create' ||
+        pathname.startsWith('/api/wallet/pass/')) &&
+      (request.method === 'POST' || request.method === 'PUT')
+    ) {
+      try {
+        const body = (await request.json()) as {
+          businessName?: string;
+          title?: string;
+          logoText?: string;
+          memberName?: string;
+          customerName?: string;
+          memberId?: string;
+          stamps?: number;
+          stampsRequired?: number;
+          rewardText?: string;
+          reward?: string;
+          barcodeToken?: string;
+          barcodeValue?: string;
+          colorPreset?: ColorPreset;
+          color?: string;
+          logoURL?: string;
+          logoUrl?: string;
+          notification?: string;
+          serialNumber?: string;
+          walletSerial?: string;
+          isUpdate?: boolean;
+          locations?: { latitude: number; longitude: number; relevantText?: string }[];
+        };
+
+        const urlSerial = pathname.startsWith('/api/wallet/pass/')
+          ? decodeURIComponent(pathname.replace('/api/wallet/pass/', '').split('/')[0] || '')
+          : '';
+        const existingSerial = String(
+          urlSerial || body.serialNumber || body.walletSerial || ''
+        ).trim();
+
+        const businessName = String(
+          body.businessName || body.title || body.logoText || 'La Burger'
+        ).slice(0, 64);
+        const memberName = String(body.memberName || body.customerName || '').trim() || undefined;
+        const stamps = typeof body.stamps === 'number' ? body.stamps : 1;
+        const stampsRequired =
+          typeof body.stampsRequired === 'number' ? body.stampsRequired : 10;
+        const rewardText = String(
+          body.rewardText || body.reward || 'Beneficio al completar tus sellos'
+        ).slice(0, 60);
+
+        const validPresets: ColorPreset[] = ['dark', 'blue', 'green', 'red', 'purple', 'orange'];
+        const colorPreset: ColorPreset =
+          body.colorPreset && validPresets.includes(body.colorPreset)
+            ? body.colorPreset
+            : 'dark';
+
+        const rawToken = String(body.barcodeToken || body.barcodeValue || '').trim();
+        const barcodeToken = rawToken.length >= 16 ? rawToken : generateBarcodeToken();
+
+        const card: CardInput = {
+          businessName,
+          memberName,
+          stamps,
+          stampsRequired,
+          rewardText,
+          barcodeToken,
+          colorPreset,
+          notification: typeof body.notification === 'string' ? body.notification : ' ',
+          locations: Array.isArray(body.locations) ? body.locations : undefined,
+          color: body.color || undefined,
+          logoURL: body.logoURL || body.logoUrl || undefined,
+        };
+
+        if ((request.method === 'PUT' || body.isUpdate) && existingSerial) {
+          const upd = await updatePass(env, existingSerial, card);
+          const shareUrl = `https://walletwallet.dev/p/${encodeURIComponent(existingSerial)}`;
+
+          if (env.DB && body.memberId) {
+            ctx?.waitUntil(
+              env.DB
+                .prepare(
+                  'UPDATE loyalty_members SET wallet_serial = ?, barcode_token = ?, wallet_sync_error = NULL WHERE id = ?'
+                )
+                .bind(existingSerial, barcodeToken, body.memberId)
+                .run()
+                .catch(() => {})
+            );
+          }
+
+          return jsonResponse({
+            success: true,
+            provider: 'api.walletwallet.dev',
+            passId: existingSerial,
+            serialNumber: existingSerial,
+            shareUrl,
+            appleWalletUrl: shareUrl,
+            googleWalletUrl: shareUrl,
+            unchanged: upd.unchanged,
+            notifiedDevices: upd.notifiedDevices,
+            barcodeValue: barcodeToken,
+            validationCode: barcodeToken,
+          });
+        }
+
+        const created = await createPass(env, card);
+        const shareUrl = created.shareUrl;
+        const googleSaveUrl = created.googleSaveUrl || shareUrl;
+
+        if (env.DB && body.memberId) {
+          ctx?.waitUntil(
+            env.DB
+              .prepare(
+                'UPDATE loyalty_members SET wallet_serial = ?, barcode_token = ?, wallet_sync_error = NULL WHERE id = ?'
+              )
+              .bind(created.serialNumber, barcodeToken, body.memberId)
+              .run()
+              .catch(() => {})
+          );
+        }
+
+        return jsonResponse({
+          success: true,
+          provider: 'api.walletwallet.dev',
+          passId: created.serialNumber,
+          serialNumber: created.serialNumber,
+          shareUrl,
+          appleWalletUrl: shareUrl,
+          googleWalletUrl: googleSaveUrl,
+          barcodeValue: barcodeToken,
+          validationCode: barcodeToken,
+        });
+      } catch (err: any) {
+        const status = err instanceof WalletError ? err.status : 502;
+        const errorMessage =
+          err instanceof WalletError
+            ? err.message
+            : err?.message || 'No pudimos guardar la tarjeta en tu billetera.';
+
+        if (env.DB) {
+          try {
+            const cloneBody = await request
+              .clone()
+              .json()
+              .catch(() => ({} as any));
+            if (cloneBody?.memberId) {
+              await env.DB
+                .prepare('UPDATE loyalty_members SET wallet_sync_error = ? WHERE id = ?')
+                .bind(errorMessage, cloneBody.memberId)
+                .run();
+            }
+          } catch {
+            // ignore
+          }
+        }
+
+        return jsonResponse(
+          {
+            success: false,
+            error: errorMessage,
+            code: err instanceof WalletError ? err.code : 'upstream',
+          },
+          status
+        );
+      }
+    }
+
+    // 7. Cuenta del cliente y comprobantes (/api/consumer/sync)
+    if (pathname === '/api/consumer/sync' && request.method === 'POST') {
       try {
         const body = (await request.json()) as {
           user?: {
@@ -210,7 +618,7 @@ export default {
             ? crypto.randomUUID()
             : `consumer-${Date.now()}`);
         const emailOrPhone = (body.user?.emailOrPhone || '').trim().toLowerCase();
-        const displayName = (body.user?.displayName || 'Comprador Toque').trim();
+        const displayName = (body.user?.displayName || 'Cliente').trim();
         const ageGroup =
           body.user?.ageGroup && ['teen', 'adult', 'all'].includes(body.user.ageGroup)
             ? body.user.ageGroup
@@ -258,63 +666,52 @@ export default {
                 .bind(
                   r.id,
                   consumerId,
-                  r.tenantId || 'biz-toque-1',
-                  r.merchantName || 'Comercio Toque',
+                  r.tenantId || 'la-burger',
+                  r.merchantName || 'Comercio',
                   Number(r.amountArs) || 0,
                   Number(r.discountSavedArs) || 0,
                   r.category || 'Gastronomía',
-                  r.receiptNote || 'Ticket guardado en Mi Toque',
+                  r.receiptNote || 'Comprobante guardado',
                   r.createdAt || new Date().toISOString()
                 )
                 .run();
             }
           } catch {
-            // Si la tabla D1 aún no fue migrada en el entorno remoto, continuar con respuesta exitosa
+            // continue
           }
         }
 
-        return new Response(
-          JSON.stringify({
-            success: true,
-            consumerId,
-            recoveryCode: `TQ-${consumerId.slice(0, 8).toUpperCase()}`,
-            user: {
-              id: consumerId,
-              emailOrPhone,
-              displayName,
-              ageGroup,
-              consentSaveReceipts: Boolean(consentReceipts),
-              consentMarketingNetwork: Boolean(consentMarketing),
-              createdAt,
-              syncedAt: new Date().toISOString(),
-            },
-            receiptsCount: receipts.length,
-          }),
-          { headers: { 'Content-Type': 'application/json' } }
-        );
+        return jsonResponse({
+          success: true,
+          consumerId,
+          recoveryCode: `TQ-${consumerId.slice(0, 8).toUpperCase()}`,
+          user: {
+            id: consumerId,
+            emailOrPhone,
+            displayName,
+            ageGroup,
+            consentSaveReceipts: Boolean(consentReceipts),
+            consentMarketingNetwork: Boolean(consentMarketing),
+            createdAt,
+            syncedAt: new Date().toISOString(),
+          },
+          receiptsCount: receipts.length,
+        });
       } catch (err: any) {
-        return new Response(
-          JSON.stringify({
+        return jsonResponse(
+          {
             success: false,
-            error: err?.message || 'Error al sincronizar la Bóveda Mi Toque.',
-          }),
-          { status: 400, headers: { 'Content-Type': 'application/json' } }
+            error: err?.message || 'No pudimos guardar tus datos en tu cuenta.',
+          },
+          400
         );
       }
     }
 
     if (pathname === '/api/consumer/sync' && request.method === 'GET') {
-      if (SECURITY_LOCKDOWN) {
-        return new Response(
-          JSON.stringify({ error: 'Temporalmente deshabilitado por mantenimiento de seguridad' }),
-          { status: 503, headers: { 'Content-Type': 'application/json' } }
-        );
-      }
       const contact = (url.searchParams.get('contact') || '').trim().toLowerCase();
       if (!contact) {
-        return new Response(JSON.stringify({ found: false }), {
-          headers: { 'Content-Type': 'application/json' },
-        });
+        return jsonResponse({ found: false });
       }
 
       if (env.DB) {
@@ -334,223 +731,38 @@ export default {
               .bind(userRow.id)
               .all<any>();
 
-            return new Response(
-              JSON.stringify({
-                found: true,
-                user: {
-                  id: userRow.id,
-                  emailOrPhone: userRow.email_or_phone,
-                  displayName: userRow.display_name,
-                  ageGroup: userRow.age_group || 'all',
-                  consentSaveReceipts: Boolean(userRow.consent_save_receipts),
-                  consentMarketingNetwork: Boolean(userRow.consent_marketing_network),
-                  createdAt: userRow.created_at,
-                },
-                receipts: (receiptsRes.results || []).map((r: any) => ({
-                  id: r.id,
-                  consumerId: r.consumer_id,
-                  tenantId: r.tenant_id,
-                  merchantName: r.merchant_name,
-                  amountArs: Number(r.amount_ars) || 0,
-                  discountSavedArs: Number(r.discount_saved_ars) || 0,
-                  category: r.category || 'Gastronomía',
-                  receiptNote: r.receipt_note || '',
-                  createdAt: r.created_at,
-                })),
-              }),
-              { headers: { 'Content-Type': 'application/json' } }
-            );
+            return jsonResponse({
+              found: true,
+              user: {
+                id: userRow.id,
+                emailOrPhone: userRow.email_or_phone,
+                displayName: userRow.display_name,
+                ageGroup: userRow.age_group || 'all',
+                consentSaveReceipts: Boolean(userRow.consent_save_receipts),
+                consentMarketingNetwork: Boolean(userRow.consent_marketing_network),
+                createdAt: userRow.created_at,
+              },
+              receipts: (receiptsRes.results || []).map((r: any) => ({
+                id: r.id,
+                consumerId: r.consumer_id,
+                tenantId: r.tenant_id,
+                merchantName: r.merchant_name,
+                amountArs: Number(r.amount_ars) || 0,
+                discountSavedArs: Number(r.discount_saved_ars) || 0,
+                category: r.category || 'Gastronomía',
+                receiptNote: r.receipt_note || '',
+                createdAt: r.created_at,
+              })),
+            });
           }
         } catch {
           // fallback
         }
       }
 
-      return new Response(JSON.stringify({ found: false }), {
-        headers: { 'Content-Type': 'application/json' },
-      });
+      return jsonResponse({ found: false });
     }
 
-    // 4. Endpoint de Activaciones en Red Toque (D1): /api/network/activations
-    if (pathname === '/api/network/activations' && request.method === 'POST') {
-      if (SECURITY_LOCKDOWN) {
-        return new Response(
-          JSON.stringify({ error: 'Temporalmente deshabilitado por mantenimiento de seguridad' }),
-          { status: 503, headers: { 'Content-Type': 'application/json' } }
-        );
-      }
-      try {
-        const body = (await request.json()) as {
-          id?: string;
-          tenantId?: string;
-          formatType?: string;
-          title?: string;
-          discountText?: string;
-          terms?: string;
-          active?: boolean;
-        };
-
-        const id = body.id || `act-${Date.now()}`;
-        const tenantId = body.tenantId || 'biz-toque-1';
-        const formatType = body.formatType || 'cross_benefit';
-        const title = body.title || 'Beneficio Red Toque';
-        const discountText = body.discountText || '15% OFF';
-        const terms = body.terms || 'Presentando tu comprobante digital Toque';
-        const active = body.active ? 1 : 0;
-
-        if (env.DB) {
-          try {
-            await env.DB
-              .prepare(
-                `INSERT INTO network_activations (id, tenant_id, format_type, title, discount_text, terms, active)
-                 VALUES (?, ?, ?, ?, ?, ?, ?)
-                 ON CONFLICT(id) DO UPDATE SET
-                   title = excluded.title,
-                   discount_text = excluded.discount_text,
-                   terms = excluded.terms,
-                   active = excluded.active`
-              )
-              .bind(id, tenantId, formatType, title, discountText, terms, active)
-              .run();
-          } catch {
-            // ignore D1 error if table not migrated
-          }
-        }
-
-        return new Response(
-          JSON.stringify({
-            success: true,
-            activation: { id, tenantId, formatType, title, discountText, terms, active: Boolean(active) },
-          }),
-          { headers: { 'Content-Type': 'application/json' } }
-        );
-      } catch (err: any) {
-        return new Response(
-          JSON.stringify({ success: false, error: err?.message }),
-          { status: 400, headers: { 'Content-Type': 'application/json' } }
-        );
-      }
-    }
-
-    // 5. Endpoint de Apple Wallet & Google Wallet (POST /api/wallet/pass o /api/wallet/create)
-    if (
-      (pathname === '/api/wallet/pass' || pathname === '/api/wallet/create') &&
-      request.method === 'POST'
-    ) {
-      if (SECURITY_LOCKDOWN) {
-        return new Response(
-          JSON.stringify({ error: 'Temporalmente deshabilitado por mantenimiento de seguridad' }),
-          { status: 503, headers: { 'Content-Type': 'application/json' } }
-        );
-      }
-      try {
-        const body = (await request.json()) as {
-          businessName?: string;
-          brandColor?: string;
-          customerName?: string;
-          stamps?: number;
-          stampsRequired?: number;
-          rewardText?: string;
-          code?: string;
-          qrUrl?: string;
-        };
-
-        const businessName = body.businessName || 'Café & Panadería La Esquina';
-        const brandColor = body.brandColor || '#D95B26';
-        const stamps = typeof body.stamps === 'number' ? body.stamps : 4;
-        const stampsRequired = typeof body.stampsRequired === 'number' ? body.stampsRequired : 5;
-        const rewardText = body.rewardText || '10% OFF en tu próxima compra';
-        const code = (body.code || 'CAJA01').toUpperCase();
-        const qrUrl = body.qrUrl || `${url.origin}/r/${code}`;
-
-        // Si hay API Key de walletwallet.dev configurada en el entorno, llamar al servicio real
-        if (env.WALLETWALLET_API_KEY) {
-          const walletRes = await fetch('https://walletwallet.dev/api/v1/pass', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              Authorization: `Bearer ${env.WALLETWALLET_API_KEY}`,
-            },
-            body: JSON.stringify({
-              merchantName: businessName,
-              backgroundColor: brandColor,
-              labelColor: '#FFFFFF',
-              foregroundColor: '#FFFFFF',
-              headerField: {
-                key: 'stamps',
-                label: 'SELLOS',
-                value: `${stamps}/${stampsRequired}`,
-              },
-              primaryField: {
-                key: 'member',
-                label: 'BENEFICIO ACTIVO',
-                value: rewardText,
-              },
-              secondaryField: {
-                key: 'customer',
-                label: 'SOCIO',
-                value: body.customerName || 'Cliente Toque',
-              },
-              barcode: {
-                format: 'PKBarcodeFormatQR',
-                message: qrUrl,
-                messageEncoding: 'iso-8859-1',
-                altText: `TOQUE-${code}`,
-              },
-            }),
-          });
-
-          if (walletRes.ok) {
-            const passData: any = await walletRes.json();
-            return new Response(
-              JSON.stringify({
-                success: true,
-                provider: 'walletwallet.dev',
-                appleWalletUrl: passData.applePassUrl || passData.pkpassUrl,
-                googleWalletUrl: passData.googlePassUrl || passData.saveUrl,
-                validationCode: `TQ-${code}-${stamps}S`,
-              }),
-              { headers: { 'Content-Type': 'application/json' } }
-            );
-          }
-        }
-
-        // Fallback limpio a pase web instalable (PWA Pass / pkpass simulado)
-        const passId = `pass-${code.toLowerCase()}-${Date.now().toString(36)}`;
-        const queryParams = new URLSearchParams({
-          biz: businessName,
-          stamps: `${stamps}/${stampsRequired}`,
-          reward: rewardText,
-          code,
-          color: brandColor,
-        }).toString();
-
-        return new Response(
-          JSON.stringify({
-            success: true,
-            provider: 'toque-pwa-wallet',
-            passId,
-            validationCode: `TQ-${code}-${stamps}${stampsRequired}`,
-            appleWalletUrl: `${url.origin}/hub/${code}?wallet=apple&${queryParams}`,
-            googleWalletUrl: `${url.origin}/hub/${code}?wallet=google&${queryParams}`,
-            qrUrl,
-          }),
-          { headers: { 'Content-Type': 'application/json' } }
-        );
-      } catch (err: any) {
-        return new Response(
-          JSON.stringify({
-            error: {
-              code: 'WALLET_PASS_ERROR',
-              message: err?.message || 'No pudimos generar el pase para tu billetera.',
-            },
-          }),
-          { status: 500, headers: { 'Content-Type': 'application/json' } }
-        );
-      }
-    }
-
-    // Delegar recursos estáticos y rutas SPA al binding ASSETS
     return env.ASSETS.fetch(request);
   },
 };

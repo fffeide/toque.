@@ -56,6 +56,11 @@ export interface WalletPassResponse {
   success: boolean;
   provider: string;
   passId?: string;
+  serialNumber?: string;
+  shareUrl?: string;
+  unchanged?: boolean;
+  notifiedDevices?: number;
+  walletSyncError?: string;
   validationCode: string;
   appleWalletUrl: string;
   googleWalletUrl: string;
@@ -117,6 +122,12 @@ export interface HubConfig {
   mode: HubMode;
   blocks: HubBlockConfig[];
   accentColor: string;
+  businessName?: string;
+  stampsRequired?: number;
+  rewardText?: string;
+  rewardValueArs?: number;
+  colorPreset?: 'dark' | 'blue' | 'green' | 'red' | 'purple' | 'orange';
+  customColor?: string;
   logoUrl?: string;
   googleReviewUrl?: string;
   socials: HubSocials;
@@ -208,14 +219,32 @@ export interface ClubReward {
 }
 
 export interface ClubConfig {
+  id?: string;
   name: string;
   clubName?: string;
   brandColor?: string;
   cardThemeColor?: string;
   logoUrl?: string;
+  wideLogoUrl?: string;
+  iconUrl?: string;
+  logoText?: string;
+  organizationName?: string;
+  headerFields?: { label: string; value: string }[];
+  primaryFields?: { label: string; value: string }[];
+  secondaryFields?: { label: string; value: string }[];
+  barcodeFormat?: 'QR' | 'CODE128' | 'PDF417' | 'AZTEC';
+  barcodeValue?: string;
+  overrideTextUnderBarcode?: boolean;
+  barcodeAltText?: string;
+  colorPreset?: 'dark' | 'blue' | 'green' | 'red' | 'purple' | 'orange';
+  customColor?: string;
+  locations?: { latitude: number; longitude: number; relevantText?: string }[];
+  walletSerial?: string;
+  shareUrl?: string;
   targetStamps?: number;
   stampsRequired?: number;
   rewardText?: string;
+  rewardValueArs?: number;
   loyaltyTitle?: string;
   loyaltyReward?: string;
   howToEarn?: string;
@@ -283,10 +312,12 @@ export interface ClubMember {
   uuid?: string;
   accountId?: string;
   businessId?: string;
+  businessName?: string;
   localId?: string;
   localCode?: string;
   localName?: string;
   memberCode?: string;
+  barcodeToken?: string;
   name?: string;
   email?: string;
   phone?: string;
@@ -303,14 +334,24 @@ export interface ClubMember {
   stamps: number;
   stampsRequired?: number;
   targetStamps?: number;
+  rewardText?: string;
+  rewardValueArs?: number;
+  colorPreset?: 'dark' | 'blue' | 'green' | 'red' | 'purple' | 'orange';
+  customColor?: string;
+  logoUrl?: string;
   rewardsRedeemed?: number;
   lastVisitAt?: string;
   lastStampedAt?: string;
   passId?: string;
   passUrl?: string;
+  shareUrl?: string;
   walletPassUrl?: string;
   appleWalletUrl?: string;
   googleWalletUrl?: string;
+  walletSerial?: string;
+  walletLastNotification?: string;
+  lastNotifiedAt?: string;
+  walletSyncError?: string;
   joinedAt: string;
   consent: boolean;
   isSample?: boolean;
@@ -327,9 +368,12 @@ export interface ClubPublicInfo {
   programName: string;
   loyaltyTitle?: string;
   brandColor: string;
+  colorPreset?: 'dark' | 'blue' | 'green' | 'red' | 'purple' | 'orange';
+  customColor?: string;
   logoUrl?: string;
   targetStamps: number;
   rewardText: string;
+  rewardValueArs?: number;
   howToEarn?: string;
   expirationPolicy?: string;
   mode: ClubRuleType;
@@ -411,11 +455,13 @@ export interface SetupProgress {
 }
 
 export interface PlanState {
-  status: 'trial' | 'active' | 'expired' | 'free';
-  planId: 'free' | 'mensual' | 'anual';
-  tier?: 'free' | 'pro';
-  billingCycle?: 'free' | 'monthly' | 'annual';
+  status: 'trial' | 'active' | 'expired' | 'expired_trial' | 'free' | 'custom';
+  planId: 'free' | 'mensual' | 'anual' | 'a_consultar';
+  tier?: 'free' | 'pro' | 'custom';
+  billingCycle?: 'free' | 'monthly' | 'annual' | 'custom';
   daysRemaining: number;
+  graceDaysRemaining?: number;
+  unpaidLockdown?: boolean;
   trialStartedAt?: string;
   trialEndsAt?: string;
   expiresAt?: string;
@@ -540,6 +586,7 @@ export interface PublicHub {
   config: HubConfig;
   smartHubConfig?: SmartHubConfig;
   crossBenefits?: NetworkActivation[];
+  unpaidLockdown?: boolean;
 }
 
 export type UserRole = 'owner' | 'manager' | 'cashier' | 'superadmin';
@@ -603,6 +650,7 @@ export interface DashboardSummary {
   // Métricas de Club por período
   visitsCount?: number;
   returningMembersCount?: number;
+  returningRatePercent?: number;
   rewardsRedeemedCount?: number;
   stampsAddedCount?: number;
 }

@@ -73,7 +73,8 @@ export const ReceiptDetailView: React.FC = () => {
         const now = Date.now();
         const expiresMs = new Date(data.expiresAt).getTime();
         const createdMs = new Date(data.createdAt).getTime();
-        const withinTwoMinutes = now <= expiresMs && now - createdMs <= 2 * 60 * 1000;
+        const withinTwoMinutes =
+          now <= expiresMs + 10000 || now - createdMs <= 2 * 60 * 1000 + 10000;
         const openedByThisDevice = hasOpenedReceiptLocally(data.id);
 
         if (openedByThisDevice) {
@@ -82,19 +83,31 @@ export const ReceiptDetailView: React.FC = () => {
           return;
         }
 
-        // Si no fue abierto por este dispositivo, debe estar 'ready' y dentro del límite de 2 minutos
-        if (data.status !== 'ready' || !withinTwoMinutes) {
+        // Si el comprobante no está vencido (dentro de los 2 minutos), permitimos abrirlo y marcarlo en el dispositivo
+        if (!withinTwoMinutes && data.status !== 'ready') {
           setReceipt(null);
           setIsLockedOrExpired(true);
           return;
         }
 
-        // Al abrirlo dentro de los 2 minutos, se bloquea inmediatamente para cualquier otro escaneo
+        if (!withinTwoMinutes) {
+          setReceipt(null);
+          setIsLockedOrExpired(true);
+          return;
+        }
+
         markReceiptOpenedLocally(data.id);
-        const claimed = await api.claimReceipt(data.id);
-        if (active) {
-          setReceipt(claimed.receipt);
-          setIsLockedOrExpired(false);
+        if (data.status === 'ready') {
+          const claimed = await api.claimReceipt(data.id).catch(() => ({ receipt: data }));
+          if (active) {
+            setReceipt(claimed.receipt);
+            setIsLockedOrExpired(false);
+          }
+        } else {
+          if (active) {
+            setReceipt(data);
+            setIsLockedOrExpired(false);
+          }
         }
       } catch {
         if (active) {
