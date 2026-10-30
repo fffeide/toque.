@@ -11,8 +11,7 @@ import { GoogleAddressPicker } from '../../components/maps/GoogleAddressPicker';
 import { BusinessHoursEditor } from '../../components/schedule/BusinessHoursEditor';
 import {
   Smartphone,
-  ArrowUp,
-  ArrowDown,
+  GripVertical,
   Save,
   Star,
   Receipt,
@@ -154,18 +153,24 @@ export const HubEditorView: React.FC = () => {
     api.updateHubConfig({ ...config, blocks: nextBlocks }).catch(() => {});
   };
 
-  const handleMoveBlock = (index: number, direction: -1 | 1) => {
-    if (!config) return;
-    const ordered = normalizeHubBlocks(config.blocks);
-    const targetIndex = index + direction;
-    if (targetIndex < 0 || targetIndex >= ordered.length) return;
+  const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
+  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
 
+  const handleDrop = (targetIndex: number) => {
+    if (!config || draggedIndex === null || draggedIndex === targetIndex) {
+      setDraggedIndex(null);
+      setDragOverIndex(null);
+      return;
+    }
+    const ordered = normalizeHubBlocks(config.blocks);
+    const itemToMove = ordered[draggedIndex];
     const nextBlocks = [...ordered];
-    const temp = nextBlocks[index];
-    nextBlocks[index] = nextBlocks[targetIndex];
-    nextBlocks[targetIndex] = temp;
+    nextBlocks.splice(draggedIndex, 1);
+    nextBlocks.splice(targetIndex, 0, itemToMove);
     setConfig({ ...config, blocks: nextBlocks });
     api.updateHubConfig({ ...config, blocks: nextBlocks }).catch(() => {});
+    setDraggedIndex(null);
+    setDragOverIndex(null);
   };
 
   const handleSave = async () => {
@@ -279,57 +284,79 @@ export const HubEditorView: React.FC = () => {
           <Card className="p-6">
             <div className="mb-4">
               <h2 className="font-bold text-base text-[#f1f1ee]">Orden en pantalla</h2>
+              <p className="text-xs text-[#a1a1aa] mt-0.5">
+                Arrastrá los bloques para definir el orden exacto en el que aparecen en el Hub.
+              </p>
             </div>
 
             <div className="space-y-2.5">
               {orderedBlocks.map((block, index) => {
                 const isReceipt = block.key === 'receipt';
-                const canMoveUp = index > 0;
-                const canMoveDown = index < orderedBlocks.length - 1;
+                const isDragged = draggedIndex === index;
+                const isDragOver = dragOverIndex === index;
 
                 return (
                   <div
                     key={block.key}
-                    className={`flex items-center justify-between p-3.5 rounded-xl border transition-colors ${
-                      isReceipt
-                        ? 'border-[#2fb36a] bg-[#2fb36a]/10'
+                    draggable
+                    onDragStart={(e) => {
+                      setDraggedIndex(index);
+                      e.dataTransfer.effectAllowed = 'move';
+                    }}
+                    onDragOver={(e) => {
+                      e.preventDefault();
+                      e.dataTransfer.dropEffect = 'move';
+                      if (dragOverIndex !== index) {
+                        setDragOverIndex(index);
+                      }
+                    }}
+                    onDragLeave={() => {
+                      if (dragOverIndex === index) {
+                        setDragOverIndex(null);
+                      }
+                    }}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      handleDrop(index);
+                    }}
+                    onDragEnd={() => {
+                      setDraggedIndex(null);
+                      setDragOverIndex(null);
+                    }}
+                    className={`flex items-center justify-between p-3.5 rounded-xl border transition-all cursor-grab active:cursor-grabbing select-none ${
+                      isDragged
+                        ? 'opacity-40 scale-95 border-[#D95B26]'
+                        : isDragOver
+                        ? 'border-[#D95B26] bg-[#D95B26]/10 shadow-md ring-1 ring-[#D95B26]'
+                        : isReceipt
+                        ? 'border-[#2fb36a]/40 bg-[#2fb36a]/10'
                         : block.enabled
-                        ? 'border-[#28282a] bg-[#161619]'
+                        ? 'border-[#28282a] bg-[#161619] hover:border-[#3a3a40]'
                         : 'border-[#242426] bg-[#111113] opacity-60'
                     }`}
                   >
                     <div className="flex items-center gap-3">
-                      <input
-                        type="checkbox"
-                        checked={isReceipt ? true : block.enabled}
-                        disabled={isReceipt}
-                        onChange={() => handleToggleBlock(block.key)}
-                        className="w-4 h-4 rounded accent-[#2fb36a] cursor-pointer disabled:cursor-default"
-                      />
+                      <GripVertical className="w-4 h-4 text-[#71717a] shrink-0" />
+                      {!isReceipt ? (
+                        <input
+                          type="checkbox"
+                          checked={block.enabled}
+                          onChange={() => handleToggleBlock(block.key)}
+                          onClick={(e) => e.stopPropagation()}
+                          className="w-4 h-4 rounded accent-[#2fb36a] cursor-pointer"
+                        />
+                      ) : null}
                       <span className="text-sm font-semibold text-[#f1f1ee]">
                         {BLOCK_LABELS[block.key]}
                       </span>
                     </div>
 
-                    <div className="flex items-center gap-1">
-                      <button
-                        type="button"
-                        disabled={!canMoveUp}
-                        onClick={() => handleMoveBlock(index, -1)}
-                        title="Subir bloque"
-                        className="p-1.5 rounded-lg hover:bg-[#242429] text-[#a1a1aa] hover:text-[#f1f1ee] disabled:opacity-25 cursor-pointer"
-                      >
-                        <ArrowUp className="w-4 h-4" />
-                      </button>
-                      <button
-                        type="button"
-                        disabled={!canMoveDown}
-                        onClick={() => handleMoveBlock(index, 1)}
-                        title="Bajar bloque"
-                        className="p-1.5 rounded-lg hover:bg-[#242429] text-[#a1a1aa] hover:text-[#f1f1ee] disabled:opacity-25 cursor-pointer"
-                      >
-                        <ArrowDown className="w-4 h-4" />
-                      </button>
+                    <div className="flex items-center gap-2">
+                      {isReceipt && (
+                        <span className="text-[11px] font-semibold text-[#2fb36a] bg-[#2fb36a]/15 px-2 py-0.5 rounded-md">
+                          Obligatorio
+                        </span>
+                      )}
                     </div>
                   </div>
                 );

@@ -1,10 +1,23 @@
-import React from 'react';
-import { Download, Image as ImageIcon, Clock, Sparkles, Lock } from 'lucide-react';
+import React, { useState } from 'react';
+import {
+  Download,
+  Share2,
+  Clock,
+  Sparkles,
+  Lock,
+  CheckCircle2,
+  MapPin,
+  Award,
+} from 'lucide-react';
 
 export interface DieCutTicketData {
   id: string;
   businessName: string;
+  businessAddress?: string;
   amountArs: number;
+  subtotalArs?: number;
+  discountArs?: number;
+  paymentMethod?: string;
   dateTime: string;
   stampAdded?: string;
   rewardNote?: string;
@@ -18,7 +31,10 @@ export interface DieCutTicketProps {
   ticket?: DieCutTicketData;
   receiptId?: string;
   businessName?: string;
+  businessAddress?: string;
   total?: number;
+  subtotal?: number;
+  discount?: number;
   createdAt?: string;
   items?: Array<{ name: string; quantity?: number; qty?: number; price: number }>;
   method?: string;
@@ -28,31 +44,32 @@ export interface DieCutTicketProps {
   onViewPass?: () => void;
   onDownloadPdf?: () => void;
   onSaveImage?: () => void;
-  /** Si se usa en el Hub: segundos restantes antes de los 2 minutos */
   secondsRemaining?: number | null;
-  /** Si ya pasaron los 2 minutos en el Hub, se aplica blur y aparece el botón a Toquecitos */
   isExpiredBlur?: boolean;
   onOpenToquecitos?: () => void;
   isRegisteredInHub?: boolean;
 }
 
-function buildBarcodeDigits(id: string, amount: number): [string, string, string] {
-  const numericHash = id
-    .split('')
-    .reduce((acc, ch, idx) => acc + ch.charCodeAt(0) * (idx + 17), Math.round(amount || 0));
-  const part1 = '7';
-  const part2 = String(790000 + (numericHash % 9999)).padStart(6, '0');
-  const part3 = String(100000 + ((numericHash * 31) % 899999)).padStart(6, '0');
-  return [part1, part2, part3];
+function formatPaymentMethodLabel(m?: string): string {
+  if (!m) return 'QR / Billetera virtual';
+  const low = m.toLowerCase();
+  if (low === 'mercadopago' || low === 'mp_qr' || low === 'qr') return 'QR / Billetera virtual';
+  if (low === 'cash' || low === 'efectivo') return 'Efectivo';
+  if (low === 'card' || low === 'tarjeta') return 'Tarjeta';
+  return m;
 }
 
 export const DieCutTicket: React.FC<DieCutTicketProps> = ({
   ticket: providedTicket,
   receiptId,
   businessName,
+  businessAddress,
   total,
+  subtotal,
+  discount,
   createdAt,
   items,
+  method,
   stamps,
   stampsRequired,
   isDark = true,
@@ -64,6 +81,8 @@ export const DieCutTicket: React.FC<DieCutTicketProps> = ({
   onOpenToquecitos,
   isRegisteredInHub = false,
 }) => {
+  const [copiedFeedback, setCopiedFeedback] = useState(false);
+
   const normalizedItems = (providedTicket?.items || items || []).map((it: any) => ({
     name: it.name,
     quantity: it.quantity ?? it.qty ?? 1,
@@ -78,121 +97,190 @@ export const DieCutTicket: React.FC<DieCutTicketProps> = ({
     return d.toLocaleString('es-AR', {
       day: '2-digit',
       month: 'short',
+      year: 'numeric',
       hour: '2-digit',
       minute: '2-digit',
     });
   })();
 
+  const effectiveStamps = typeof stamps === 'number' ? stamps : 4;
+  const effectiveTarget = stampsRequired || 5;
+
   const ticket: DieCutTicketData = providedTicket || {
-    id: receiptId || 'TQ-001',
-    businessName: businessName || 'Comercio adherido',
+    id: receiptId || 'rcp-burger-1001',
+    businessName: businessName || 'La Burger',
+    businessAddress: businessAddress,
     amountArs: total ?? 0,
+    subtotalArs: subtotal,
+    discountArs: discount,
+    paymentMethod: formatPaymentMethodLabel(method),
     dateTime: formattedDate,
-    stampAdded:
-      typeof stamps === 'number'
-        ? `+1 Sello acreditado (${stamps}/${stampsRequired || 10})`
-        : '+1 Sello acreditado',
+    stampAdded: `+1 sello, ${effectiveStamps} / ${effectiveTarget}`,
     itemsSummary:
       normalizedItems.length > 0
         ? normalizedItems.map((i) => `${i.quantity || 1}x ${i.name}`).join(' · ')
-        : 'Consumo general en local',
+        : 'Consumo en local',
     items: normalizedItems,
   };
 
-  const digits =
-    ticket.barcodeDigits || buildBarcodeDigits(ticket.id || 'TQ-001', ticket.amountArs);
+  const itemsTotalSum =
+    ticket.items && ticket.items.length > 0
+      ? ticket.items.reduce((acc, it) => acc + (it.price || 0) * (it.quantity || 1), 0)
+      : ticket.amountArs;
 
-  const handleDefaultPrintPdf = () => {
+  const computedSubtotal = ticket.subtotalArs ?? Math.max(itemsTotalSum, ticket.amountArs);
+  const computedDiscount =
+    ticket.discountArs ?? Math.max(0, computedSubtotal - ticket.amountArs);
+
+  const handleDownload = () => {
+    if (onSaveImage) {
+      onSaveImage();
+      return;
+    }
     if (onDownloadPdf) {
       onDownloadPdf();
       return;
     }
     try {
-      window.print();
-    } catch {
-      // ignore
-    }
-  };
-
-  const handleDefaultSaveImage = () => {
-    if (onSaveImage) {
-      onSaveImage();
-      return;
-    }
-    try {
       const canvas = document.createElement('canvas');
-      canvas.width = 720;
-      canvas.height = 980;
+      canvas.width = 760;
+      canvas.height = 1080;
       const ctx = canvas.getContext('2d');
       if (!ctx) return;
 
       ctx.fillStyle = '#141414';
-      ctx.fillRect(0, 0, 720, 980);
+      ctx.fillRect(0, 0, 760, 1080);
 
-      ctx.fillStyle = '#D95B26';
-      ctx.fillRect(0, 0, 720, 16);
+      ctx.fillStyle = '#2FB36A';
+      ctx.font = 'bold 22px Inter, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('Cobro realizado', 380, 75);
 
       ctx.fillStyle = '#FFFFFF';
-      ctx.font = 'bold 34px Inter, sans-serif';
-      ctx.textAlign = 'center';
-      ctx.fillText('¡Gracias por tu visita!', 360, 110);
+      ctx.font = 'bold 56px Inter, sans-serif';
+      ctx.fillText(`$${ticket.amountArs.toLocaleString('es-AR')}`, 380, 145);
 
       ctx.fillStyle = '#A1A1AA';
-      ctx.font = '500 22px Inter, sans-serif';
-      ctx.fillText(`Comprobante digital · ${ticket.businessName}`, 360, 155);
+      ctx.font = '500 20px Inter, sans-serif';
+      ctx.fillText(ticket.dateTime, 380, 185);
+
+      ctx.fillStyle = '#FFFFFF';
+      ctx.font = 'bold 26px Inter, sans-serif';
+      ctx.fillText(ticket.businessName, 380, 235);
+      if (ticket.businessAddress) {
+        ctx.fillStyle = '#A1A1AA';
+        ctx.font = '500 18px Inter, sans-serif';
+        ctx.fillText(ticket.businessAddress, 380, 265);
+      }
 
       ctx.strokeStyle = '#2E2E32';
       ctx.setLineDash([8, 8]);
       ctx.beginPath();
-      ctx.moveTo(60, 200);
-      ctx.lineTo(660, 200);
+      ctx.moveTo(60, 300);
+      ctx.lineTo(700, 300);
       ctx.stroke();
 
       ctx.textAlign = 'left';
+      let y = 350;
       ctx.fillStyle = '#8E8E93';
       ctx.font = '600 18px Inter, sans-serif';
-      ctx.fillText('N.º de comprobante', 60, 265);
-      ctx.fillStyle = '#FFFFFF';
-      ctx.font = 'bold 24px monospace';
-      ctx.fillText(ticket.id, 60, 300);
+      ctx.fillText(`Medio de pago: ${ticket.paymentMethod || formatPaymentMethodLabel(method)}`, 60, y);
+      y += 34;
+      ctx.fillText(`N.º de comprobante: ${ticket.id}`, 60, y);
+      y += 50;
 
+      ctx.fillStyle = '#FFFFFF';
+      ctx.font = 'bold 20px Inter, sans-serif';
+      ctx.fillText('Detalle de ítems', 60, y);
+      y += 34;
+
+      const listToDraw =
+        ticket.items && ticket.items.length > 0
+          ? ticket.items
+          : [{ name: 'Consumo en local', quantity: 1, price: ticket.amountArs }];
+
+      for (const item of listToDraw.slice(0, 6)) {
+        ctx.textAlign = 'left';
+        ctx.fillStyle = '#E4E4E7';
+        ctx.font = '500 20px Inter, sans-serif';
+        ctx.fillText(`${item.quantity || 1}x ${item.name}`, 60, y);
+        ctx.textAlign = 'right';
+        ctx.fillText(
+          `$${((item.price || 0) * (item.quantity || 1)).toLocaleString('es-AR')}`,
+          700,
+          y
+        );
+        y += 32;
+      }
+
+      y += 20;
+      ctx.textAlign = 'left';
+      ctx.fillStyle = '#A1A1AA';
+      ctx.fillText('Subtotal', 60, y);
       ctx.textAlign = 'right';
-      ctx.fillStyle = '#8E8E93';
-      ctx.font = '600 18px Inter, sans-serif';
-      ctx.fillText('Monto', 660, 265);
-      ctx.fillStyle = '#2FB36A';
-      ctx.font = 'bold 34px Inter, sans-serif';
-      ctx.fillText(`$${ticket.amountArs.toLocaleString('es-AR')}`, 660, 305);
+      ctx.fillText(`$${computedSubtotal.toLocaleString('es-AR')}`, 700, y);
+      y += 30;
 
       ctx.textAlign = 'left';
-      ctx.fillStyle = '#8E8E93';
-      ctx.font = '600 18px Inter, sans-serif';
-      ctx.fillText('Fecha y hora', 60, 380);
-      ctx.fillStyle = '#FFFFFF';
-      ctx.font = '600 22px Inter, sans-serif';
-      ctx.fillText(ticket.dateTime, 60, 415);
-
+      ctx.fillText('Descuentos', 60, y);
       ctx.textAlign = 'right';
-      ctx.fillStyle = '#8E8E93';
-      ctx.font = '600 18px Inter, sans-serif';
-      ctx.fillText('Detalle', 660, 380);
-      ctx.fillStyle = '#FFFFFF';
-      ctx.font = '500 22px Inter, sans-serif';
-      ctx.fillText(ticket.itemsSummary.slice(0, 36), 660, 415);
+      ctx.fillText(`-$${computedDiscount.toLocaleString('es-AR')}`, 700, y);
+      y += 36;
 
-      if (ticket.stampAdded) {
-        ctx.textAlign = 'center';
-        ctx.fillStyle = '#10B981';
-        ctx.font = 'bold 24px Inter, sans-serif';
-        ctx.fillText(`${ticket.businessName} · ${ticket.stampAdded}`, 360, 520);
-      }
+      ctx.textAlign = 'left';
+      ctx.fillStyle = '#FFFFFF';
+      ctx.font = 'bold 24px Inter, sans-serif';
+      ctx.fillText('Total', 60, y);
+      ctx.textAlign = 'right';
+      ctx.fillStyle = '#2FB36A';
+      ctx.fillText(`$${ticket.amountArs.toLocaleString('es-AR')}`, 700, y);
+      y += 55;
+
+      ctx.textAlign = 'center';
+      ctx.fillStyle = '#2FB36A';
+      ctx.font = 'bold 22px Inter, sans-serif';
+      ctx.fillText(ticket.stampAdded || `+1 sello, ${effectiveStamps} / ${effectiveTarget}`, 380, y);
+
+      ctx.fillStyle = '#71717A';
+      ctx.font = '500 16px Inter, sans-serif';
+      ctx.fillText('Comprobante de compra. No es una factura.', 380, 1030);
 
       const a = document.createElement('a');
       a.href = canvas.toDataURL('image/png');
-      a.download = `ticket-${ticket.id.toLowerCase()}.png`;
+      a.download = `comprobante-${ticket.id.toLowerCase()}.png`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
+    } catch {
+      try {
+        window.print();
+      } catch {
+        // ignore
+      }
+    }
+  };
+
+  const handleShare = async () => {
+    const shareUrl = `${window.location.origin}/r/${encodeURIComponent(ticket.id)}`;
+    const shareData = {
+      title: `Comprobante de ${ticket.businessName}`,
+      text: `Cobro realizado por $${ticket.amountArs.toLocaleString('es-AR')} en ${ticket.businessName}`,
+      url: shareUrl,
+    };
+
+    if (navigator.share) {
+      try {
+        await navigator.share(shareData);
+        return;
+      } catch {
+        // fallback al portapapeles
+      }
+    }
+
+    try {
+      await navigator.clipboard.writeText(shareUrl);
+      setCopiedFeedback(true);
+      setTimeout(() => setCopiedFeedback(false), 2500);
     } catch {
       // ignore
     }
@@ -200,7 +288,6 @@ export const DieCutTicket: React.FC<DieCutTicketProps> = ({
 
   return (
     <div className="relative">
-      {/* Barra superior opcional con contador de 2 minutos en el Hub */}
       {typeof secondsRemaining === 'number' && !isExpiredBlur && (
         <div className="mb-2.5 flex items-center justify-between px-3.5 py-2 rounded-2xl bg-[#141414] border border-[#242424] text-xs">
           <span className="flex items-center gap-1.5 text-emerald-400 font-semibold">
@@ -215,237 +302,195 @@ export const DieCutTicket: React.FC<DieCutTicketProps> = ({
         </div>
       )}
 
-      {/* Contenedor del Ticket Troquelado (con blur si vencieron los 2 minutos en el Hub) */}
       <div
         className={`transition-all duration-500 ${
           isExpiredBlur ? 'blur-md pointer-events-none select-none opacity-65' : ''
         }`}
       >
+        {/* Comprobante completo estilo billetera virtual */}
         <div
-          className={`relative w-full rounded-t-[26px] pt-6 pb-8 overflow-hidden transition-colors shadow-xl ${
+          className={`relative w-full rounded-3xl p-6 overflow-hidden transition-colors shadow-xl space-y-5 ${
             isDark
               ? 'bg-[#141414] border border-[#242424] text-white'
               : 'bg-white border border-zinc-200/80 text-[#111111]'
           }`}
         >
-          {/* Muescas semicirculares laterales alineadas con la línea punteada */}
-          <div
-            className={`absolute top-[132px] -left-3 w-6 h-6 rounded-full ${
-              isDark
-                ? 'bg-[#0A0A0A] border-r border-[#242424]'
-                : 'bg-[#F7F7F9] border-r border-zinc-200'
-            }`}
-          />
-          <div
-            className={`absolute top-[132px] -right-3 w-6 h-6 rounded-full ${
-              isDark
-                ? 'bg-[#0A0A0A] border-l border-[#242424]'
-                : 'bg-[#F7F7F9] border-l border-zinc-200'
-            }`}
-          />
+          {/* 1. Estado ("Cobro realizado"), monto grande, fecha y hora */}
+          <div className="flex flex-col items-center text-center space-y-2 pb-4 border-b border-dashed border-current/15">
+            <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#2FB36A]/15 border border-[#2FB36A]/30 text-[#2FB36A] text-xs font-bold">
+              <CheckCircle2 className="w-4 h-4" />
+              <span>Cobro realizado</span>
+            </div>
 
-          {/* Encabezado de confirmación */}
-          <div className="flex flex-col items-center text-center px-6 pb-5">
-            <div className="text-3xl mb-2 select-none">🎉</div>
-            <h3 className="text-lg font-bold tracking-tight">¡Gracias por tu visita!</h3>
-            <p
-              className={`text-xs mt-0.5 max-w-[240px] ${
-                isDark ? 'text-[#8E8E93]' : 'text-zinc-500'
-              }`}
-            >
-              Tu comprobante y tu visita en {ticket.businessName} quedaron registrados
+            <div className="text-4xl font-extrabold font-mono tracking-tight tabular-nums pt-1">
+              ${ticket.amountArs.toLocaleString('es-AR')}
+            </div>
+
+            <p className={`text-xs ${isDark ? 'text-[#9E9EA8]' : 'text-zinc-500'}`}>
+              {ticket.dateTime}
             </p>
           </div>
 
-          {/* Primera línea divisoria punteada */}
-          <div
-            className={`w-[84%] mx-auto border-t border-dashed my-1 ${
-              isDark ? 'border-[#2E2E32]' : 'border-zinc-300'
-            }`}
-          />
-
-          {/* Datos del comprobante */}
-          <div className="px-6 py-4 flex flex-col gap-4">
-            <div className="flex items-center justify-between gap-2">
-              <div>
-                <p
-                  className={`text-[10px] tracking-wider font-semibold ${
-                    isDark ? 'text-[#8E8E93]' : 'text-zinc-400'
-                  }`}
-                >
-                  N.º de comprobante
-                </p>
-                <p className="text-xs font-semibold mt-0.5 font-mono">{ticket.id}</p>
-              </div>
-              <div className="text-right">
-                <p
-                  className={`text-[10px] tracking-wider font-semibold ${
-                    isDark ? 'text-[#8E8E93]' : 'text-zinc-400'
-                  }`}
-                >
-                  Monto
-                </p>
-                <p className="text-sm font-bold mt-0.5">
-                  ${ticket.amountArs.toLocaleString('es-AR')}
-                </p>
-              </div>
-            </div>
-
+          {/* 2. Comercio (nombre y dirección si hay), medio de pago y número de comprobante */}
+          <div className="space-y-2.5 text-xs pb-4 border-b border-dashed border-current/15">
             <div className="flex items-start justify-between gap-3">
-              <div>
-                <p
-                  className={`text-[10px] tracking-wider font-semibold ${
-                    isDark ? 'text-[#8E8E93]' : 'text-zinc-400'
-                  }`}
-                >
-                  Fecha y hora
-                </p>
-                <p className="text-xs font-semibold mt-0.5">{ticket.dateTime}</p>
-              </div>
-              <div className="text-right max-w-[58%]">
-                <p
-                  className={`text-[10px] tracking-wider font-semibold ${
-                    isDark ? 'text-[#8E8E93]' : 'text-zinc-400'
-                  }`}
-                >
-                  Detalle
-                </p>
-                <p className="text-xs font-medium mt-0.5 leading-snug">{ticket.itemsSummary}</p>
+              <span className={isDark ? 'text-[#9E9EA8]' : 'text-zinc-500'}>Comercio</span>
+              <div className="text-right">
+                <p className="font-bold">{ticket.businessName}</p>
+                {ticket.businessAddress && (
+                  <p
+                    className={`text-[11px] flex items-center justify-end gap-1 mt-0.5 ${
+                      isDark ? 'text-[#9E9EA8]' : 'text-zinc-500'
+                    }`}
+                  >
+                    <MapPin className="w-3 h-3 text-[#D95B26] shrink-0" />
+                    <span>{ticket.businessAddress}</span>
+                  </p>
+                )}
               </div>
             </div>
 
-            {/* Desglose de ítems si hay más de 1 ítem */}
-            {ticket.items && ticket.items.length > 0 && (
-              <div
-                className={`rounded-xl p-3 space-y-1.5 text-xs ${
-                  isDark
-                    ? 'bg-[#0A0A0A]/60 border border-[#242424]'
-                    : 'bg-zinc-50 border border-zinc-200/70'
-                }`}
-              >
-                {ticket.items.map((item, index) => (
+            <div className="flex items-center justify-between gap-3">
+              <span className={isDark ? 'text-[#9E9EA8]' : 'text-zinc-500'}>Medio de pago</span>
+              <span className="font-semibold">
+                {ticket.paymentMethod || formatPaymentMethodLabel(method)}
+              </span>
+            </div>
+
+            <div className="flex items-center justify-between gap-3">
+              <span className={isDark ? 'text-[#9E9EA8]' : 'text-zinc-500'}>
+                N.º de comprobante
+              </span>
+              <span className="font-mono font-semibold">{ticket.id}</span>
+            </div>
+          </div>
+
+          {/* 3. Detalle de ítems con cantidad y precio */}
+          <div className="space-y-2.5 pb-4 border-b border-dashed border-current/15">
+            <div className="flex items-center justify-between text-[11px] font-semibold opacity-70">
+              <span>Detalle de ítems</span>
+              <span>Importe</span>
+            </div>
+
+            <div className="space-y-2 text-xs">
+              {ticket.items && ticket.items.length > 0 ? (
+                ticket.items.map((item, index) => (
                   <div key={index} className="flex items-center justify-between gap-2">
-                    <span className={isDark ? 'text-zinc-300' : 'text-zinc-700'}>
-                      {item.quantity || 1}x {item.name}
+                    <span>
+                      <strong className="font-mono">{item.quantity || 1}x</strong> {item.name}
                     </span>
                     <span className="font-mono font-semibold">
                       ${((item.price || 0) * (item.quantity || 1)).toLocaleString('es-AR')}
                     </span>
                   </div>
-                ))}
-              </div>
-            )}
-
-            {/* Recuadro interno: Comercio + Sello sumado en Toquecitos */}
-            <div
-              className={`rounded-2xl p-3.5 flex items-center justify-between gap-3 ${
-                isDark
-                  ? 'bg-[#1C1C1F] border border-[#2A2A2E]'
-                  : 'bg-[#F5F6FA] border border-zinc-200/70'
-              }`}
-            >
-              <div className="flex items-center gap-3 min-w-0">
-                <div className="w-9 h-9 rounded-xl bg-[#D95B26] text-white flex items-center justify-center font-bold text-sm shrink-0">
-                  {(ticket.businessName || 'T')[0].toUpperCase()}
+                ))
+              ) : (
+                <div className="flex items-center justify-between gap-2">
+                  <span>1x {ticket.itemsSummary || 'Consumo en local'}</span>
+                  <span className="font-mono font-semibold">
+                    ${ticket.amountArs.toLocaleString('es-AR')}
+                  </span>
                 </div>
-                <div className="min-w-0">
-                  <p className="text-xs font-bold leading-tight truncate">{ticket.businessName}</p>
-                  <p className="text-[11px] text-emerald-500 font-semibold mt-0.5 truncate">
-                    {ticket.stampAdded || '+1 sello sumado en tu visita'}
-                  </p>
-                </div>
-              </div>
-              {onViewPass && (
-                <button
-                  type="button"
-                  onClick={onViewPass}
-                  className={`text-[11px] font-semibold px-2.5 py-1.5 rounded-xl transition-colors shrink-0 cursor-pointer ${
-                    isDark
-                      ? 'bg-[#2A2A2E] text-white hover:bg-[#343438]'
-                      : 'bg-white text-zinc-800 shadow-sm'
-                  }`}
-                >
-                  Ver pase
-                </button>
               )}
             </div>
           </div>
 
-          {/* Segunda línea divisoria punteada */}
+          {/* 4. Subtotal, descuentos y total */}
+          <div className="space-y-1.5 text-xs pb-4 border-b border-dashed border-current/15">
+            <div className="flex items-center justify-between">
+              <span className={isDark ? 'text-[#9E9EA8]' : 'text-zinc-500'}>Subtotal</span>
+              <span className="font-mono">${computedSubtotal.toLocaleString('es-AR')}</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className={isDark ? 'text-[#9E9EA8]' : 'text-zinc-500'}>Descuentos</span>
+              <span className="font-mono text-[#2FB36A]">
+                -${computedDiscount.toLocaleString('es-AR')}
+              </span>
+            </div>
+            <div className="flex items-center justify-between pt-1.5 text-sm font-extrabold">
+              <span>Total</span>
+              <span className="font-mono text-base">
+                ${ticket.amountArs.toLocaleString('es-AR')}
+              </span>
+            </div>
+          </div>
+
+          {/* 5. Recuadro del sello sumado ("+1 sello, 4 / 5") */}
           <div
-            className={`w-full border-t border-dashed my-2 ${
-              isDark ? 'border-[#2E2E32]' : 'border-zinc-300'
+            className={`rounded-2xl p-3.5 flex items-center justify-between gap-3 ${
+              isDark
+                ? 'bg-[#0A0A0A] border border-[#242424]'
+                : 'bg-[#F5F6FA] border border-zinc-200/70'
             }`}
-          />
-
-          {/* Código de barras inferior del comprobante */}
-          <div className="px-8 pt-3 pb-2 flex flex-col items-center">
-            <div className="flex items-end justify-center gap-[2px] w-full h-12">
-              {[
-                3, 1, 4, 2, 1, 3, 5, 1, 2, 2, 1, 4, 1, 2, 3, 1, 4, 2, 1, 5, 2, 1, 3, 2, 1, 4, 2,
-                1, 3, 1, 2, 4,
-              ].map((w, i) => (
-                <div
-                  key={i}
-                  className={`h-full rounded-[0.5px] ${isDark ? 'bg-white' : 'bg-[#111111]'}`}
-                  style={{ width: `${w}px` }}
-                />
-              ))}
+          >
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="w-9 h-9 rounded-xl bg-[#D95B26]/15 border border-[#D95B26]/30 text-[#D95B26] flex items-center justify-center shrink-0">
+                <Award className="w-4 h-4" />
+              </div>
+              <div className="min-w-0">
+                <p className="text-xs font-bold leading-tight truncate">{ticket.businessName}</p>
+                <p className="text-xs text-[#2FB36A] font-extrabold mt-0.5 truncate">
+                  {ticket.stampAdded || `+1 sello, ${effectiveStamps} / ${effectiveTarget}`}
+                </p>
+              </div>
             </div>
-            <div
-              className={`flex justify-between w-full px-3 mt-1.5 font-mono text-[10px] tracking-[0.2em] ${
-                isDark ? 'text-[#8E8E93]' : 'text-zinc-500'
-              }`}
-            >
-              <span>{digits[0]}</span>
-              <span>{digits[1]}</span>
-              <span>{digits[2]}</span>
-            </div>
+            {onViewPass && (
+              <button
+                type="button"
+                onClick={onViewPass}
+                className={`text-[11px] font-semibold px-3 py-1.5 rounded-xl transition-colors shrink-0 cursor-pointer ${
+                  isDark
+                    ? 'bg-[#1C1C22] text-white hover:bg-[#282830]'
+                    : 'bg-white text-zinc-800 shadow-sm'
+                }`}
+              >
+                Ver tarjeta
+              </button>
+            )}
           </div>
 
-          {/* Borde inferior troquelado con recortes circulares */}
-          <div className="absolute -bottom-2.5 left-0 w-full flex justify-between px-2">
-            {[...Array(13)].map((_, i) => (
-              <div
-                key={i}
-                className={`w-4 h-4 rounded-full ${isDark ? 'bg-[#0A0A0A]' : 'bg-[#F7F7F9]'}`}
-              />
-            ))}
-          </div>
+          {/* 6. Pie obligatorio */}
+          <p
+            className={`text-center text-[11px] pt-1 ${
+              isDark ? 'text-[#9E9EA8]' : 'text-zinc-500'
+            }`}
+          >
+            Comprobante de compra. No es una factura.
+          </p>
         </div>
 
-        {/* Acciones reales del comprobante */}
+        {/* Botones "Descargar" y "Compartir" */}
         <div className="grid grid-cols-2 gap-2.5 mt-3 print:hidden">
           <button
             type="button"
-            onClick={handleDefaultPrintPdf}
-            className={`flex items-center justify-center gap-2 py-2.5 px-3 rounded-2xl text-xs font-semibold border transition-colors cursor-pointer ${
+            onClick={handleDownload}
+            className={`flex items-center justify-center gap-2 py-3 px-4 rounded-2xl text-xs font-bold border transition-colors cursor-pointer ${
               isDark
                 ? 'bg-[#141414] border-[#242424] hover:bg-[#1C1C1F] text-white'
                 : 'bg-white border-zinc-200 hover:bg-zinc-50 text-zinc-800'
             }`}
           >
-            <Download className="w-3.5 h-3.5 text-[#D95B26]" />
-            <span>Descargar PDF</span>
+            <Download className="w-4 h-4 text-[#D95B26]" />
+            <span>Descargar</span>
           </button>
           <button
             type="button"
-            onClick={handleDefaultSaveImage}
-            className={`flex items-center justify-center gap-2 py-2.5 px-3 rounded-2xl text-xs font-semibold border transition-colors cursor-pointer ${
+            onClick={handleShare}
+            className={`flex items-center justify-center gap-2 py-3 px-4 rounded-2xl text-xs font-bold border transition-colors cursor-pointer ${
               isDark
                 ? 'bg-[#141414] border-[#242424] hover:bg-[#1C1C1F] text-white'
                 : 'bg-white border-zinc-200 hover:bg-zinc-50 text-zinc-800'
             }`}
           >
-            <ImageIcon className="w-3.5 h-3.5 text-[#D95B26]" />
-            <span>Guardar imagen</span>
+            <Share2 className="w-4 h-4 text-[#D95B26]" />
+            <span>{copiedFeedback ? 'Link copiado' : 'Compartir'}</span>
           </button>
         </div>
       </div>
 
-      {/* Overlay con fade-in cuando se cumplen los 2 minutos en el Hub */}
+      {/* Overlay cuando se cumplen los 2 minutos en el Hub */}
       {isExpiredBlur && (
-        <div className="absolute inset-0 z-20 flex flex-col items-center justify-center p-6 text-center animate-in fade-in duration-500">
+        <div className="absolute inset-0 z-20 flex flex-col items-center justify-center p-6 text-center">
           <div className="max-w-xs w-full rounded-3xl bg-[#141414]/95 border border-[#242424] p-5 shadow-2xl space-y-3 backdrop-blur-md">
             <div className="w-10 h-10 rounded-2xl bg-[#D95B26]/15 border border-[#D95B26]/30 text-[#D95B26] flex items-center justify-center mx-auto">
               <Lock className="w-4 h-4" />
@@ -456,7 +501,7 @@ export const DieCutTicket: React.FC<DieCutTicketProps> = ({
               </h4>
               <p className="text-xs text-[#8E8E93] leading-relaxed">
                 {isRegisteredInHub
-                  ? 'Ya quedó guardado automáticamente en tu cuenta de Toquecitos.'
+                  ? 'Ya quedó guardado en tu cuenta de Toquecitos.'
                   : 'Ingresá a Toquecitos o registrá tu tarjeta abajo para conservarlo en tu cuenta.'}
               </p>
             </div>

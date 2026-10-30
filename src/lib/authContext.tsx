@@ -27,15 +27,37 @@ interface AuthContextType {
   verifyOtp: (
     email: string,
     code: string,
-    extra?: { businessName?: string; ownerName?: string }
+    extra?: {
+      businessName?: string;
+      ownerName?: string;
+      ownerRole?: 'Dueño/a' | 'Encargado/a' | 'Administración' | 'Otro';
+      businessEmail?: string;
+      teamSize?: 'Solo yo' | '2 a 5' | '6 a 15' | '16 o más';
+      category?: string;
+    }
   ) => Promise<User | null>;
   loginWithOtp: (
     email: string,
     code: string,
-    extra?: { businessName?: string; ownerName?: string }
+    extra?: {
+      businessName?: string;
+      ownerName?: string;
+      ownerRole?: 'Dueño/a' | 'Encargado/a' | 'Administración' | 'Otro';
+      businessEmail?: string;
+      teamSize?: 'Solo yo' | '2 a 5' | '6 a 15' | '16 o más';
+      category?: string;
+    }
   ) => Promise<User | null>;
   login: (credentials: { email: string; code?: string }) => Promise<void>;
-  register: (data: { businessName: string; ownerName: string; email: string }) => Promise<void>;
+  register: (data: {
+    businessName: string;
+    ownerName: string;
+    email: string;
+    ownerRole?: 'Dueño/a' | 'Encargado/a' | 'Administración' | 'Otro';
+    businessEmail?: string;
+    teamSize?: 'Solo yo' | '2 a 5' | '6 a 15' | '16 o más';
+    category?: string;
+  }) => Promise<void>;
   logout: () => Promise<void>;
   refreshProfile: () => Promise<void>;
   refreshSession: () => Promise<void>;
@@ -77,7 +99,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const verifyOtp = async (
     email: string,
     code: string,
-    extra?: { businessName?: string; ownerName?: string }
+    extra?: {
+      businessName?: string;
+      ownerName?: string;
+      ownerRole?: 'Dueño/a' | 'Encargado/a' | 'Administración' | 'Otro';
+      businessEmail?: string;
+      teamSize?: 'Solo yo' | '2 a 5' | '6 a 15' | '16 o más';
+      category?: string;
+    }
   ): Promise<User | null> => {
     const res = await api.verifyOtp(email, code, extra);
     if (res.user) {
@@ -108,6 +137,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     businessName: string;
     ownerName: string;
     email: string;
+    ownerRole?: 'Dueño/a' | 'Encargado/a' | 'Administración' | 'Otro';
+    businessEmail?: string;
+    teamSize?: 'Solo yo' | '2 a 5' | '6 a 15' | '16 o más';
+    category?: string;
   }) => {
     const res = await api.register(data);
     setUser(res.user);

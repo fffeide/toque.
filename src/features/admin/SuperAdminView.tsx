@@ -33,6 +33,7 @@ import {
   Search,
   UserPlus,
   Trash2,
+  Factory,
 } from 'lucide-react';
 
 type AdminTab = 'overview' | 'users' | 'carteles' | 'waitlist' | 'toque_team';
@@ -200,6 +201,13 @@ export const SuperAdminView: React.FC = () => {
             <RefreshCw className="w-3.5 h-3.5" />
             <span>Actualizar</span>
           </button>
+          <Link
+            to="/fabricante"
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-[#141418] hover:bg-[#202026] text-[#F4F4F0] border border-[#282830] text-xs font-semibold"
+          >
+            <Factory className="w-3.5 h-3.5 text-[#D95B26]" />
+            <span>Fabricante</span>
+          </Link>
           <Link
             to="/panel/resumen"
             className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-[#BEC8FF] text-[#0C0C0E] text-xs font-bold"

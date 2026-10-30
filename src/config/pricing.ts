@@ -35,7 +35,8 @@ export interface PlanDefinition {
   features: string[];
 }
 
-export const TRIAL_DAYS = 14;
+export const pruebaGratisDias = 14;
+export const TRIAL_DAYS = pruebaGratisDias;
 export const BASE_MONTHLY_PRICE_ARS = 34999;
 export const ANNUAL_MONTHS_CHARGED = 10;
 export const ANNUAL_TOTAL_PRICE_ARS = BASE_MONTHLY_PRICE_ARS * ANNUAL_MONTHS_CHARGED;

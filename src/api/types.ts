@@ -54,16 +54,17 @@ export interface SmartHubConfig {
 
 export interface WalletPassResponse {
   success: boolean;
-  provider: string;
+  configured?: boolean;
+  provider?: string;
   passId?: string;
   serialNumber?: string;
   shareUrl?: string;
   unchanged?: boolean;
   notifiedDevices?: number;
   walletSyncError?: string;
-  validationCode: string;
-  appleWalletUrl: string;
-  googleWalletUrl: string;
+  validationCode?: string;
+  appleWalletUrl?: string;
+  googleWalletUrl?: string;
   qrUrl?: string;
   fallbackWebPass?: boolean;
   barcodeValue?: string;
@@ -321,6 +322,7 @@ export interface ClubMember {
   localCode?: string;
   localName?: string;
   memberCode?: string;
+  shortCode?: string;
   barcodeToken?: string;
   name?: string;
   email?: string;
@@ -362,6 +364,26 @@ export interface ClubMember {
   stampHistory?: ClubStampEntry[];
 }
 
+export interface CashierMemberLookupResult {
+  id: string;
+  memberId?: string;
+  shortCode: string;
+  memberCode: string;
+  displayName: string;
+  stamps: number;
+  targetStamps: number;
+  remainingStamps: number;
+  rewardText: string;
+  rewardPending: boolean;
+  rewardReady?: boolean;
+  lastStampedAt?: string;
+  canStampNow: boolean;
+  cooldownMessage?: string;
+  programMode: ClubRuleType;
+  amountPerStamp?: number;
+  maxStampsPerVisit?: number;
+}
+
 export interface ClubPublicInfo {
   businessId: string;
   businessName: string;
@@ -390,6 +412,7 @@ export interface ClubPublicInfo {
 
 export interface RecognizedClientAccount {
   recognized: boolean;
+  accountExists?: boolean;
   accountId?: string;
   name?: string;
   email?: string;
@@ -419,7 +442,7 @@ export interface ClubLocal {
 export interface AuditLogEntry {
   id: string;
   businessId: string;
-  actionType: 'void_stamp' | 'void_reward' | 'adjust_balance';
+  actionType: 'void_stamp' | 'void_reward' | 'adjust_balance' | 'export_csv' | 'delete_member';
   actionLabel: string;
   memberId: string;
   memberName: string;
@@ -459,7 +482,7 @@ export interface SetupProgress {
 }
 
 export interface PlanState {
-  status: 'trial' | 'active' | 'expired' | 'expired_trial' | 'free' | 'custom';
+  status: 'trial' | 'active' | 'expired' | 'expired_trial' | 'past_due' | 'free' | 'custom';
   planId: 'free' | 'mensual' | 'anual' | 'a_consultar';
   tier?: 'free' | 'pro' | 'custom';
   billingCycle?: 'free' | 'monthly' | 'annual' | 'custom';
@@ -469,6 +492,7 @@ export interface PlanState {
   trialStartedAt?: string;
   trialEndsAt?: string;
   expiresAt?: string;
+  planSelected?: boolean;
   isSimulated: boolean;
 }
 
@@ -484,7 +508,7 @@ export interface WaitlistEntry {
   isSample?: boolean;
 }
 
-export type OtpPurpose = 'login' | 'register_merchant' | 'register_client' | 'cashier_confirm';
+export type OtpPurpose = 'login' | 'register_merchant' | 'register_client' | 'client_card' | 'cashier_confirm';
 
 export interface BusinessProfile {
   id: string;
@@ -492,6 +516,11 @@ export interface BusinessProfile {
   name: string;
   ownerName: string;
   email: string;
+  ownerRole?: string;
+  businessEmail?: string;
+  teamSize?: string;
+  category?: string;
+  planSelected?: boolean;
   ownerUid?: string;
   reviewUrl?: string;
   cardThemeColor?: string;
@@ -540,6 +569,7 @@ export interface ConsumerUser {
   uuid?: string;
   emailOrPhone: string;
   displayName: string;
+  birthDate?: string;
   ageGroup: ConsumerAgeGroup;
   consentSaveReceipts: boolean;
   consentMarketingNetwork: boolean;

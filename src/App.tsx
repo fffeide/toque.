@@ -185,8 +185,14 @@ export const App: React.FC = () => {
 
                     {/* Activación de Cartel Físico y Panel de Fabricante */}
                     <Route path="/activar" element={<ActivateCartelView />} />
-                    <Route path="/activar/:code" element={<ActivateCartelView />} />
-                    <Route path="/fabricante" element={<ManufacturerView />} />
+                    <Route
+                      path="/fabricante"
+                      element={
+                        <RoleRouteGuard allowedRoles={['superadmin']}>
+                          <ManufacturerView />
+                        </RoleRouteGuard>
+                      }
+                    />
 
                     {/* Hub Público del Cliente + Tarjeta de Sellos (QR / NFC / Slug) */}
                     <Route path="/u/:code" element={<PublicHubView />} />

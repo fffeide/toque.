@@ -41,6 +41,7 @@ import {
   NetworkActivationFormat,
   ConsumerUser,
   ConsumerReceipt,
+  CashierMemberLookupResult,
 } from './types';
 
 export interface ToqueApi {
@@ -60,9 +61,17 @@ export interface ToqueApi {
   verifyOtp(
     email: string,
     code: string,
-    extra?: { businessName?: string; ownerName?: string }
+    extra?: {
+      businessName?: string;
+      ownerName?: string;
+      ownerRole?: string;
+      businessEmail?: string;
+      teamSize?: string;
+      category?: string;
+    }
   ): Promise<{
     verified: boolean;
+    accountExists?: boolean;
     user?: User;
     account?: RecognizedClientAccount;
   }>;
@@ -71,6 +80,10 @@ export interface ToqueApi {
     businessName: string;
     ownerName: string;
     email: string;
+    ownerRole?: string;
+    businessEmail?: string;
+    teamSize?: string;
+    category?: string;
   }): Promise<{ user: User; token: string }>;
 
   login(credentials: {
@@ -117,7 +130,9 @@ export interface ToqueApi {
     account: RecognizedClientAccount;
   }>;
 
-  // Club — Suma de Sellos, Canje y Toquecitos
+  // Club — Búsqueda y Suma de Sellos en Caja (sin enviar delta de sellos desde el navegador)
+  lookupMemberByCode(code: string): Promise<CashierMemberLookupResult>;
+
   addStampByCashier(data: {
     memberId?: string;
     memberCode?: string;
@@ -169,7 +184,7 @@ export interface ToqueApi {
   // Historial de Sellos y Premios (Stamp Logs & CSV)
   listStampLogs(period?: '30d' | '3m' | '12m' | 'all'): Promise<StampLogEntry[]>;
 
-  exportStampLogsCsv(period?: '30d' | '3m' | '12m' | 'all'): Promise<string>;
+  exportStampLogsCsv(period?: '30d' | '3m' | '12m' | 'all', reason?: string): Promise<string>;
 
   // Club — Correcciones (Solo lectura con motivo obligatorio >= 10 caracteres)
   voidStamp(data: {
@@ -204,11 +219,11 @@ export interface ToqueApi {
 
   listClubMembers(): Promise<ClubMember[]>;
 
-  exportClubMembersCsv(): Promise<string>;
+  exportClubMembersCsv(reason?: string): Promise<string>;
 
-  deleteClubMember(id: string): Promise<void>;
+  deleteClubMember(id: string, reason?: string): Promise<void>;
 
-  revokeMemberCard(memberId: string): Promise<{ revoked: boolean; walletRevoked?: boolean }>;
+  revokeMemberCard(memberId: string, reason?: string): Promise<{ revoked: boolean; walletRevoked?: boolean }>;
 
   getClubConfig(): Promise<ClubConfig>;
 
@@ -289,6 +304,10 @@ export interface ToqueApi {
   getPlanState(): Promise<PlanState>;
 
   startTrial(planId?: 'free' | 'mensual' | 'anual' | 'a_consultar'): Promise<PlanState>;
+
+  selectPlan(
+    planChoice: 'mensual' | 'anual' | 'trial_14' | 'trial_14d'
+  ): Promise<PlanState>;
 
   // Lista de Espera (Waitlist)
   joinWaitlist(data: {

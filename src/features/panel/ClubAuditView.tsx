@@ -22,7 +22,14 @@ export const ClubAuditView: React.FC = () => {
   const [successMsg, setSuccessMsg] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
-  const canModify = user?.role === 'owner' || user?.role === 'manager' || user?.role === 'superadmin';
+  const canModify =
+    user?.role === 'owner' || user?.role === 'manager' || user?.role === 'superadmin';
+  const isOwner =
+    user?.role === 'owner' || user?.role === 'superadmin' || Boolean(user?.isSuperAdmin);
+
+  const [showExportModal, setShowExportModal] = useState(false);
+  const [exportReason, setExportReason] = useState('');
+  const [exportingCsv, setExportingCsv] = useState(false);
 
   const loadData = async () => {
     setLoading(true);
@@ -92,7 +99,7 @@ export const ClubAuditView: React.FC = () => {
         });
       }
       setReason('');
-      setSuccessMsg('Corrección registrada en el historial inmutable.');
+      setSuccessMsg('Corrección registrada en la lista de correcciones.');
       await loadData();
     } catch (err: any) {
       setErrorMsg(err?.message || 'No se pudo registrar la corrección.');
@@ -101,26 +108,32 @@ export const ClubAuditView: React.FC = () => {
     }
   };
 
-  const handleExportCsv = () => {
-    const headers = ['Fecha', 'Quien', 'Rol', 'Accion', 'Cliente', 'Cambio Sellos', 'Motivo', 'Ejemplo'];
-    const rows = filteredEntries.map((e) => [
-      new Date(e.createdAt).toLocaleString('es-AR'),
-      e.actorName,
-      e.actorRole,
-      e.actionLabel,
-      e.memberName,
-      String(e.delta),
-      `"${e.reason.replace(/"/g, '""')}"`,
-      e.isSample ? 'Ejemplo' : 'Real',
-    ]);
-    const csvContent = [headers.join(','), ...rows.map((r) => r.join(','))].join('\n');
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `correcciones-toque-${new Date().toISOString().slice(0, 10)}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
+  const handleExportCsvSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!isOwner) return;
+    if (exportReason.trim().length < 10) {
+      setErrorMsg('El motivo para exportar debe tener al menos 10 caracteres.');
+      return;
+    }
+    setExportingCsv(true);
+    try {
+      const csvContent = await api.exportStampLogsCsv('all', exportReason.trim());
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `correcciones-toque-${new Date().toISOString().slice(0, 10)}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+      setShowExportModal(false);
+      setExportReason('');
+      setSuccessMsg('Exportación descargada y registrada en la lista de correcciones.');
+      await loadData();
+    } catch (err: any) {
+      setErrorMsg(err?.message || 'No se pudo exportar el archivo CSV.');
+    } finally {
+      setExportingCsv(false);
+    }
   };
 
   return (
@@ -136,7 +149,7 @@ export const ClubAuditView: React.FC = () => {
               Correcciones (registro de cambios)
             </h1>
             <p className="text-sm text-[#a1a1aa] leading-relaxed">
-              Cada vez que alguien anula, borra o ajusta algo, queda acá: quién, cuándo y por qué. No se puede editar ni borrar.
+              Toda acción de anular, ajustar, exportar o borrar pide un motivo y queda registrada acá: quién, cuándo y por qué. No se puede editar ni borrar.
             </p>
           </div>
         </div>
@@ -157,7 +170,7 @@ export const ClubAuditView: React.FC = () => {
         </div>
 
         <p className="text-xs text-[#a1a1aa]">
-          Para anular un sello o un premio hay que escribir el motivo. Así cualquier error queda explicado.
+          Para anular un sello o ajustar un saldo hay que escribir el motivo. Así cualquier corrección queda explicada.
         </p>
 
         {canModify ? (
@@ -173,7 +186,7 @@ export const ClubAuditView: React.FC = () => {
               >
                 {members.map((m) => (
                   <option key={m.id} value={m.id}>
-                    {m.name || 'Cliente'} ({m.stamps} sellos) {m.isSample ? '· Ejemplo' : ''}
+                    {m.name || 'Cliente'} ({m.stamps} sellos)
                   </option>
                 ))}
               </select>
@@ -235,7 +248,7 @@ export const ClubAuditView: React.FC = () => {
           </form>
         ) : (
           <p className="text-sm text-[#a1a1aa]">
-            Tu cuenta tiene rol de Cajero. Podés consultar el listado de correcciones pero no anular sellos ni ajustar saldos.
+            Tu cuenta tiene rol de Cajero. Solo encargados y dueños pueden registrar correcciones.
           </p>
         )}
 
@@ -253,7 +266,7 @@ export const ClubAuditView: React.FC = () => {
         )}
       </Card>
 
-      {/* Filtros y exportar */}
+      {/* Filtros y exportar (solo dueño puede exportar) */}
       <Card className="p-4 flex flex-wrap items-center justify-between gap-4">
         <div className="flex flex-wrap items-center gap-3">
           <div className="flex items-center gap-2 text-sm font-bold text-[#f1f1ee]">
@@ -286,11 +299,51 @@ export const ClubAuditView: React.FC = () => {
           </select>
         </div>
 
-        <Button variant="secondary" onClick={handleExportCsv}>
-          <Download className="w-4 h-4 mr-2" />
-          Exportar CSV
-        </Button>
+        {isOwner && (
+          <Button
+            variant="secondary"
+            onClick={() => {
+              setExportReason('');
+              setShowExportModal(true);
+            }}
+          >
+            <Download className="w-4 h-4 mr-2" />
+            Exportar CSV
+          </Button>
+        )}
       </Card>
+
+      {/* Modal para pedir motivo antes de exportar CSV */}
+      {showExportModal && isOwner && (
+        <Card className="p-5 border border-[#D95B26]/50 space-y-4">
+          <h3 className="text-base font-bold text-[#f1f1ee]">
+            Motivo para exportar el historial en CSV
+          </h3>
+          <form onSubmit={handleExportCsvSubmit} className="flex flex-col sm:flex-row gap-3">
+            <input
+              type="text"
+              required
+              minLength={10}
+              value={exportReason}
+              onChange={(e) => setExportReason(e.target.value)}
+              placeholder="Ej: Control contable de fin de mes (mínimo 10 caracteres)"
+              className="flex-1 min-h-[48px] px-3 rounded-xl border border-[#28282a] bg-[#18181b] text-[#f1f1ee] text-sm"
+            />
+            <div className="flex items-center gap-2">
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => setShowExportModal(false)}
+              >
+                Cancelar
+              </Button>
+              <Button type="submit" disabled={exportingCsv}>
+                {exportingCsv ? 'Exportando...' : 'Confirmar y descargar'}
+              </Button>
+            </div>
+          </form>
+        </Card>
+      )}
 
       {/* Tabla de solo lectura */}
       <Card className="overflow-hidden p-0">
@@ -304,11 +357,11 @@ export const ClubAuditView: React.FC = () => {
           <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse">
               <thead>
-                <tr className="border-b border-[#242426] bg-[#18181b]/50 text-xs uppercase font-bold text-[#a1a1aa]">
+                <tr className="border-b border-[#242426] bg-[#18181b]/50 text-xs font-bold text-[#a1a1aa]">
                   <th className="py-3.5 px-6">Fecha y hora</th>
                   <th className="py-3.5 px-6">Quién lo hizo</th>
                   <th className="py-3.5 px-6">Acción</th>
-                  <th className="py-3.5 px-6">Cliente</th>
+                  <th className="py-3.5 px-6">Detalle / Cliente</th>
                   <th className="py-3.5 px-6">Cambio</th>
                   <th className="py-3.5 px-6">Motivo declarado</th>
                 </tr>
@@ -323,11 +376,6 @@ export const ClubAuditView: React.FC = () => {
                         hour: '2-digit',
                         minute: '2-digit',
                       })}
-                      {entry.isSample && (
-                        <span className="ml-2 inline-block px-2 py-0.5 text-[10px] font-bold rounded bg-[#f59e0b]/15 text-[#f59e0b] border border-[#f59e0b]/30">
-                          Ejemplo
-                        </span>
-                      )}
                     </td>
                     <td className="py-4 px-6">
                       <div className="font-bold text-[#f1f1ee]">{entry.actorName}</div>
@@ -342,15 +390,19 @@ export const ClubAuditView: React.FC = () => {
                       {entry.memberName}
                     </td>
                     <td className="py-4 px-6 font-bold">
-                      <span
-                        className={
-                          entry.delta < 0
-                            ? 'text-[#ef4444]'
-                            : 'text-[#2fb36a]'
-                        }
-                      >
-                        {entry.delta > 0 ? `+${entry.delta}` : entry.delta} sellos
-                      </span>
+                      {entry.delta === 0 ? (
+                        <span className="text-[#a1a1aa]">—</span>
+                      ) : (
+                        <span
+                          className={
+                            entry.delta < 0
+                              ? 'text-[#ef4444]'
+                              : 'text-[#2fb36a]'
+                          }
+                        >
+                          {entry.delta > 0 ? `+${entry.delta}` : entry.delta} sellos
+                        </span>
+                      )}
                     </td>
                     <td className="py-4 px-6 text-[#a1a1aa] max-w-md">
                       {entry.reason}

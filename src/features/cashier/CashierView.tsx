@@ -19,8 +19,10 @@ import { BrandLogo } from '../../components/ui/Avatar';
 import { RealQrCode } from '../../components/ui/RealQrCode';
 import { useToast } from '../../components/ui/Toast';
 import { formatCurrency, formatDate } from '../../lib/formatters';
+import { ClubScannerView } from '../panel/ClubScannerView';
 import {
   QrCode,
+  Award,
   Banknote,
   CreditCard,
   Delete,
@@ -136,57 +138,28 @@ export const CashierView: React.FC = () => {
   const [emittedReceipt, setEmittedReceipt] = useState<Receipt | null>(null);
   const [secondsLeft, setSecondsLeft] = useState<number>(120);
 
-  // Perfil activo en POS: si ya está definido en localStorage, no vuelve a pedirlo al entrar
+  // Modal de Sumar Sello desde Caja
+  const [showStampModal, setShowStampModal] = useState<boolean>(false);
+
+  // Perfil activo en POS (en memoria de sesión)
   const [activeProfile, setActiveProfile] = useState<{
     id: string;
     name: string;
     role: 'owner' | 'manager' | 'cashier';
     email?: string;
-  }>(() => {
-    try {
-      const savedRaw = window.localStorage.getItem('toque_pos_active_profile_v1');
-      if (savedRaw) {
-        const parsed = JSON.parse(savedRaw);
-        if (parsed && parsed.name && parsed.role) {
-          return {
-            id: parsed.id || 'saved-profile',
-            name: stripRoleFromName(parsed.name),
-            role: parsed.role,
-            email: parsed.email || '',
-          };
-        }
-      }
-    } catch {
-      // ignore
-    }
-    return {
-      id: user?.id || 'default-profile',
-      name: stripRoleFromName(user?.name || business?.ownerName || 'Cajero'),
-      role:
-        user?.role === 'cashier'
-          ? 'cashier'
-          : user?.role === 'manager'
-          ? 'manager'
-          : 'owner',
-      email: user?.email,
-    };
-  });
+  }>(() => ({
+    id: user?.id || 'default-profile',
+    name: stripRoleFromName(user?.name || business?.ownerName || 'Cajero'),
+    role:
+      user?.role === 'cashier'
+        ? 'cashier'
+        : user?.role === 'manager'
+        ? 'manager'
+        : 'owner',
+    email: user?.email,
+  }));
 
-  // Modal de elegir perfil: solo se abre automáticamente si NO hay un perfil guardado en localStorage
-  const [showCashierAccountModal, setShowCashierAccountModal] = useState<boolean>(() => {
-    try {
-      const savedRaw = window.localStorage.getItem('toque_pos_active_profile_v1');
-      if (savedRaw) {
-        const parsed = JSON.parse(savedRaw);
-        if (parsed && parsed.name && parsed.role) {
-          return false;
-        }
-      }
-    } catch {
-      // ignore
-    }
-    return true;
-  });
+  const [showCashierAccountModal, setShowCashierAccountModal] = useState<boolean>(false);
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
   const [newCashierName, setNewCashierName] = useState('');
   const [isCreatingCashier, setIsCreatingCashier] = useState(false);
@@ -203,11 +176,6 @@ export const CashierView: React.FC = () => {
       email?: string;
     }) => {
       setActiveProfile(profile);
-      try {
-        window.localStorage.setItem('toque_pos_active_profile_v1', JSON.stringify(profile));
-      } catch {
-        // ignore
-      }
     },
     []
   );
@@ -604,7 +572,7 @@ export const CashierView: React.FC = () => {
         return;
       }
 
-      if (showCashierAccountModal || showCatalogModal) return;
+      if (showCashierAccountModal || showCatalogModal || showStampModal) return;
 
       if (/^[0-9]$/.test(e.key)) {
         e.preventDefault();
@@ -654,6 +622,7 @@ export const CashierView: React.FC = () => {
     isSubmitting,
     showCashierAccountModal,
     showCatalogModal,
+    showStampModal,
   ]);
 
   // Cajeros NO tienen contraseña; Encargados y Dueños SÍ piden contraseña
@@ -808,9 +777,18 @@ export const CashierView: React.FC = () => {
           </div>
         </div>
 
-        {/* Selector de Cartel + Modo Oscuro/Claro + Elegir Perfil */}
+        {/* Botón Sumar Sello + Selector de Cartel + Modo Oscuro/Claro + Elegir Perfil */}
         <div className="flex items-center gap-2">
-          <div className="flex items-center gap-1.5 bg-[#1C1C22] border border-[#282830] rounded-xl px-2.5 py-1.5">
+          <button
+            type="button"
+            onClick={() => setShowStampModal(true)}
+            className="px-3 h-8 rounded-xl bg-[#D95B26] hover:bg-[#e06530] text-white flex items-center gap-1.5 text-xs font-bold transition-colors cursor-pointer shrink-0 shadow-sm"
+          >
+            <Award className="w-3.5 h-3.5" />
+            <span>Sumar sello</span>
+          </button>
+
+          <div className="hidden sm:flex items-center gap-1.5 bg-[#1C1C22] border border-[#282830] rounded-xl px-2.5 py-1.5">
             <QrCode className="w-3.5 h-3.5 text-[#D95B26] shrink-0" />
             <select
               value={selectedCartel?.id || ''}
@@ -1616,6 +1594,32 @@ export const CashierView: React.FC = () => {
                 </form>
               </>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Pantalla "Sumar sello" desde la Caja */}
+      {showStampModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 overflow-y-auto">
+          <div className="w-full max-w-2xl rounded-3xl bg-[#0A0A0A] border border-[#242424] p-4 sm:p-6 space-y-4 my-auto max-h-[92vh] overflow-y-auto shadow-2xl">
+            <div className="flex items-center justify-between border-b border-[#242424] pb-3">
+              <div className="flex items-center gap-2">
+                <Award className="w-5 h-5 text-[#D95B26]" />
+                <span className="text-sm font-bold text-[#F4F4F6]">
+                  Sumar sello desde Caja
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowStampModal(false)}
+                className="p-1.5 rounded-lg text-[#9E9EA8] hover:text-[#F4F4F6] cursor-pointer"
+                aria-label="Cerrar ventana"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <ClubScannerView />
           </div>
         </div>
       )}

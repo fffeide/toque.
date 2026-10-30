@@ -14,6 +14,7 @@ import {
   Receipt,
   ClubConfig,
   ClubMember,
+  CashierMemberLookupResult,
   ClubPublicInfo,
   RecognizedClientAccount,
   ClubLocal,
@@ -109,12 +110,20 @@ class HttpApi implements ToqueApi {
   async verifyOtp(
     email: string,
     code: string,
-    extra?: { businessName?: string; ownerName?: string }
+    extra?: {
+      businessName?: string;
+      ownerName?: string;
+      ownerRole?: 'Dueño/a' | 'Encargado/a' | 'Administración' | 'Otro';
+      businessEmail?: string;
+      teamSize?: 'Solo yo' | '2 a 5' | '6 a 15' | '16 o más';
+      category?: string;
+    }
   ) {
     return this.request<{
       verified: boolean;
       user?: User;
       account?: RecognizedClientAccount;
+      accountExists?: boolean;
     }>('/auth/verify-otp', {
       method: 'POST',
       body: JSON.stringify({ email, code, ...extra }),
@@ -125,6 +134,10 @@ class HttpApi implements ToqueApi {
     businessName: string;
     ownerName: string;
     email: string;
+    ownerRole?: 'Dueño/a' | 'Encargado/a' | 'Administración' | 'Otro';
+    businessEmail?: string;
+    teamSize?: 'Solo yo' | '2 a 5' | '6 a 15' | '16 o más';
+    category?: string;
   }): Promise<{ user: User; token: string }> {
     return this.request('/auth/register', {
       method: 'POST',
@@ -204,6 +217,10 @@ class HttpApi implements ToqueApi {
   }
 
   // Sellos, Canje y Toquecitos
+  async lookupMemberByCode(code: string): Promise<CashierMemberLookupResult> {
+    return this.request(`/club/members/lookup?code=${encodeURIComponent(code)}`);
+  }
+
   async addStampByCashier(data: {
     memberId?: string;
     memberCode?: string;
@@ -271,8 +288,13 @@ class HttpApi implements ToqueApi {
     return this.request(`/club/stamp-logs?period=${encodeURIComponent(period)}`);
   }
 
-  async exportStampLogsCsv(period: '30d' | '3m' | '12m' | 'all' = '30d'): Promise<string> {
-    return this.request(`/club/stamp-logs/export-csv?period=${encodeURIComponent(period)}`);
+  async exportStampLogsCsv(
+    period: '30d' | '3m' | '12m' | 'all' = '30d',
+    reason?: string
+  ): Promise<string> {
+    const params = new URLSearchParams({ period });
+    if (reason) params.set('reason', reason);
+    return this.request(`/club/stamp-logs/export-csv?${params.toString()}`);
   }
 
   // Correcciones
@@ -320,17 +342,25 @@ class HttpApi implements ToqueApi {
     return this.listMembers();
   }
 
-  async exportClubMembersCsv(): Promise<string> {
-    return this.request('/club/members/export-csv');
+  async exportClubMembersCsv(reason?: string): Promise<string> {
+    const q = reason ? `?reason=${encodeURIComponent(reason)}` : '';
+    return this.request(`/club/members/export-csv${q}`);
   }
 
-  async deleteClubMember(id: string): Promise<void> {
-    await this.request(`/club/members/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  async deleteClubMember(id: string, reason?: string): Promise<void> {
+    await this.request(`/club/members/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+      body: reason ? JSON.stringify({ reason }) : undefined,
+    });
   }
 
-  async revokeMemberCard(memberId: string): Promise<{ revoked: boolean; walletRevoked?: boolean }> {
+  async revokeMemberCard(
+    memberId: string,
+    reason?: string
+  ): Promise<{ revoked: boolean; walletRevoked?: boolean }> {
     return this.request(`/club/members/${encodeURIComponent(memberId)}/revoke`, {
       method: 'DELETE',
+      body: reason ? JSON.stringify({ reason }) : undefined,
     });
   }
 
@@ -468,6 +498,13 @@ class HttpApi implements ToqueApi {
     return this.request('/subscription/start-trial', {
       method: 'POST',
       body: JSON.stringify({ planId }),
+    });
+  }
+
+  async selectPlan(planChoice: 'mensual' | 'anual' | 'trial_14' | 'trial_14d'): Promise<PlanState> {
+    return this.request('/subscription/select-plan', {
+      method: 'POST',
+      body: JSON.stringify({ planChoice }),
     });
   }
 

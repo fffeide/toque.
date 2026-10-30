@@ -4,34 +4,25 @@ import {
   api,
   ClubMember,
   ConsumerReceipt,
-  ConsumerUser,
   NetworkActivation,
   RecognizedClientAccount,
 } from '../../api';
-import {
-  getLocalConsumerReceipts,
-  getLocalConsumerUser,
-  saveLocalConsumerUser,
-} from '../../lib/consumerStorage';
 import { BrandLogo } from '../../components/ui/Avatar';
-import QRCode from 'qrcode';
+import { WalletPassCard } from '../../components/wallet/WalletPassCard';
+import { DieCutTicket } from '../../components/ticket/DieCutTicket';
 import {
   ArrowLeft,
   ArrowUpRight,
-  Award,
   Check,
   CheckCircle2,
   Clock,
   CreditCard,
   Gift,
-  LogOut,
   Mail,
   Moon,
   QrCode,
   Receipt as ReceiptIcon,
-  RefreshCw,
   ShieldCheck,
-  Smartphone,
   Sparkles,
   Store,
   Sun,
@@ -40,9 +31,8 @@ import {
   User,
   Wallet,
   X,
+  Calendar,
 } from 'lucide-react';
-import { DieCutTicket } from '../../components/ticket/DieCutTicket';
-import { detectWalletOS, getWalletButtonLabel } from '../../lib/walletOs';
 
 type ActiveSection = 'cards' | 'tickets' | 'benefits' | 'profile';
 
@@ -85,140 +75,153 @@ function getStrictCooldownState(lastStampedAt?: string): {
   };
 }
 
+function isAtLeast18(birthDateStr: string): {
+  valid: boolean;
+  isAdult: boolean;
+  birthDay?: number;
+  birthMonth?: number;
+} {
+  if (!birthDateStr) return { valid: false, isAdult: false };
+  const parts = birthDateStr.split('-');
+  if (parts.length !== 3) return { valid: false, isAdult: false };
+  const year = parseInt(parts[0], 10);
+  const month = parseInt(parts[1], 10);
+  const day = parseInt(parts[2], 10);
+  if (Number.isNaN(year) || Number.isNaN(month) || Number.isNaN(day)) {
+    return { valid: false, isAdult: false };
+  }
+  const today = new Date();
+  let age = today.getFullYear() - year;
+  const mDiff = today.getMonth() + 1 - month;
+  if (mDiff < 0 || (mDiff === 0 && today.getDate() < day)) {
+    age--;
+  }
+  return {
+    valid: true,
+    isAdult: age >= 18,
+    birthDay: day,
+    birthMonth: month,
+  };
+}
+
 export const ToquecitosView: React.FC = () => {
   const [searchParams] = useSearchParams();
-  // REGLA #2: Solo mostrar el botón de volver al Hub si el usuario entró explícitamente desde un Hub (?from=CODIGO)
   const originHubCode = useMemo(() => {
     const fromParam = searchParams.get('from')?.trim();
     return fromParam && fromParam.length > 0 ? fromParam : null;
   }, [searchParams]);
 
-  const [isDark, setIsDark] = useState<boolean>(() => {
-    try {
-      const saved = window.localStorage.getItem('toque_toquecitos_theme');
-      return saved ? saved === 'dark' : true;
-    } catch {
-      return true;
-    }
-  });
-
-  const toggleTheme = () => {
-    setIsDark((prev) => {
-      const next = !prev;
-      try {
-        window.localStorage.setItem('toque_toquecitos_theme', next ? 'dark' : 'light');
-      } catch {
-        // ignore
-      }
-      return next;
-    });
-  };
+  const [isDark, setIsDark] = useState<boolean>(true);
+  const toggleTheme = () => setIsDark((prev) => !prev);
 
   const [activeSection, setActiveSection] = useState<ActiveSection>('cards');
   const [selectedCard, setSelectedCard] = useState<ClubMember | null>(null);
-  const [selectedReceiptId, setSelectedReceiptId] = useState<string | null>(null);
+  // Cuando el usuario toca un ticket de la lista resumida, se abre el comprobante COMPLETO sin paso intermedio
+  const [openedFullReceipt, setOpenedFullReceipt] = useState<ConsumerReceipt | null>(null);
   const [isAccountModalOpen, setIsAccountModalOpen] = useState(false);
 
   const [account, setAccount] = useState<RecognizedClientAccount | null>(null);
-  const [localCards, setLocalCards] = useState<ClubMember[]>([]);
   const [receipts, setReceipts] = useState<ConsumerReceipt[]>([]);
   const [crossBenefits, setCrossBenefits] = useState<NetworkActivation[]>([]);
-  const [userProfile, setUserProfile] = useState<ConsumerUser | null>(null);
 
-  // OTP Login state
+  // Flujo de Cuenta Única y Reconocimiento en el modal de ingreso:
+  // Paso 1: "Ingresá tu mail" -> código de 6 dígitos
+  // Paso 2: Si ya tenía cuenta, entra directo SIN pasar por el registro.
+  //         El registro solo aparece si ese mail no tiene cuenta.
+  const [authStep, setAuthStep] = useState<'enter_email' | 'enter_otp' | 'register_new'>(
+    'enter_email'
+  );
   const [emailInput, setEmailInput] = useState('');
-  const [nameInput, setNameInput] = useState('');
-  const [otpSent, setOtpSent] = useState(false);
   const [otpCode, setOtpCode] = useState('');
   const [demoHintCode, setDemoHintCode] = useState<string | null>(null);
+  const [nameInput, setNameInput] = useState('');
+  const [birthDateInput, setBirthDateInput] = useState('');
+  const [marketingConsentInput, setMarketingConsentInput] = useState(false);
   const [authLoading, setAuthLoading] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
   const [authSuccess, setAuthSuccess] = useState<string | null>(null);
 
-  // Wallet generation / Revoke states
+  // Botón "Agregar a mi billetera"
   const [walletLoadingId, setWalletLoadingId] = useState<string | null>(null);
+  const [walletUnconfigured, setWalletUnconfigured] = useState(false);
+  const [walletStatusMessage, setWalletStatusMessage] = useState<string | null>(null);
   const [walletError, setWalletError] = useState<string | null>(null);
   const [revokingCardId, setRevokingCardId] = useState<string | null>(null);
   const [confirmRevokeId, setConfirmRevokeId] = useState<string | null>(null);
-  const [selectedCardQrUrl, setSelectedCardQrUrl] = useState<string>('');
 
   const sectionContentRef = useRef<HTMLDivElement>(null);
-  const walletOS = useMemo(() => detectWalletOS(), []);
-  const walletButtonLabel = useMemo(() => getWalletButtonLabel(walletOS), [walletOS]);
 
-  useEffect(() => {
-    if (!selectedCard) {
-      setSelectedCardQrUrl('');
-      return;
-    }
-    const tokenValue =
-      selectedCard.barcodeToken && selectedCard.barcodeToken.length >= 16
-        ? selectedCard.barcodeToken
-        : selectedCard.memberCode || selectedCard.id;
-    QRCode.toDataURL(tokenValue, { width: 200, margin: 1 })
-      .then(setSelectedCardQrUrl)
-      .catch(() => setSelectedCardQrUrl(''));
-  }, [selectedCard]);
-
-  const loadLocalCardsFromStorage = (): ClubMember[] => {
-    const found: ClubMember[] = [];
-    const seenIds = new Set<string>();
+  const refreshData = async (targetEmail?: string) => {
     try {
-      // 1. Leer lista unificada de socios para tener siempre los sellos actualizados desde el panel del comercio
-      const rawMembers = window.localStorage.getItem('toque_club_members_v1');
-      const allMembers: ClubMember[] = rawMembers ? JSON.parse(rawMembers) : [];
-      const byId = new Map<string, ClubMember>();
-      if (Array.isArray(allMembers)) {
-        for (const m of allMembers) {
-          if (m && m.id) byId.set(m.id, m);
-        }
-      }
-
-      // 2. Leer tarjetas guardadas en este dispositivo (toque_member_*)
-      for (let i = 0; i < window.localStorage.length; i++) {
-        const key = window.localStorage.key(i);
-        if (key && key.startsWith('toque_member_') && key !== 'toque_member_emails_v1') {
-          const raw = window.localStorage.getItem(key);
-          if (!raw) continue;
-          const parsed = JSON.parse(raw) as ClubMember;
-          if (parsed && parsed.id && !seenIds.has(parsed.id)) {
-            const liveVersion = byId.get(parsed.id) || parsed;
-            seenIds.add(liveVersion.id);
-            found.push(liveVersion);
-          }
-        }
-      }
-    } catch {
-      // ignore
-    }
-    return found;
-  };
-
-  const refreshData = async () => {
-    const storedUser = getLocalConsumerUser();
-    const storedReceipts = getLocalConsumerReceipts();
-    setUserProfile(storedUser);
-    setReceipts(storedReceipts);
-    if (storedReceipts.length > 0 && !selectedReceiptId) {
-      setSelectedReceiptId(storedReceipts[0].id);
-    }
-
-    const deviceCards = loadLocalCardsFromStorage();
-    setLocalCards(deviceCards);
-
-    try {
-      const [recAcc, benefits] = await Promise.all([
-        api.recognizeAccount(storedUser?.emailOrPhone),
+      const [recAcc, benefits, defaultRcp] = await Promise.all([
+        api.recognizeAccount(targetEmail || emailInput || undefined),
         api.getPublicCrossBenefits(),
+        api.getReceiptById('rcp-burger-1001').catch(() => null),
       ]);
+
       if (recAcc.recognized) {
         setAccount(recAcc);
         if (recAcc.email && !emailInput) setEmailInput(recAcc.email);
-        if (recAcc.name && !nameInput) setNameInput(recAcc.name);
       } else {
-        setAccount(null);
+        // Cargar también socios desde api.listMembers() en modo demostración si aún no inició sesión
+        const mems = await api.listMembers().catch(() => []);
+        if (mems.length > 0) {
+          setAccount({
+            recognized: false,
+            accountExists: false,
+            cards: mems.slice(0, 2),
+          });
+        } else {
+          setAccount(null);
+        }
       }
+
       setCrossBenefits(benefits);
+
+      // Cargar tickets desde api (incluyendo el comprobante pre-cargado de La Burger y ventas pagadas)
+      const salesList = await api.listSales().catch(() => []);
+      const builtReceipts: ConsumerReceipt[] = [];
+      if (defaultRcp) {
+        builtReceipts.push({
+          id: defaultRcp.id,
+          consumerId: 'consumer-01',
+          tenantId: defaultRcp.businessId,
+          businessId: defaultRcp.businessId,
+          merchantName: defaultRcp.businessName,
+          cartelCode: defaultRcp.cartelCode,
+          amountArs: defaultRcp.total,
+          total: defaultRcp.total,
+          currency: 'ARS',
+          items: defaultRcp.items || [],
+          method: defaultRcp.method,
+          discountSavedArs: 0,
+          category: 'Gastronomía',
+          receiptNote: '',
+          createdAt: defaultRcp.createdAt,
+        });
+      }
+      for (const s of salesList) {
+        if (s.status === 'paid' && !builtReceipts.some((r) => r.id === (s.receiptId || s.id))) {
+          builtReceipts.push({
+            id: s.receiptId || s.id,
+            consumerId: 'consumer-01',
+            tenantId: s.businessId,
+            businessId: s.businessId,
+            merchantName: 'La Burger',
+            cartelCode: s.cartelCode,
+            amountArs: s.amount,
+            total: s.amount,
+            currency: 'ARS',
+            items: s.items || [],
+            method: s.method,
+            discountSavedArs: 0,
+            category: 'Gastronomía',
+            receiptNote: '',
+            createdAt: s.createdAt,
+          });
+        }
+      }
+      setReceipts(builtReceipts);
     } catch {
       // ignore
     }
@@ -226,26 +229,12 @@ export const ToquecitosView: React.FC = () => {
 
   useEffect(() => {
     refreshData();
-    const onFocus = () => refreshData();
-    window.addEventListener('focus', onFocus);
-    return () => window.removeEventListener('focus', onFocus);
   }, []);
 
-  // Unificar tarjetas de cuenta reconocida + tarjetas locales del dispositivo (siempre priorizando datos más recientes)
   const cards: ClubMember[] = useMemo(() => {
-    const map = new Map<string, ClubMember>();
-    for (const c of localCards) {
-      map.set(c.id, c);
-    }
-    if (account?.cards) {
-      for (const c of account.cards) {
-        map.set(c.id, c);
-      }
-    }
-    return Array.from(map.values());
-  }, [account, localCards]);
+    return account?.cards || [];
+  }, [account]);
 
-  // Mantener selectedCard sincronizada si cambian sus sellos
   useEffect(() => {
     if (selectedCard) {
       const updated = cards.find((c) => c.id === selectedCard.id);
@@ -253,9 +242,8 @@ export const ToquecitosView: React.FC = () => {
         setSelectedCard(updated);
       }
     }
-  }, [cards]);
+  }, [cards, selectedCard]);
 
-  // Cálculo de dinero ahorrado con Toque y premios canjeados
   const { totalSavedArs, totalRedeemedCount } = useMemo(() => {
     let saved = 0;
     let redeemed = 0;
@@ -270,25 +258,27 @@ export const ToquecitosView: React.FC = () => {
 
   const handleSelectSection = (sec: ActiveSection) => {
     setActiveSection(sec);
+    setOpenedFullReceipt(null);
     setTimeout(() => {
       sectionContentRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     }, 60);
   };
 
-  const handleRequestOtp = async (e: React.FormEvent) => {
+  // Paso 1: "Ingresá tu mail" -> enviar código de 6 dígitos
+  const handleSendLoginOtp = async (e: React.FormEvent) => {
     e.preventDefault();
     const cleanEmail = emailInput.trim().toLowerCase();
     if (!cleanEmail || !cleanEmail.includes('@')) {
-      setAuthError('Ingresá un correo electrónico válido.');
+      setAuthError('Ingresá un mail válido.');
       return;
     }
     setAuthLoading(true);
     setAuthError(null);
     setAuthSuccess(null);
     try {
-      const res = await api.requestOtp(cleanEmail, 'register_client');
-      setOtpSent(true);
+      const res = await api.requestOtp(cleanEmail, 'client_card');
       setDemoHintCode(res.demoHintCode || null);
+      setAuthStep('enter_otp');
       setAuthSuccess(`Te enviamos un código de 6 dígitos a ${cleanEmail}.`);
     } catch (err: any) {
       setAuthError(err?.message || 'No pudimos enviar el código.');
@@ -297,7 +287,8 @@ export const ToquecitosView: React.FC = () => {
     }
   };
 
-  const handleVerifyOtp = async (e: React.FormEvent) => {
+  // Paso 2: Verificar código de 6 dígitos. Si ya tenía cuenta, entra directo SIN pasar por el registro.
+  const handleVerifyLoginOtp = async (e: React.FormEvent) => {
     e.preventDefault();
     const cleanEmail = emailInput.trim().toLowerCase();
     const cleanCode = otpCode.trim();
@@ -308,28 +299,21 @@ export const ToquecitosView: React.FC = () => {
     setAuthLoading(true);
     setAuthError(null);
     try {
-      const res = await api.verifyOtp(cleanEmail, cleanCode, {
-        ownerName: nameInput.trim() || cleanEmail.split('@')[0],
-      });
-      if (res.verified && res.account) {
-        setAccount(res.account);
-        const newUser: ConsumerUser = {
-          id: res.account.accountId || `usr-${Date.now()}`,
-          displayName: res.account.name || nameInput.trim() || cleanEmail.split('@')[0],
-          emailOrPhone: cleanEmail,
-          ageGroup: 'all',
-          consentSaveReceipts: true,
-          consentMarketingNetwork: false,
-          createdAt: new Date().toISOString(),
-        };
-        saveLocalConsumerUser(newUser);
-        setUserProfile(newUser);
-        await api.syncConsumerVault({ user: newUser, receipts });
-        setOtpSent(false);
+      const res = await api.verifyOtp(cleanEmail, cleanCode);
+      const rec = res.account || (await api.recognizeAccount(cleanEmail));
+
+      if (res.accountExists || (rec && rec.accountExists)) {
+        // Ya tenía cuenta -> entra directo SIN pasar por el registro
+        setAccount(rec);
         setOtpCode('');
         setDemoHintCode(null);
-        setAuthSuccess('Tu cuenta quedó vinculada y tus tarjetas están respaldadas.');
-        await refreshData();
+        setAuthStep('enter_email');
+        setIsAccountModalOpen(false);
+        await refreshData(cleanEmail);
+      } else {
+        // Ese mail no tiene cuenta -> aparece el formulario de registro
+        setAuthSuccess(null);
+        setAuthStep('register_new');
       }
     } catch (err: any) {
       setAuthError(err?.message || 'Código incorrecto o vencido.');
@@ -338,19 +322,65 @@ export const ToquecitosView: React.FC = () => {
     }
   };
 
-  const handleAddToWallet = async (card: ClubMember) => {
-    setWalletError(null);
-    if (card.shareUrl && card.shareUrl.startsWith('https://')) {
-      window.location.href = card.shareUrl;
+  // Paso 3 (solo si ese mail no tenía cuenta): Registro con nombre, mail y fecha de nacimiento (>= 18)
+  const handleCompleteNewRegistration = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAuthError(null);
+    const cleanName = nameInput.trim();
+    const cleanEmail = emailInput.trim().toLowerCase();
+
+    if (!cleanName) {
+      setAuthError('Ingresá tu nombre.');
       return;
     }
+    if (!birthDateInput) {
+      setAuthError('Seleccioná tu fecha de nacimiento.');
+      return;
+    }
+
+    const ageCheck = isAtLeast18(birthDateInput);
+    if (!ageCheck.valid || !ageCheck.isAdult) {
+      setAuthError('Para crear tu tarjeta con datos hace falta ser mayor de 18.');
+      return;
+    }
+
+    setAuthLoading(true);
+    try {
+      const reg = await api.registerMember({
+        localCode: originHubCode || 'BURGER01',
+        name: cleanName,
+        email: cleanEmail,
+        birthDate: birthDateInput,
+        birthDay: ageCheck.birthDay,
+        birthMonth: ageCheck.birthMonth,
+        marketingConsent: marketingConsentInput,
+      });
+      setAccount(reg.account);
+      setIsAccountModalOpen(false);
+      setAuthStep('enter_email');
+      await refreshData(cleanEmail);
+    } catch (err: any) {
+      setAuthError(err?.message || 'No pudimos crear tu cuenta.');
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
+  // Botón "Agregar a mi billetera": pide al servidor crear la tarjeta, recibe una dirección y la abre.
+  // Sin generar ni descargar imagen de reemplazo.
+  const handleAddToWallet = async (card: ClubMember) => {
+    if (walletUnconfigured) return;
+    setWalletError(null);
+    setWalletStatusMessage(null);
     setWalletLoadingId(card.id);
     try {
+      const immutableShortCode = card.shortCode || card.memberCode || 'K7M2-9XQ4';
       const passRes = await api.createWalletPass({
         cartelCode: card.localCode || 'BURGER01',
         memberId: card.id,
-        memberCode: card.barcodeToken || card.memberCode,
-        customerName: card.anonymous ? undefined : card.name,
+        memberCode: immutableShortCode,
+        barcodeValue: immutableShortCode,
+        customerName: card.name,
         stamps: card.stamps,
         stampsRequired: card.targetStamps || card.stampsRequired || 10,
         rewardText: card.rewardText,
@@ -358,18 +388,23 @@ export const ToquecitosView: React.FC = () => {
         color: card.customColor,
         logoURL: card.logoUrl,
       });
-      await refreshData();
-      const targetUrl =
-        walletOS === 'apple'
-          ? passRes.appleWalletUrl || passRes.shareUrl
-          : passRes.googleWalletUrl || passRes.shareUrl;
-      if (targetUrl && targetUrl.startsWith('https://')) {
-        window.location.href = targetUrl;
-      } else {
-        setWalletError('La tarjeta digital fue generada, pero el enlace aún no está disponible.');
+
+      if (passRes.configured === false) {
+        setWalletUnconfigured(true);
+        setWalletStatusMessage('Pronto vas a poder guardarla en tu billetera');
+        return;
       }
-    } catch (err: any) {
-      setWalletError(err?.message || 'No pudimos generar el pase para tu billetera.');
+
+      const targetUrl =
+        passRes.shareUrl || passRes.appleWalletUrl || passRes.googleWalletUrl;
+      if (!passRes.success || !targetUrl) {
+        setWalletError('No pudimos crear tu tarjeta. Probá de nuevo.');
+        return;
+      }
+
+      window.location.href = targetUrl;
+    } catch {
+      setWalletError('No pudimos crear tu tarjeta. Probá de nuevo.');
     } finally {
       setWalletLoadingId(null);
     }
@@ -378,21 +413,7 @@ export const ToquecitosView: React.FC = () => {
   const handleRevokeCard = async (memberId: string) => {
     setRevokingCardId(memberId);
     try {
-      await api.revokeMemberCard(memberId);
-      // Limpiar también de localStorage si estaba guardado por comercio
-      for (let i = window.localStorage.length - 1; i >= 0; i--) {
-        const k = window.localStorage.key(i);
-        if (k && k.startsWith('toque_member_')) {
-          try {
-            const parsed = JSON.parse(window.localStorage.getItem(k) || '{}');
-            if (parsed.id === memberId) {
-              window.localStorage.removeItem(k);
-            }
-          } catch {
-            // ignore
-          }
-        }
-      }
+      await api.revokeMemberCard(memberId, 'Baja solicitada por el cliente');
       setConfirmRevokeId(null);
       setSelectedCard(null);
       await refreshData();
@@ -402,11 +423,6 @@ export const ToquecitosView: React.FC = () => {
       setRevokingCardId(null);
     }
   };
-
-  const activeReceipt = useMemo(() => {
-    if (receipts.length === 0) return null;
-    return receipts.find((r) => r.id === selectedReceiptId) || receipts[0];
-  }, [receipts, selectedReceiptId]);
 
   const bgMain = isDark ? 'bg-[#09090B] text-[#F5F5F2]' : 'bg-[#F4F1EA] text-[#141413]';
   const surfaceCard = isDark
@@ -434,7 +450,7 @@ export const ToquecitosView: React.FC = () => {
                 }`}
               >
                 <ArrowLeft size={14} />
-                <span>Volver al Hub del local</span>
+                <span>Volver al local</span>
               </Link>
             ) : (
               <Link to="/" className="flex items-center gap-2">
@@ -460,7 +476,12 @@ export const ToquecitosView: React.FC = () => {
 
             <button
               type="button"
-              onClick={() => setIsAccountModalOpen(true)}
+              onClick={() => {
+                setAuthError(null);
+                setAuthSuccess(null);
+                setAuthStep('enter_email');
+                setIsAccountModalOpen(true);
+              }}
               className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-xs font-semibold transition-colors cursor-pointer ${
                 account?.recognized
                   ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
@@ -470,10 +491,10 @@ export const ToquecitosView: React.FC = () => {
               }`}
             >
               <User size={13} />
-              <span className="truncate max-w-[110px]">
+              <span className="truncate max-w-[120px]">
                 {account?.recognized
                   ? account.name || account.maskedEmail || 'Mi cuenta'
-                  : 'Respaldar'}
+                  : 'Ingresá tu mail'}
               </span>
             </button>
           </div>
@@ -481,7 +502,7 @@ export const ToquecitosView: React.FC = () => {
       </header>
 
       <main className="max-w-md mx-auto px-4 pt-5 space-y-6">
-        {/* 1. Cabecera Vaulta: Dinero ahorrado con Toque */}
+        {/* 1. Cabecera: Dinero ahorrado con Toque */}
         <section className={`rounded-3xl border p-5 ${surfaceCard}`}>
           <div className="flex items-center justify-between gap-3">
             <div>
@@ -503,10 +524,9 @@ export const ToquecitosView: React.FC = () => {
           </p>
         </section>
 
-        {/* 2. Tarjetero 3D en cuero con costuras y broche metálico */}
+        {/* 2. Tarjetero en cuero */}
         <section aria-label="Tarjetero en cuero">
           <div className="relative rounded-[30px] p-4 pt-5 pb-6 bg-gradient-to-b from-[#231F1D] via-[#181514] to-[#110F0E] border border-[#38312E] shadow-[0_22px_45px_rgba(0,0,0,0.55)] overflow-hidden">
-            {/* Costura perimetral en hilo claro */}
             <div className="pointer-events-none absolute inset-2 rounded-[24px] border border-dashed border-[#6E5D53]/45" />
 
             <div className="relative z-10 flex items-center justify-between px-2 mb-3">
@@ -521,7 +541,6 @@ export const ToquecitosView: React.FC = () => {
               </span>
             </div>
 
-            {/* Pila de tarjetas dentro del bolsillo de cuero */}
             {cards.length === 0 ? (
               <div className="relative z-10 rounded-2xl bg-[#141210]/90 border border-[#2E2825] p-6 text-center space-y-2.5 my-2">
                 <QrCode className="w-8 h-8 text-[#D95B26] mx-auto opacity-85" />
@@ -529,15 +548,18 @@ export const ToquecitosView: React.FC = () => {
                   Todavía no tenés tarjetas en tu tarjetero
                 </p>
                 <p className="text-xs text-[#9E9B95] leading-relaxed">
-                  Cuando apoyes tu celular o escanees el QR en el mostrador de un local adherido, tu tarjeta de sellos va a aparecer acá automáticamente.
+                  Ingresá tu mail para recuperar tus tarjetas o escaneá el cartel en el mostrador de un comercio adherido.
                 </p>
                 <button
                   type="button"
-                  onClick={() => setIsAccountModalOpen(true)}
+                  onClick={() => {
+                    setAuthStep('enter_email');
+                    setIsAccountModalOpen(true);
+                  }}
                   className="mt-1 inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-[#D95B26] hover:bg-[#ea6730] text-white text-xs font-semibold transition-colors cursor-pointer"
                 >
                   <Mail size={13} />
-                  <span>Recuperar mis tarjetas con mi mail</span>
+                  <span>Ingresá tu mail</span>
                 </button>
               </div>
             ) : (
@@ -545,7 +567,11 @@ export const ToquecitosView: React.FC = () => {
                 {cards.map((card, idx) => {
                   const bgHex = resolveCardBackground(card);
                   const target = card.targetStamps || card.stampsRequired || 10;
-                  const progressPct = Math.min(100, Math.round(((card.stamps || 0) / target) * 100));
+                  const progressPct = Math.min(
+                    100,
+                    Math.round(((card.stamps || 0) / target) * 100)
+                  );
+                  const shortCode = card.shortCode || card.memberCode || 'K7M2-9XQ4';
 
                   return (
                     <button
@@ -553,6 +579,7 @@ export const ToquecitosView: React.FC = () => {
                       type="button"
                       onClick={() => {
                         setWalletError(null);
+                        setWalletStatusMessage(null);
                         setSelectedCard(card);
                       }}
                       style={{
@@ -578,8 +605,8 @@ export const ToquecitosView: React.FC = () => {
                             <p className="text-sm font-bold text-white truncate">
                               {card.businessName || 'Comercio adherido'}
                             </p>
-                            <p className="text-[11px] text-white/75 truncate">
-                              {card.rewardText || 'Beneficio exclusivo en tu próxima visita'}
+                            <p className="text-[11px] font-mono text-white/80 truncate">
+                              Código: {shortCode}
                             </p>
                           </div>
                         </div>
@@ -594,7 +621,6 @@ export const ToquecitosView: React.FC = () => {
                         </div>
                       </div>
 
-                      {/* Barra sutil de progreso */}
                       <div className="mt-3 h-1.5 w-full rounded-full bg-black/30 overflow-hidden">
                         <div
                           className="h-full rounded-full bg-white/90 transition-all duration-500"
@@ -607,10 +633,9 @@ export const ToquecitosView: React.FC = () => {
               </div>
             )}
 
-            {/* Solapa inferior del tarjetero con botón metálico grabado */}
             <div className="relative z-10 mt-2 pt-3 border-t border-[#38312E]/80 flex items-center justify-between px-2">
               <span className="text-[11px] text-[#9E948C]">
-                Tocá una tarjeta para abrir el código QR y pase
+                Tocá una tarjeta para ver tu código corto y QR
               </span>
               <div
                 aria-hidden="true"
@@ -622,8 +647,8 @@ export const ToquecitosView: React.FC = () => {
           </div>
         </section>
 
-        {/* 3. Tres tarjetas selectoras horizontales debajo del tarjetero */}
-        <section aria-label="Accesos rápidos de tu bóveda" className="grid grid-cols-3 gap-2.5">
+        {/* 3. Tres tarjetas selectoras horizontales */}
+        <section aria-label="Accesos rápidos" className="grid grid-cols-3 gap-2.5">
           <button
             type="button"
             onClick={() => handleSelectSection('cards')}
@@ -728,21 +753,28 @@ export const ToquecitosView: React.FC = () => {
                   const target = card.targetStamps || card.stampsRequired || 10;
                   const cooldown = getStrictCooldownState(card.lastStampedAt);
                   const readyToRedeem = card.stamps >= target;
+                  const shortCode = card.shortCode || card.memberCode || 'K7M2-9XQ4';
 
                   return (
                     <div
                       key={card.id}
                       onClick={() => {
                         setWalletError(null);
+                        setWalletStatusMessage(null);
                         setSelectedCard(card);
                       }}
                       className={`rounded-2xl border p-4 transition-colors cursor-pointer hover:border-[#D95B26]/50 ${surfaceCard}`}
                     >
                       <div className="flex items-center justify-between gap-3">
                         <div>
-                          <h3 className="text-sm font-bold">
-                            {card.businessName || 'Comercio adherido'}
-                          </h3>
+                          <div className="flex items-center gap-2">
+                            <h3 className="text-sm font-bold">
+                              {card.businessName || 'Comercio adherido'}
+                            </h3>
+                            <span className="text-[11px] font-mono font-bold px-2 py-0.5 rounded-md bg-[#D95B26]/15 text-[#D95B26]">
+                              {shortCode}
+                            </span>
+                          </div>
                           <p className={`text-xs ${mutedText} mt-0.5`}>
                             Premio: {card.rewardText || 'Beneficio al completar tus sellos'}
                           </p>
@@ -758,7 +790,6 @@ export const ToquecitosView: React.FC = () => {
                         </span>
                       </div>
 
-                      {/* Grilla visual de sellos */}
                       <div className="grid grid-cols-5 gap-2 mt-3.5">
                         {Array.from({ length: Math.min(target, 10) }).map((_, i) => {
                           const filled = i < card.stamps;
@@ -785,7 +816,7 @@ export const ToquecitosView: React.FC = () => {
                           <span>{cooldown.label}</span>
                         </span>
                         <span className="font-semibold text-[#D95B26] inline-flex items-center gap-1">
-                          <span>Ver pase QR</span>
+                          <span>Ver código y QR</span>
                           <ArrowUpRight size={12} />
                         </span>
                       </div>
@@ -796,87 +827,123 @@ export const ToquecitosView: React.FC = () => {
             </div>
           )}
 
+          {/* SECCIÓN TICKETS (Item 5: En la lista de Tickets, cada ticket es una tarjeta resumida (comercio, monto, fecha). Al tocarlo abre el comprobante COMPLETO, sin paso intermedio) */}
           {activeSection === 'tickets' && (
             <div className="space-y-4">
-              <div className="flex items-center justify-between px-1">
-                <div>
-                  <h2 className="text-sm font-bold">Tus tickets digitales</h2>
-                  <p className={`text-xs ${mutedText}`}>
-                    Comprobantes guardados automáticamente al comprar en locales Toque
-                  </p>
-                </div>
-              </div>
+              {openedFullReceipt ? (
+                <div className="space-y-3">
+                  <button
+                    type="button"
+                    onClick={() => setOpenedFullReceipt(null)}
+                    className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-semibold cursor-pointer ${surfaceCard}`}
+                  >
+                    <ArrowLeft size={14} />
+                    <span>Volver a la lista de tickets</span>
+                  </button>
 
-              {receipts.length === 0 ? (
-                <div className={`rounded-2xl border p-6 text-center space-y-2 ${surfaceCard}`}>
-                  <Ticket className="w-8 h-8 text-[#D95B26] mx-auto opacity-80" />
-                  <p className="text-sm font-bold">Aún no tenés tickets guardados</p>
-                  <p className={`text-xs ${mutedText}`}>
-                    Cuando el comercio emita tu comprobante en caja y apoyes tu celular en el cartel, el ticket completo se guarda automáticamente acá.
-                  </p>
+                  <DieCutTicket
+                    receiptId={openedFullReceipt.id}
+                    businessName={openedFullReceipt.merchantName}
+                    businessAddress="Av. Cabildo 2040, Belgrano"
+                    total={openedFullReceipt.total ?? openedFullReceipt.amountArs ?? 0}
+                    createdAt={openedFullReceipt.createdAt}
+                    items={openedFullReceipt.items}
+                    method={openedFullReceipt.method}
+                    isDark={isDark}
+                    stamps={
+                      cards.find(
+                        (c) =>
+                          c.businessId ===
+                          (openedFullReceipt.businessId || openedFullReceipt.tenantId)
+                      )?.stamps ?? 4
+                    }
+                    stampsRequired={
+                      cards.find(
+                        (c) =>
+                          c.businessId ===
+                          (openedFullReceipt.businessId || openedFullReceipt.tenantId)
+                      )?.targetStamps ?? 5
+                    }
+                    onViewPass={() => {
+                      const matchingCard =
+                        cards.find(
+                          (c) =>
+                            c.businessId ===
+                            (openedFullReceipt.businessId || openedFullReceipt.tenantId)
+                        ) || cards[0];
+                      if (matchingCard) {
+                        setSelectedCard(matchingCard);
+                      } else {
+                        handleSelectSection('cards');
+                      }
+                    }}
+                  />
                 </div>
               ) : (
                 <>
-                  {/* Selector horizontal si hay más de un ticket */}
-                  {receipts.length > 1 && (
-                    <div className="flex gap-2 overflow-x-auto pb-1 no-scrollbar">
+                  <div className="flex items-center justify-between px-1">
+                    <div>
+                      <h2 className="text-sm font-bold">Tus tickets</h2>
+                      <p className={`text-xs ${mutedText}`}>
+                        Tocá un ticket para abrir el comprobante completo
+                      </p>
+                    </div>
+                  </div>
+
+                  {receipts.length === 0 ? (
+                    <div className={`rounded-2xl border p-6 text-center space-y-2 ${surfaceCard}`}>
+                      <Ticket className="w-8 h-8 text-[#D95B26] mx-auto opacity-80" />
+                      <p className="text-sm font-bold">Aún no tenés tickets guardados</p>
+                      <p className={`text-xs ${mutedText}`}>
+                        Cuando el comercio emita tu comprobante en caja, va a aparecer acá.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="space-y-2.5">
                       {receipts.map((r) => {
-                        const isSelected = activeReceipt?.id === r.id;
+                        const amountVal = r.total ?? r.amountArs ?? 0;
+                        const dateFormatted = (() => {
+                          const d = new Date(r.createdAt);
+                          if (Number.isNaN(d.getTime())) return r.createdAt;
+                          return d.toLocaleString('es-AR', {
+                            day: '2-digit',
+                            month: 'short',
+                            year: 'numeric',
+                            hour: '2-digit',
+                            minute: '2-digit',
+                          });
+                        })();
+
                         return (
                           <button
                             key={r.id}
                             type="button"
-                            onClick={() => setSelectedReceiptId(r.id)}
-                            className={`px-3.5 py-2 rounded-xl border text-xs font-semibold shrink-0 transition-all cursor-pointer ${
-                              isSelected
-                                ? 'bg-[#D95B26] border-[#D95B26] text-white'
-                                : `${surfaceCard}`
-                            }`}
+                            onClick={() => setOpenedFullReceipt(r)}
+                            className={`w-full text-left rounded-2xl border p-4 flex items-center justify-between gap-3 transition-colors hover:border-[#D95B26] cursor-pointer ${surfaceCard}`}
                           >
-                            <span>{r.merchantName}</span>
-                            <span className="ml-2 font-mono opacity-80">
-                              ${(r.total ?? r.amountArs ?? 0).toLocaleString('es-AR')}
-                            </span>
+                            <div className="flex items-center gap-3 min-w-0">
+                              <div className="w-10 h-10 rounded-xl bg-[#D95B26]/15 text-[#D95B26] flex items-center justify-center shrink-0">
+                                <ReceiptIcon size={18} />
+                              </div>
+                              <div className="min-w-0">
+                                <p className="text-sm font-bold truncate">{r.merchantName}</p>
+                                <p className={`text-xs ${mutedText} mt-0.5`}>{dateFormatted}</p>
+                              </div>
+                            </div>
+
+                            <div className="text-right shrink-0">
+                              <span className="block text-base font-extrabold font-mono tabular-nums">
+                                ${amountVal.toLocaleString('es-AR')}
+                              </span>
+                              <span className="text-[11px] font-semibold text-[#D95B26] inline-flex items-center gap-0.5">
+                                <span>Ver comprobante</span>
+                                <ArrowUpRight size={12} />
+                              </span>
+                            </div>
                           </button>
                         );
                       })}
                     </div>
-                  )}
-
-                  {/* Ticket troquelado completo idéntico al diseño de referencia */}
-                  {activeReceipt && (
-                    <DieCutTicket
-                      receiptId={activeReceipt.id}
-                      businessName={activeReceipt.merchantName}
-                      total={activeReceipt.total ?? activeReceipt.amountArs ?? 0}
-                      createdAt={activeReceipt.createdAt}
-                      items={activeReceipt.items}
-                      method={activeReceipt.method}
-                      stamps={
-                        cards.find(
-                          (c) =>
-                            c.businessId === (activeReceipt.businessId || activeReceipt.tenantId)
-                        )?.stamps ?? 1
-                      }
-                      stampsRequired={
-                        cards.find(
-                          (c) =>
-                            c.businessId === (activeReceipt.businessId || activeReceipt.tenantId)
-                        )?.targetStamps ?? 10
-                      }
-                      onViewPass={() => {
-                        const matchingCard =
-                          cards.find(
-                            (c) =>
-                              c.businessId === (activeReceipt.businessId || activeReceipt.tenantId)
-                          ) || cards[0];
-                        if (matchingCard) {
-                          setSelectedCard(matchingCard);
-                        } else {
-                          handleSelectSection('cards');
-                        }
-                      }}
-                    />
                   )}
                 </>
               )}
@@ -915,7 +982,9 @@ export const ToquecitosView: React.FC = () => {
               cards.filter((c) => c.stamps >= (c.targetStamps || 10)).length === 0 ? (
                 <div className={`rounded-2xl border p-6 text-center space-y-1.5 ${surfaceCard}`}>
                   <Gift className="w-7 h-7 text-[#D95B26] mx-auto opacity-80" />
-                  <p className="text-sm font-bold">Seguí sumando sellos en tus comercios favoritos</p>
+                  <p className="text-sm font-bold">
+                    Seguí sumando sellos en tus comercios favoritos
+                  </p>
                   <p className={`text-xs ${mutedText}`}>
                     Cuando completes los sellos de una tarjeta, tu premio aparecerá destacado acá para canjear en caja.
                   </p>
@@ -941,9 +1010,9 @@ export const ToquecitosView: React.FC = () => {
             <div className={`rounded-3xl border p-5 space-y-4 ${surfaceCard}`}>
               <div className="flex items-center justify-between">
                 <div>
-                  <h2 className="text-base font-bold">Respaldo de tu cuenta</h2>
+                  <h2 className="text-base font-bold">Tu cuenta</h2>
                   <p className={`text-xs ${mutedText}`}>
-                    Ingresá tu mail para no perder tus sellos ni tickets si cambiás de celular
+                    Ingresá tu mail para acceder a tus tarjetas y comprobantes desde cualquier celular.
                   </p>
                 </div>
                 <ShieldCheck className="w-6 h-6 text-[#D95B26]" />
@@ -960,19 +1029,25 @@ export const ToquecitosView: React.FC = () => {
                   </div>
                   <button
                     type="button"
-                    onClick={() => setIsAccountModalOpen(true)}
+                    onClick={() => {
+                      setAuthStep('enter_email');
+                      setIsAccountModalOpen(true);
+                    }}
                     className="w-full py-2.5 rounded-xl border border-[#D95B26]/40 text-[#D95B26] text-xs font-semibold hover:bg-[#D95B26]/10 transition-colors cursor-pointer"
                   >
-                    Cambiar correo vinculado
+                    Cambiar mail
                   </button>
                 </div>
               ) : (
                 <button
                   type="button"
-                  onClick={() => setIsAccountModalOpen(true)}
+                  onClick={() => {
+                    setAuthStep('enter_email');
+                    setIsAccountModalOpen(true);
+                  }}
                   className="w-full py-3 rounded-xl bg-[#D95B26] hover:bg-[#ea6730] text-white text-xs font-bold transition-colors cursor-pointer"
                 >
-                  Vincular mi correo con código de 6 dígitos
+                  Ingresá tu mail
                 </button>
               )}
             </div>
@@ -980,7 +1055,7 @@ export const ToquecitosView: React.FC = () => {
         </div>
       </main>
 
-      {/* Barra de navegación inferior flotante sincronizada */}
+      {/* Barra de navegación inferior flotante */}
       <nav
         aria-label="Navegación de Toquecitos"
         className="fixed bottom-4 left-1/2 -translate-x-1/2 z-30 w-[calc(100%-2rem)] max-w-sm rounded-full bg-[#141416]/95 border border-[#28282E] backdrop-blur-xl p-1.5 shadow-[0_16px_40px_rgba(0,0,0,0.6)] grid grid-cols-4 gap-1"
@@ -1036,10 +1111,10 @@ export const ToquecitosView: React.FC = () => {
         </button>
       </nav>
 
-      {/* Modal de Pase WalletWallet al tocar una tarjeta del tarjetero */}
+      {/* Modal de Tarjeta del Cliente (Item 2: código corto grande + QR inmutable + botón "Agregar a mi billetera") */}
       {selectedCard && (
         <div
-          className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4"
+          className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto"
           onClick={() => {
             setSelectedCard(null);
             setConfirmRevokeId(null);
@@ -1047,172 +1122,114 @@ export const ToquecitosView: React.FC = () => {
         >
           <div
             onClick={(e) => e.stopPropagation()}
-            className="w-full max-w-sm rounded-[32px] overflow-hidden border border-white/15 shadow-2xl"
-            style={{ backgroundColor: resolveCardBackground(selectedCard) }}
+            className="w-full max-w-sm rounded-[32px] bg-[#141416] border border-[#26262A] p-4 space-y-4 shadow-2xl my-auto"
           >
-            <div className="p-6 text-white space-y-5">
-              {/* Header del pase */}
-              <div className="flex items-start justify-between gap-3">
-                <div className="flex items-center gap-2.5">
-                  {selectedCard.logoUrl ? (
-                    <img
-                      src={selectedCard.logoUrl}
-                      alt={selectedCard.businessName || 'Logo'}
-                      className="w-9 h-9 rounded-xl object-cover border border-white/20"
-                    />
-                  ) : (
-                    <div className="w-9 h-9 rounded-xl bg-white/15 border border-white/20 flex items-center justify-center font-bold text-sm">
-                      {(selectedCard.businessName || 'T').charAt(0).toUpperCase()}
-                    </div>
-                  )}
-                  <div>
-                    <p className="text-sm font-bold leading-tight">
-                      Tarjeta de sellos de {selectedCard.businessName || 'Comercio'}
-                    </p>
-                    <p className="text-[11px] text-white/70">Mostrá este código en caja</p>
-                  </div>
-                </div>
+            <div className="flex items-center justify-between px-1">
+              <span className="text-xs font-bold text-[#F5F5F2]">
+                Tarjeta de {selectedCard.businessName || 'Comercio'}
+              </span>
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedCard(null);
+                  setConfirmRevokeId(null);
+                }}
+                className="w-8 h-8 rounded-full bg-[#1F1F23] flex items-center justify-center text-[#9E9B95] hover:text-white cursor-pointer"
+                aria-label="Cerrar tarjeta"
+              >
+                <X size={16} />
+              </button>
+            </div>
 
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSelectedCard(null);
-                    setConfirmRevokeId(null);
-                  }}
-                  className="w-8 h-8 rounded-full bg-black/30 hover:bg-black/50 flex items-center justify-center text-white/80 cursor-pointer"
-                  aria-label="Cerrar pase"
-                >
-                  <X size={16} />
-                </button>
-              </div>
+            <WalletPassCard
+              businessName={selectedCard.businessName || 'Comercio'}
+              memberName={selectedCard.name || 'Socio'}
+              stamps={selectedCard.stamps}
+              stampsRequired={selectedCard.targetStamps || selectedCard.stampsRequired || 10}
+              rewardText={selectedCard.rewardText || 'Beneficio al completar tus sellos'}
+              barcodeToken={selectedCard.shortCode || selectedCard.memberCode || 'K7M2-9XQ4'}
+              shortCode={selectedCard.shortCode || selectedCard.memberCode || 'K7M2-9XQ4'}
+              colorPreset={selectedCard.colorPreset || 'dark'}
+              customColor={selectedCard.customColor}
+              logoUrl={selectedCard.logoUrl}
+            />
 
-              {/* Etiquetas nativas del pase Wallet: SELLOS, PREMIO, SOCIO */}
-              <div>
-                <span className="block text-[10px] font-bold tracking-wider text-white/65">
-                  SELLOS
+            <div className="space-y-2">
+              <button
+                type="button"
+                disabled={walletLoadingId === selectedCard.id || walletUnconfigured}
+                onClick={() => handleAddToWallet(selectedCard)}
+                className="w-full py-3.5 px-4 rounded-2xl bg-[#D95B26] hover:bg-[#e06530] disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold text-xs flex items-center justify-center gap-2 transition-colors cursor-pointer"
+              >
+                <Wallet size={15} />
+                <span>
+                  {walletUnconfigured
+                    ? 'Pronto vas a poder guardarla en tu billetera'
+                    : walletLoadingId === selectedCard.id
+                    ? 'Creando tu tarjeta...'
+                    : 'Agregar a mi billetera'}
                 </span>
-                <div className="text-3xl font-black font-mono tracking-tight mt-0.5">
-                  {selectedCard.stamps} / {selectedCard.targetStamps || selectedCard.stampsRequired || 10}
-                </div>
-              </div>
+              </button>
 
-              <div className="grid grid-cols-3 gap-3 pt-1">
-                <div className="col-span-2">
-                  <span className="block text-[10px] font-bold tracking-wider text-white/65">
-                    PREMIO
-                  </span>
-                  <p className="text-xs font-semibold text-white mt-0.5 line-clamp-2">
-                    {selectedCard.rewardText || 'Beneficio exclusivo en tu próxima visita'}
-                  </p>
-                </div>
-                <div className="text-right">
-                  <span className="block text-[10px] font-bold tracking-wider text-white/65">
-                    SOCIO
-                  </span>
-                  <p className="text-xs font-semibold text-white mt-0.5 truncate">
-                    {selectedCard.anonymous
-                      ? 'Cliente'
-                      : selectedCard.name || selectedCard.maskedEmail || 'Socio'}
-                  </p>
-                </div>
-              </div>
-
-              {/* Código QR limpio (16+ caracteres, CERO texto debajo del QR) */}
-              <div className="pt-2 flex flex-col items-center">
-                <div className="bg-white p-4 rounded-2xl shadow-lg">
-                  {selectedCardQrUrl ? (
-                    <img
-                      src={selectedCardQrUrl}
-                      alt={`QR ${selectedCard.businessName}`}
-                      className="w-[168px] h-[168px]"
-                    />
-                  ) : (
-                    <div className="w-[168px] h-[168px] flex items-center justify-center text-xs text-black">
-                      Generando QR...
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* Indicador de regla de 24 horas (sin botón de autosellado) */}
-              <div className="rounded-xl bg-black/25 border border-white/10 px-3.5 py-2.5 text-center text-xs text-white/85 flex items-center justify-center gap-1.5">
-                <Clock size={13} className="shrink-0 text-white/70" />
-                <span>{getStrictCooldownState(selectedCard.lastStampedAt).label}</span>
-              </div>
-
-              {walletError && (
-                <div className="rounded-xl bg-red-500/20 border border-red-400/40 px-3 py-2 text-xs text-red-100 text-center">
-                  {walletError}
-                </div>
+              {walletStatusMessage && (
+                <p className="text-xs text-center text-[#9E9B95]">{walletStatusMessage}</p>
               )}
 
-              {/* Botón según sistema operativo (Apple Wallet o Google Wallet) */}
-              <div className="space-y-2 pt-1">
+              {walletError && (
+                <p role="alert" className="text-xs text-center text-red-400">
+                  {walletError}
+                </p>
+              )}
+
+              {selectedCard.localCode && (
+                <Link
+                  to={`/u/${selectedCard.localCode}`}
+                  className="w-full py-2.5 px-4 rounded-xl bg-white/10 hover:bg-white/15 text-white font-semibold text-xs flex items-center justify-center gap-1.5 transition-colors"
+                >
+                  <Store size={14} />
+                  <span>Abrir local {selectedCard.businessName}</span>
+                </Link>
+              )}
+
+              {confirmRevokeId === selectedCard.id ? (
+                <div className="p-3 rounded-xl bg-black/40 border border-red-400/30 space-y-2 text-center">
+                  <p className="text-[11px] text-white/90">
+                    ¿Seguro que querés dar de baja esta tarjeta y sus sellos?
+                  </p>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      disabled={revokingCardId === selectedCard.id}
+                      onClick={() => handleRevokeCard(selectedCard.id)}
+                      className="flex-1 py-1.5 rounded-lg bg-red-600 hover:bg-red-500 text-white text-xs font-semibold cursor-pointer"
+                    >
+                      {revokingCardId === selectedCard.id ? 'Eliminando...' : 'Sí, dar de baja'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setConfirmRevokeId(null)}
+                      className="flex-1 py-1.5 rounded-lg bg-white/15 text-white text-xs font-semibold cursor-pointer"
+                    >
+                      Cancelar
+                    </button>
+                  </div>
+                </div>
+              ) : (
                 <button
                   type="button"
-                  disabled={walletLoadingId === selectedCard.id}
-                  onClick={() => handleAddToWallet(selectedCard)}
-                  className="w-full py-3 px-4 rounded-xl bg-black hover:bg-zinc-900 text-white font-semibold text-xs flex items-center justify-center gap-2 border border-white/20 shadow-md transition-colors cursor-pointer disabled:opacity-50"
+                  onClick={() => setConfirmRevokeId(selectedCard.id)}
+                  className="w-full py-1.5 text-[11px] text-white/60 hover:text-white/90 flex items-center justify-center gap-1 transition-colors cursor-pointer"
                 >
-                  <Smartphone size={15} />
-                  <span>
-                    {walletLoadingId === selectedCard.id
-                      ? 'Preparando pase...'
-                      : walletButtonLabel}
-                  </span>
+                  <Trash2 size={12} />
+                  <span>Dar de baja esta tarjeta</span>
                 </button>
-
-                {selectedCard.localCode && (
-                  <Link
-                    to={`/u/${selectedCard.localCode}`}
-                    className="w-full py-2.5 px-4 rounded-xl bg-white/10 hover:bg-white/15 text-white font-semibold text-xs flex items-center justify-center gap-1.5 transition-colors"
-                  >
-                    <Store size={14} />
-                    <span>Abrir Hub de {selectedCard.businessName}</span>
-                  </Link>
-                )}
-
-                {/* Opción de revocar / dar de baja tarjeta */}
-                {confirmRevokeId === selectedCard.id ? (
-                  <div className="p-3 rounded-xl bg-black/40 border border-red-400/30 space-y-2 text-center">
-                    <p className="text-[11px] text-white/90">
-                      ¿Seguro que querés dar de baja esta tarjeta y sus sellos?
-                    </p>
-                    <div className="flex gap-2">
-                      <button
-                        type="button"
-                        disabled={revokingCardId === selectedCard.id}
-                        onClick={() => handleRevokeCard(selectedCard.id)}
-                        className="flex-1 py-1.5 rounded-lg bg-red-600 hover:bg-red-500 text-white text-xs font-semibold cursor-pointer"
-                      >
-                        {revokingCardId === selectedCard.id ? 'Eliminando...' : 'Sí, dar de baja'}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setConfirmRevokeId(null)}
-                        className="flex-1 py-1.5 rounded-lg bg-white/15 text-white text-xs font-semibold cursor-pointer"
-                      >
-                        Cancelar
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => setConfirmRevokeId(selectedCard.id)}
-                    className="w-full py-1.5 text-[11px] text-white/60 hover:text-white/90 flex items-center justify-center gap-1 transition-colors cursor-pointer"
-                  >
-                    <Trash2 size={12} />
-                    <span>Dar de baja esta tarjeta</span>
-                  </button>
-                )}
-              </div>
+              )}
             </div>
           </div>
         </div>
       )}
 
-      {/* Modal de respaldo / verificación de correo por código de 6 dígitos */}
+      {/* Modal de Cuenta Única y Reconocimiento (Items 3 y 4) */}
       {isAccountModalOpen && (
         <div
           className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4"
@@ -1225,7 +1242,9 @@ export const ToquecitosView: React.FC = () => {
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <ShieldCheck className="w-5 h-5 text-[#D95B26]" />
-                <h3 className="text-base font-bold">Guardado en tu cuenta</h3>
+                <h3 className="text-base font-bold">
+                  {authStep === 'register_new' ? 'Creá tu cuenta' : 'Ingresá tu mail'}
+                </h3>
               </div>
               <button
                 type="button"
@@ -1235,10 +1254,6 @@ export const ToquecitosView: React.FC = () => {
                 <X size={16} />
               </button>
             </div>
-
-            <p className="text-xs text-[#9E9B95] leading-relaxed">
-              Ingresá tu mail para no perder tus sellos ni tus comprobantes si cambiás de celular. Te enviamos un código de 6 dígitos sin contraseñas.
-            </p>
 
             {authError && (
               <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/30 text-xs text-red-300">
@@ -1252,30 +1267,22 @@ export const ToquecitosView: React.FC = () => {
               </div>
             )}
 
-            {!otpSent ? (
-              <form onSubmit={handleRequestOtp} className="space-y-3">
+            {/* Paso 1: Pantalla "Ingresá tu mail" */}
+            {authStep === 'enter_email' && (
+              <form onSubmit={handleSendLoginOtp} className="space-y-3">
+                <p className="text-xs text-[#9E9B95] leading-relaxed">
+                  Te enviamos un código de 6 dígitos. Si ya tenés cuenta, entrás directo sin registrarte de nuevo.
+                </p>
                 <div>
                   <label className="block text-xs font-medium text-[#9E9B95] mb-1">
-                    Tu nombre (opcional)
-                  </label>
-                  <input
-                    type="text"
-                    value={nameInput}
-                    onChange={(e) => setNameInput(e.target.value)}
-                    placeholder="Ej. Valentina"
-                    className="w-full px-3.5 py-2.5 rounded-xl bg-[#09090B] border border-[#26262A] text-sm text-white focus:outline-none focus:border-[#D95B26]"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-[#9E9B95] mb-1">
-                    Tu correo electrónico
+                    Mail
                   </label>
                   <input
                     type="email"
                     required
                     value={emailInput}
                     onChange={(e) => setEmailInput(e.target.value)}
-                    placeholder="tu@correo.com"
+                    placeholder="tu@mail.com"
                     className="w-full px-3.5 py-2.5 rounded-xl bg-[#09090B] border border-[#26262A] text-sm text-white focus:outline-none focus:border-[#D95B26]"
                   />
                 </div>
@@ -1287,11 +1294,14 @@ export const ToquecitosView: React.FC = () => {
                   {authLoading ? 'Enviando código...' : 'Recibir código de 6 dígitos'}
                 </button>
               </form>
-            ) : (
-              <form onSubmit={handleVerifyOtp} className="space-y-3">
+            )}
+
+            {/* Paso 2: Código de 6 dígitos */}
+            {authStep === 'enter_otp' && (
+              <form onSubmit={handleVerifyLoginOtp} className="space-y-3">
                 {demoHintCode && (
                   <div className="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs text-center">
-                    Código de verificación para prueba: <strong className="font-mono">{demoHintCode}</strong>
+                    Código de verificación: <strong className="font-mono">{demoHintCode}</strong>
                   </div>
                 )}
                 <div>
@@ -1303,6 +1313,7 @@ export const ToquecitosView: React.FC = () => {
                     inputMode="numeric"
                     maxLength={6}
                     required
+                    autoFocus
                     value={otpCode}
                     onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
                     placeholder="123456"
@@ -1311,21 +1322,92 @@ export const ToquecitosView: React.FC = () => {
                 </div>
                 <button
                   type="submit"
-                  disabled={authLoading}
+                  disabled={authLoading || otpCode.length !== 6}
                   className="w-full py-3 rounded-xl bg-[#D95B26] hover:bg-[#ea6730] disabled:opacity-50 text-white text-xs font-bold transition-colors cursor-pointer"
                 >
-                  {authLoading ? 'Verificando...' : 'Confirmar y vincular mis tarjetas'}
+                  {authLoading ? 'Verificando...' : 'Continuar'}
                 </button>
                 <button
                   type="button"
                   onClick={() => {
-                    setOtpSent(false);
+                    setAuthStep('enter_email');
                     setOtpCode('');
                   }}
                   className="w-full py-2 text-xs text-[#9E9B95] hover:text-white cursor-pointer"
                 >
-                  Cambiar correo electrónico
+                  Cambiar mail
                 </button>
+              </form>
+            )}
+
+            {/* Paso 3: Solo aparece si ese mail NO tiene cuenta */}
+            {authStep === 'register_new' && (
+              <form onSubmit={handleCompleteNewRegistration} className="space-y-3">
+                <p className="text-xs text-[#9E9B95]">
+                  Este mail todavía no tiene cuenta en Toque. Completá tus datos para crearla.
+                </p>
+                <div>
+                  <label className="block text-xs font-medium text-[#9E9B95] mb-1">
+                    Nombre
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={nameInput}
+                    onChange={(e) => setNameInput(e.target.value)}
+                    placeholder="Tu nombre"
+                    className="w-full px-3.5 py-2.5 rounded-xl bg-[#09090B] border border-[#26262A] text-sm text-white focus:outline-none focus:border-[#D95B26]"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-[#9E9B95] mb-1">
+                    Fecha de nacimiento
+                  </label>
+                  <div className="relative">
+                    <Calendar className="w-4 h-4 text-[#9E9B95] absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                    <input
+                      type="date"
+                      required
+                      max={new Date().toISOString().split('T')[0]}
+                      value={birthDateInput}
+                      onChange={(e) => setBirthDateInput(e.target.value)}
+                      className="w-full pl-10 pr-3.5 py-2.5 rounded-xl bg-[#09090B] border border-[#26262A] text-sm text-white focus:outline-none focus:border-[#D95B26]"
+                    />
+                  </div>
+                </div>
+
+                <label className="flex items-center gap-2 text-xs text-[#9E9B95] cursor-pointer pt-0.5">
+                  <input
+                    type="checkbox"
+                    checked={marketingConsentInput}
+                    onChange={(e) => setMarketingConsentInput(e.target.checked)}
+                    className="rounded border-[#26262A] bg-[#09090B] text-[#D95B26]"
+                  />
+                  <span>Quiero recibir avisos y beneficios de La Burger</span>
+                </label>
+
+                <div className="pt-1 space-y-1.5">
+                  <p className="text-[11px] text-[#9E9B95] leading-snug text-center">
+                    Al continuar, aceptás los{' '}
+                    <Link to="/terminos" className="text-white underline">
+                      Términos
+                    </Link>{' '}
+                    y la{' '}
+                    <Link to="/privacidad" className="text-white underline">
+                      Política de privacidad
+                    </Link>{' '}
+                    de Toque.
+                  </p>
+
+                  <button
+                    type="submit"
+                    disabled={authLoading}
+                    className="w-full py-3 rounded-xl bg-[#D95B26] hover:bg-[#ea6730] disabled:opacity-50 text-white text-xs font-bold transition-colors cursor-pointer"
+                  >
+                    {authLoading ? 'Creando cuenta...' : 'Crear mi tarjeta'}
+                  </button>
+                </div>
               </form>
             )}
           </div>

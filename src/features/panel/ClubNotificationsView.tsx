@@ -5,6 +5,7 @@ import {
   NotificationLimits,
   PlanState,
 } from '../../api';
+import { useAuth } from '../../lib/authContext';
 import { Skeleton } from '../../components/ui/Skeleton';
 import {
   Bell,
@@ -18,6 +19,10 @@ import {
 } from 'lucide-react';
 
 export const ClubNotificationsView: React.FC = () => {
+  const { user } = useAuth();
+  const isOwner =
+    user?.role === 'owner' || user?.role === 'superadmin' || Boolean(user?.isSuperAdmin);
+
   const [templates, setTemplates] = useState<NotificationTemplate[]>([]);
   const [limits, setLimits] = useState<NotificationLimits>({
     maxPerClientDays: 7,
@@ -91,6 +96,11 @@ export const ClubNotificationsView: React.FC = () => {
     setErrorMsg(null);
     setStatusMsg(null);
 
+    if (!isOwner) {
+      setErrorMsg('Solo el dueño puede configurar avisos.');
+      return;
+    }
+
     if (!editTitle.trim() || !editMessage.trim()) {
       setErrorMsg('Completá el título y el texto del aviso.');
       return;
@@ -122,6 +132,11 @@ export const ClubNotificationsView: React.FC = () => {
     setErrorMsg(null);
     setStatusMsg(null);
 
+    if (!isOwner) {
+      setErrorMsg('Solo el dueño puede programar avisos.');
+      return;
+    }
+
     if (!customTitle.trim() || !customMessage.trim()) {
       setErrorMsg('Completá el título y el mensaje del aviso programado.');
       return;
@@ -145,6 +160,17 @@ export const ClubNotificationsView: React.FC = () => {
       setIsSaving(false);
     }
   };
+
+  if (!isOwner) {
+    return (
+      <div className="p-6 rounded-2xl bg-[#111113] border border-[#242426] space-y-2">
+        <h1 className="text-xl font-bold text-[#f1f1ee]">Avisos</h1>
+        <p className="text-sm text-[#a1a1aa]">
+          Solo el dueño del comercio puede configurar y programar avisos para los socios.
+        </p>
+      </div>
+    );
+  }
 
   if (isLoading) {
     return (

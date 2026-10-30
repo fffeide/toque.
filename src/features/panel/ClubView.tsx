@@ -57,6 +57,20 @@ export const ClubView: React.FC = () => {
   const scannerInputRef = useRef<HTMLInputElement | null>(null);
 
   const isCashier = user?.role === 'cashier' && !user?.isSuperAdmin;
+  const isManager = user?.role === 'manager' && !user?.isSuperAdmin;
+  const isOwner =
+    user?.role === 'owner' || user?.role === 'superadmin' || Boolean(user?.isSuperAdmin);
+
+  const formatMemberNameForRole = (fullName?: string): string => {
+    const clean = (fullName || 'Cliente').trim();
+    if (!isCashier) return clean;
+    const parts = clean.split(/\s+/).filter(Boolean);
+    if (parts.length === 0) return 'Cliente';
+    if (parts.length === 1) return parts[0];
+    const firstName = parts[0];
+    const lastInitial = parts[parts.length - 1][0]?.toUpperCase() || '';
+    return lastInitial ? `${firstName} ${lastInitial}.` : firstName;
+  };
 
   const [activeTab, setActiveTab] = useState<'socios' | 'diseno' | 'avisos'>('socios');
   const [config, setConfig] = useState<ClubConfig | null>(null);
@@ -127,17 +141,28 @@ export const ClubView: React.FC = () => {
   const [newCardPreset, setNewCardPreset] = useState<PresetColorKey>('dark');
   const [creatingCard, setCreatingCard] = useState(false);
 
-  // Envío de Avisos por Email vía Resend (/api/club/broadcast)
+  // Envío de Avisos por Email
   const [broadcastHeadline, setBroadcastHeadline] = useState('');
   const [broadcastMessage, setBroadcastMessage] = useState('');
   const [broadcastCtaLabel, setBroadcastCtaLabel] = useState('Ver mi tarjeta y beneficio');
   const [sendingBroadcast, setSendingBroadcast] = useState(false);
 
-  // Modal de Ajuste / Descuento Manual (con motivo obligatorio >= 10 caracteres)
+  // Modal de Anulación / Ajuste Manual (con motivo obligatorio >= 10 caracteres)
   const [adjustTarget, setAdjustTarget] = useState<ClubMember | null>(null);
+  const [adjustMode, setAdjustMode] = useState<'void' | 'adjust'>('void');
   const [adjustDelta, setAdjustDelta] = useState(-1);
   const [adjustReason, setAdjustReason] = useState('');
   const [submittingAdjust, setSubmittingAdjust] = useState(false);
+
+  // Modal de Exportar CSV con motivo obligatorio (solo Dueño)
+  const [showExportModal, setShowExportModal] = useState(false);
+  const [exportReason, setExportReason] = useState('');
+  const [submittingExport, setSubmittingExport] = useState(false);
+
+  // Modal de Borrar Socio con motivo obligatorio (solo Dueño)
+  const [deleteTarget, setDeleteTarget] = useState<ClubMember | null>(null);
+  const [deleteReason, setDeleteReason] = useState('');
+  const [submittingDelete, setSubmittingDelete] = useState(false);
 
   const syncFormWithConfig = (cfg: ClubConfig) => {
     const bizName = business?.name || '';
@@ -470,22 +495,20 @@ export const ClubView: React.FC = () => {
 
   const handleBarcodeScannerSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const code = barcodeQuery.trim();
+    const code = barcodeQuery.trim().toUpperCase();
     if (!code) return;
 
     try {
       setScanningFast(true);
       const res = await api.addStampByCashier({
         memberCode: code,
-        memberId: code,
-        email: code,
       });
       if (res.cooldown) {
         const remMs = res.remainingMs || 0;
         const hrs = Math.floor(remMs / 3600000);
         const mins = Math.max(1, Math.ceil((remMs % 3600000) / 60000));
         showToast(
-          res.message || `Este socio ya sumó su sello hoy. Disponible en ${hrs} h ${mins} min.`,
+          res.message || `Podrá sumar en ${hrs} h ${mins} min.`,
           'info'
         );
         return;
@@ -494,7 +517,7 @@ export const ClubView: React.FC = () => {
       setLastScannedMember(res.member);
       setBarcodeQuery('');
       showToast(
-        `+1 sello cargado a ${res.member.name || res.member.memberCode} (${res.member.stamps}/${
+        `Sello sumado a ${formatMemberNameForRole(res.member.name)} (${res.member.stamps}/${
           res.member.targetStamps || 10
         })`,
         'success'
@@ -502,7 +525,7 @@ export const ClubView: React.FC = () => {
       scannerInputRef.current?.focus();
     } catch (err: any) {
       showToast(
-        err?.message || 'Código no encontrado. Probá con el código de socio o correo.',
+        err?.message || 'No encontramos ese código. Revisalo y probá de nuevo.',
         'error'
       );
     } finally {
@@ -512,13 +535,15 @@ export const ClubView: React.FC = () => {
 
   const handleQuickPlusStamp = async (member: ClubMember) => {
     try {
-      const res = await api.addStampByCashier({ memberId: member.id });
+      const res = await api.addStampByCashier({
+        memberCode: member.shortCode || member.memberCode || member.id,
+      });
       if (res.cooldown) {
         const remMs = res.remainingMs || 0;
         const hrs = Math.floor(remMs / 3600000);
         const mins = Math.max(1, Math.ceil((remMs % 3600000) / 60000));
         showToast(
-          res.message || `Este socio ya sumó su sello hoy. Disponible en ${hrs} h ${mins} min.`,
+          res.message || `Podrá sumar en ${hrs} h ${mins} min.`,
           'info'
         );
         return;
@@ -526,7 +551,7 @@ export const ClubView: React.FC = () => {
       setMembers((prev) => prev.map((m) => (m.id === res.member.id ? res.member : m)));
       setLastScannedMember(res.member);
       showToast(
-        `+1 sello para ${res.member.name || 'Socio'} (${res.member.stamps}/${
+        `Sello sumado a ${formatMemberNameForRole(res.member.name)} (${res.member.stamps}/${
           res.member.targetStamps || 10
         })`,
         'success'
@@ -540,15 +565,25 @@ export const ClubView: React.FC = () => {
     try {
       const res = await api.redeemReward(member.id);
       setMembers((prev) => prev.map((m) => (m.id === res.member.id ? res.member : m)));
-      showToast(`¡Premio canjeado para ${res.member.name || 'Socio'}!`, 'success');
+      showToast(`¡Premio entregado a ${formatMemberNameForRole(res.member.name)}!`, 'success');
     } catch (err: any) {
-      showToast(err?.message || 'No se pudo canjear el premio', 'error');
+      showToast(err?.message || 'No se pudo entregar el premio', 'error');
     }
   };
 
-  const handleExportMembersCsv = async () => {
+  const handleExportMembersCsvSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!isOwner) {
+      showToast('Solo el dueño puede exportar la lista de socios.', 'error');
+      return;
+    }
+    if (exportReason.trim().length < 10) {
+      showToast('Escribí el motivo para exportar (mínimo 10 caracteres).', 'error');
+      return;
+    }
     try {
-      const csv = await api.exportClubMembersCsv();
+      setSubmittingExport(true);
+      const csv = await api.exportClubMembersCsv(exportReason.trim());
       const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -558,14 +593,47 @@ export const ClubView: React.FC = () => {
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
-      showToast('Listado de socios descargado en CSV', 'success');
+      setShowExportModal(false);
+      setExportReason('');
+      showToast('Listado exportado en CSV y registrado en correcciones.', 'success');
     } catch (err: any) {
       showToast(err?.message || 'Error al exportar socios', 'error');
+    } finally {
+      setSubmittingExport(false);
+    }
+  };
+
+  const handleDeleteMemberSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!deleteTarget) return;
+    if (!isOwner) {
+      showToast('Solo el dueño puede borrar un socio.', 'error');
+      return;
+    }
+    if (deleteReason.trim().length < 10) {
+      showToast('Escribí el motivo para borrar al socio (mínimo 10 caracteres).', 'error');
+      return;
+    }
+    try {
+      setSubmittingDelete(true);
+      await api.deleteClubMember(deleteTarget.id, deleteReason.trim());
+      setMembers((prev) => prev.filter((m) => m.id !== deleteTarget.id));
+      setDeleteTarget(null);
+      setDeleteReason('');
+      showToast('Socio borrado y acción registrada en correcciones.', 'success');
+    } catch (err: any) {
+      showToast(err?.message || 'No se pudo borrar el socio', 'error');
+    } finally {
+      setSubmittingDelete(false);
     }
   };
 
   const handleSendBroadcast = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!isOwner) {
+      showToast('Solo el dueño puede enviar y configurar avisos.', 'error');
+      return;
+    }
     if (isFreePlan) {
       showToast('El envío masivo por email está disponible en el Plan Pago.', 'error');
       return;
@@ -613,19 +681,33 @@ export const ClubView: React.FC = () => {
   const handleAdjustSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!adjustTarget) return;
+    if (adjustReason.trim().length < 10) {
+      showToast('El motivo debe tener al menos 10 caracteres.', 'error');
+      return;
+    }
     try {
       setSubmittingAdjust(true);
-      const res = await api.adjustBalance({
-        memberId: adjustTarget.id,
-        delta: adjustDelta,
-        reason: adjustReason,
-      });
-      setMembers((prev) => prev.map((m) => (m.id === res.member.id ? res.member : m)));
+      if (adjustMode === 'void') {
+        const res = await api.voidStamp({
+          stampId: `stamp-${Date.now()}`,
+          memberId: adjustTarget.id,
+          reason: adjustReason.trim(),
+        });
+        setMembers((prev) => prev.map((m) => (m.id === res.member.id ? res.member : m)));
+        showToast('Sello anulado y registrado en la lista de correcciones.', 'success');
+      } else {
+        const res = await api.adjustBalance({
+          memberId: adjustTarget.id,
+          delta: adjustDelta,
+          reason: adjustReason.trim(),
+        });
+        setMembers((prev) => prev.map((m) => (m.id === res.member.id ? res.member : m)));
+        showToast('Saldo de sellos ajustado y registrado en la lista de correcciones.', 'success');
+      }
       setAdjustTarget(null);
       setAdjustReason('');
-      showToast('Saldo de sellos ajustado y registrado en auditoría', 'success');
     } catch (err: any) {
-      showToast(err?.message || 'Error al ajustar sellos', 'error');
+      showToast(err?.message || 'Error al registrar la corrección', 'error');
     } finally {
       setSubmittingAdjust(false);
     }
@@ -655,11 +737,18 @@ export const ClubView: React.FC = () => {
     if (selectedLocalId !== 'all' && m.localId !== selectedLocalId) return false;
     const q = search.trim().toLowerCase();
     if (!q) return true;
+    if (isCashier) {
+      return (
+        formatMemberNameForRole(m.name).toLowerCase().includes(q) ||
+        (m.shortCode || '').toLowerCase().includes(q) ||
+        (m.memberCode || '').toLowerCase().includes(q)
+      );
+    }
     return (
       (m.name || '').toLowerCase().includes(q) ||
+      (m.shortCode || '').toLowerCase().includes(q) ||
       (m.memberCode || '').toLowerCase().includes(q) ||
-      (m.email || '').toLowerCase().includes(q) ||
-      (m.maskedEmail || m.contact || '').toLowerCase().includes(q)
+      (m.maskedEmail || '').toLowerCase().includes(q)
     );
   });
 
@@ -672,16 +761,22 @@ export const ClubView: React.FC = () => {
         <div>
           <h1 className="text-lg font-bold text-[#F4F4F6]">Tarjetas y Socios</h1>
           <p className="text-xs text-[#9E9EA8] mt-0.5">
-            Configurá los datos de tu tarjeta para Apple/Google Wallet y compartí el QR o link.
+            {isCashier
+              ? 'Vista de cajero: nombre con inicial, sellos y premios (sin correo ni cumpleaños).'
+              : isManager
+              ? 'Vista de encargado: lista de socios con mail parcialmente oculto, cumpleaños y anulaciones con motivo.'
+              : 'Vista de dueño: gestión completa de socios, exportación con motivo, avisos y diseño de tarjeta.'}
           </p>
         </div>
 
         <div className="flex items-center gap-2 flex-wrap">
-          <div className="px-3 py-2 rounded-xl bg-[#141418] border border-[#282830] flex items-center gap-2">
-            <RefreshCw className="w-3.5 h-3.5 text-[#D95B26]" />
-            <span className="text-xs text-[#9E9EA8]">Clientes que volvieron:</span>
-            <span className="text-xs font-extrabold text-[#F4F4F6]">{returningRatePercent}%</span>
-          </div>
+          {!isCashier && (
+            <div className="px-3 py-2 rounded-xl bg-[#141418] border border-[#282830] flex items-center gap-2">
+              <RefreshCw className="w-3.5 h-3.5 text-[#D95B26]" />
+              <span className="text-xs text-[#9E9EA8]">Clientes que volvieron:</span>
+              <span className="text-xs font-extrabold text-[#F4F4F6]">{returningRatePercent}%</span>
+            </div>
+          )}
 
           {!isCashier && (
             <div className="inline-flex rounded-xl bg-[#141418] p-1 border border-[#282830]">
@@ -707,28 +802,43 @@ export const ClubView: React.FC = () => {
               >
                 Configurar Tarjeta ({cards.length})
               </button>
-              <button
-                type="button"
-                onClick={() => setActiveTab('avisos')}
-                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer ${
-                  activeTab === 'avisos'
-                    ? 'bg-[#D95B26] text-white'
-                    : 'text-[#9E9EA8] hover:text-white'
-                }`}
-              >
-                Avisos por Email
-              </button>
+              {isOwner && (
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('avisos')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer ${
+                    activeTab === 'avisos'
+                      ? 'bg-[#D95B26] text-white'
+                      : 'text-[#9E9EA8] hover:text-white'
+                  }`}
+                >
+                  Avisos
+                </button>
+              )}
             </div>
           )}
 
           {!isCashier && (
+            <Link
+              to="/panel/club/auditoria"
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-[#141418] hover:bg-[#1C1C22] border border-[#282830] text-xs font-semibold text-[#F4F4F6]"
+            >
+              <ShieldAlert className="w-3.5 h-3.5 text-[#BEC8FF]" />
+              <span>Correcciones</span>
+            </Link>
+          )}
+
+          {isOwner && (
             <button
               type="button"
-              onClick={handleExportMembersCsv}
+              onClick={() => {
+                setExportReason('');
+                setShowExportModal(true);
+              }}
               className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-[#141418] hover:bg-[#1C1C22] border border-[#282830] text-xs font-semibold text-[#F4F4F6] cursor-pointer"
             >
               <Download className="w-3.5 h-3.5 text-[#BEC8FF]" />
-              <span>CSV</span>
+              <span>Exportar CSV</span>
             </button>
           )}
         </div>
@@ -761,7 +871,7 @@ export const ClubView: React.FC = () => {
                     />
                     <span>{c.loyaltyTitle || `Tarjeta #${idx + 1}`}</span>
                   </button>
-                  {cards.length > 1 && c.id && (
+                  {isOwner && cards.length > 1 && c.id && (
                     <button
                       type="button"
                       onClick={() => handleDeleteCard(c.id!)}
@@ -797,26 +907,28 @@ export const ClubView: React.FC = () => {
               <span>Ver QR y Link</span>
             </button>
 
-            <button
-              type="button"
-              onClick={() => {
-                if (!canCreateMoreCards) {
-                  showToast(
-                    `Tu plan (${planLimits.label}) permite hasta ${planLimits.maxCards} tarjeta(s).`,
-                    'error'
-                  );
-                  return;
-                }
-                setShowNewCardModal(true);
-              }}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#1C1C22] hover:bg-[#26262E] border border-[#282830] text-xs font-bold text-[#BEC8FF] cursor-pointer"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              <span>
-                Nueva tarjeta ({cards.length}/
-                {planLimits.maxCards > 99 ? '∞' : planLimits.maxCards})
-              </span>
-            </button>
+            {isOwner && (
+              <button
+                type="button"
+                onClick={() => {
+                  if (!canCreateMoreCards) {
+                    showToast(
+                      `Tu plan (${planLimits.label}) permite hasta ${planLimits.maxCards} tarjeta(s).`,
+                      'error'
+                    );
+                    return;
+                  }
+                  setShowNewCardModal(true);
+                }}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#1C1C22] hover:bg-[#26262E] border border-[#282830] text-xs font-bold text-[#BEC8FF] cursor-pointer"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>
+                  Nueva tarjeta ({cards.length}/
+                  {planLimits.maxCards > 99 ? '∞' : planLimits.maxCards})
+                </span>
+              </button>
+            )}
           </div>
         </div>
       )}
@@ -833,14 +945,14 @@ export const ClubView: React.FC = () => {
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="flex items-center gap-2 text-xs font-bold text-[#D95B26]">
                 <Barcode className="w-4 h-4" />
-                <span>Lector de Código de Barras / QR (Pistola USB-Bluetooth)</span>
+                <span>Ingresar código corto (ej. K7M2-9XQ4) o escanear con lector</span>
               </div>
               <Link
                 to="/panel/escanear"
                 className="text-xs font-bold text-[#BEC8FF] hover:underline flex items-center gap-1"
               >
                 <QrCode className="w-3.5 h-3.5" />
-                <span>Usar cámara del celular →</span>
+                <span>Ir a pantalla Sumar sello →</span>
               </Link>
             </div>
 
@@ -852,8 +964,8 @@ export const ClubView: React.FC = () => {
                   type="text"
                   autoFocus
                   value={barcodeQuery}
-                  onChange={(e) => setBarcodeQuery(e.target.value)}
-                  placeholder="Escaneá el pase del cliente o escribí su código y presioná Enter..."
+                  onChange={(e) => setBarcodeQuery(e.target.value.toUpperCase())}
+                  placeholder="Escribí el código corto (K7M2-9XQ4) o escaneá el QR..."
                   className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-[#0C0C0E] border border-[#282830] font-mono text-xs text-[#F4F4F6] placeholder-[#666672] focus:outline-none focus:border-[#D95B26]"
                 />
               </div>
@@ -863,7 +975,7 @@ export const ClubView: React.FC = () => {
                 className="px-4 py-2.5 rounded-xl bg-[#2FB36A] hover:bg-[#269a59] text-[#05150c] font-bold text-xs flex items-center justify-center gap-1.5 disabled:opacity-50 cursor-pointer shrink-0"
               >
                 <Plus className="w-3.5 h-3.5 stroke-[3]" />
-                <span>{scanningFast ? 'Sumando...' : 'Sumar +1 Sello'}</span>
+                <span>{scanningFast ? 'Sumando...' : 'Sumar sello'}</span>
               </button>
             </div>
 
@@ -873,7 +985,8 @@ export const ClubView: React.FC = () => {
                   <CheckCircle2 className="w-4 h-4 text-[#2FB36A]" />
                   <div className="text-xs">
                     <span className="font-bold text-[#F4F4F6]">
-                      Último escaneo: {lastScannedMember.name} ({lastScannedMember.memberCode})
+                      Último escaneo: {formatMemberNameForRole(lastScannedMember.name)} (
+                      {lastScannedMember.shortCode || lastScannedMember.memberCode})
                     </span>
                     <span className="text-[#2FB36A] font-extrabold ml-2">
                       Sellos: {lastScannedMember.stamps} / {lastScannedMember.targetStamps || 10}
@@ -886,7 +999,7 @@ export const ClubView: React.FC = () => {
                     onClick={() => handleRedeemReward(lastScannedMember)}
                     className="px-2.5 py-1 rounded-lg bg-[#D95B26] text-white text-xs font-bold cursor-pointer"
                   >
-                    🎁 Canjear Premio
+                    🎁 Entregar premio
                   </button>
                 )}
               </div>
@@ -900,7 +1013,11 @@ export const ClubView: React.FC = () => {
                 type="text"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                placeholder="Filtrar por nombre, código o email..."
+                placeholder={
+                  isCashier
+                    ? 'Buscar por nombre o código corto...'
+                    : 'Filtrar por nombre, código corto o mail oculto...'
+                }
                 className="w-full pl-9 pr-4 py-2 rounded-xl bg-[#141418] border border-[#282830] text-xs text-[#F4F4F6] placeholder-[#666672] focus:outline-none focus:border-[#D95B26]"
               />
             </div>
@@ -924,18 +1041,21 @@ export const ClubView: React.FC = () => {
               <table className="w-full text-left border-collapse">
                 <thead>
                   <tr className="border-b border-[#242424] text-xs font-semibold text-[#9E9EA8] bg-[#141414]">
-                    <th className="py-3 px-4">Socio</th>
-                    <th className="py-3 px-4">Código de socio</th>
-                    <th className="py-3 px-4">Cumpleaños</th>
-                    <th className="py-3 px-4">Progreso de sellos</th>
+                    <th className="py-3 px-4">Cliente</th>
+                    <th className="py-3 px-4">Código corto</th>
+                    {!isCashier && <th className="py-3 px-4">Cumpleaños (día/mes)</th>}
+                    <th className="py-3 px-4">Sellos y premio</th>
                     <th className="py-3 px-4 text-right">Acciones</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[#282830] text-xs">
                   {filteredMembers.length === 0 ? (
                     <tr>
-                      <td colSpan={5} className="py-8 text-center text-[#9E9EA8]">
-                        No encontramos socios con ese criterio.
+                      <td
+                        colSpan={isCashier ? 4 : 5}
+                        className="py-8 text-center text-[#9E9EA8]"
+                      >
+                        No encontramos clientes con ese criterio.
                       </td>
                     </tr>
                   ) : (
@@ -945,34 +1065,40 @@ export const ClubView: React.FC = () => {
                       return (
                         <tr key={m.id} className="hover:bg-[#1C1C22]/50 transition-colors">
                           <td className="py-3 px-4">
-                            <div className="font-bold text-[#F4F4F6]">{m.name || 'Socio'}</div>
-                            <div className="text-[11px] text-[#9E9EA8]">
-                              {m.maskedEmail || m.contact}
+                            <div className="font-bold text-[#F4F4F6]">
+                              {formatMemberNameForRole(m.name)}
                             </div>
+                            {!isCashier && (
+                              <div className="text-[11px] text-[#9E9EA8]">
+                                {m.maskedEmail || '—'}
+                              </div>
+                            )}
                           </td>
 
                           <td className="py-3 px-4">
                             <span className="inline-block px-2 py-0.5 rounded-lg bg-[#0C0C0E] border border-[#282830] font-mono text-[11px] font-bold text-[#BEC8FF]">
-                              {m.memberCode || m.id.slice(0, 8).toUpperCase()}
+                              {m.shortCode || m.memberCode}
                             </span>
                           </td>
 
-                          <td className="py-3 px-4 text-xs text-[#9E9EA8]">
-                            {m.birthDay && m.birthMonth
-                              ? `${String(m.birthDay).padStart(2, '0')}/${String(
-                                  m.birthMonth
-                                ).padStart(2, '0')}`
-                              : '—'}
-                          </td>
+                          {!isCashier && (
+                            <td className="py-3 px-4 text-xs text-[#9E9EA8]">
+                              {m.birthDay && m.birthMonth
+                                ? `${String(m.birthDay).padStart(2, '0')}/${String(
+                                    m.birthMonth
+                                  ).padStart(2, '0')}`
+                                : '—'}
+                            </td>
+                          )}
 
                           <td className="py-3 px-4">
-                            <div className="flex items-center gap-2">
+                            <div className="flex items-center gap-2 flex-wrap">
                               <span className="font-mono font-bold text-xs text-[#F4F4F6]">
                                 {m.stamps} / {target}
                               </span>
                               {isReadyForReward && (
                                 <span className="px-2 py-0.5 rounded-full bg-[#2FB36A]/20 text-[#2FB36A] text-[10px] font-bold">
-                                  🎁 Premio listo
+                                  🎁 Premio listo: {config?.rewardText || 'Beneficio'}
                                 </span>
                               )}
                             </div>
@@ -984,10 +1110,10 @@ export const ClubView: React.FC = () => {
                                 type="button"
                                 onClick={() => handleQuickPlusStamp(m)}
                                 className="px-2.5 py-1.5 rounded-xl bg-[#2FB36A] hover:bg-[#259858] text-[#05150c] font-bold text-xs inline-flex items-center gap-1 cursor-pointer"
-                                title="Sumar 1 sello"
+                                title="Sumar sello"
                               >
                                 <Plus className="w-3 h-3 stroke-[3]" />
-                                <span>1 Sello</span>
+                                <span>Sumar sello</span>
                               </button>
 
                               {isReadyForReward && (
@@ -997,7 +1123,7 @@ export const ClubView: React.FC = () => {
                                   className="px-2.5 py-1.5 rounded-xl bg-[#D95B26] hover:bg-[#e56732] text-white font-bold text-xs inline-flex items-center gap-1 cursor-pointer"
                                 >
                                   <Gift className="w-3 h-3" />
-                                  <span>Canjear</span>
+                                  <span>Entregar premio</span>
                                 </button>
                               )}
 
@@ -1006,13 +1132,28 @@ export const ClubView: React.FC = () => {
                                   type="button"
                                   onClick={() => {
                                     setAdjustTarget(m);
+                                    setAdjustMode('void');
                                     setAdjustDelta(-1);
                                     setAdjustReason('');
                                   }}
-                                  className="p-1.5 rounded-xl bg-[#1C1C22] hover:bg-[#26262e] border border-[#282830] text-[#9E9EA8] hover:text-white cursor-pointer"
-                                  title="Ajustar o descontar sellos con motivo"
+                                  className="px-2.5 py-1.5 rounded-xl bg-[#1C1C22] hover:bg-[#26262e] border border-[#282830] text-xs font-bold text-[#9E9EA8] hover:text-white cursor-pointer"
+                                  title="Anular sello o ajustar con motivo"
                                 >
-                                  <Minus className="w-3.5 h-3.5" />
+                                  Anular
+                                </button>
+                              )}
+
+                              {isOwner && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setDeleteTarget(m);
+                                    setDeleteReason('');
+                                  }}
+                                  className="p-1.5 rounded-xl bg-[#1C1C22] hover:bg-[#ef4444]/20 border border-[#282830] hover:border-[#ef4444]/40 text-[#9E9EA8] hover:text-[#f87171] cursor-pointer"
+                                  title="Borrar socio (con motivo)"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
                                 </button>
                               )}
                             </div>
@@ -1678,9 +1819,9 @@ export const ClubView: React.FC = () => {
       )}
 
       {/* =================================================================== */}
-      {/* MODULO 3: AVISOS Y BENEFICIOS POR EMAIL                             */}
+      {/* MODULO 3: AVISOS Y BENEFICIOS POR EMAIL (SOLO DUEÑO)                */}
       {/* =================================================================== */}
-      {activeTab === 'avisos' && !isCashier && (
+      {activeTab === 'avisos' && isOwner && (
         <div className="rounded-2xl bg-[#141418] border border-[#282830] p-5 space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div>
@@ -1694,13 +1835,21 @@ export const ClubView: React.FC = () => {
                 aceptaron recibir novedades.
               </p>
             </div>
-            <Link
-              to="/panel/correcciones"
-              className="text-xs font-semibold text-[#BEC8FF] hover:underline flex items-center gap-1"
-            >
-              <ShieldAlert className="w-3.5 h-3.5" />
-              <span>Ver auditoría de sellos →</span>
-            </Link>
+            <div className="flex items-center gap-3">
+              <Link
+                to="/panel/club/avisos"
+                className="text-xs font-semibold text-[#D95B26] hover:underline"
+              >
+                Configurar avisos automáticos →
+              </Link>
+              <Link
+                to="/panel/club/auditoria"
+                className="text-xs font-semibold text-[#BEC8FF] hover:underline flex items-center gap-1"
+              >
+                <ShieldAlert className="w-3.5 h-3.5" />
+                <span>Ver correcciones →</span>
+              </Link>
+            </div>
           </div>
 
           <form onSubmit={handleSendBroadcast} className="space-y-3.5 max-w-2xl">
@@ -1841,7 +1990,7 @@ export const ClubView: React.FC = () => {
               completedCardResult.walletShareUrl !== completedCardResult.hubLink && (
                 <div className="space-y-1.5 pt-1">
                   <label className="block text-xs font-bold text-[#F4F4F6]">
-                    Link directo de pase WalletWallet
+                    Link directo de billetera
                   </label>
                   <div className="flex items-center gap-2">
                     <input
@@ -1854,7 +2003,7 @@ export const ClubView: React.FC = () => {
                       type="button"
                       onClick={() => {
                         navigator.clipboard.writeText(completedCardResult.walletShareUrl!);
-                        showToast('Link de Wallet copiado', 'success');
+                        showToast('Link copiado', 'success');
                       }}
                       className="px-3 py-2 rounded-xl bg-[#1C1C22] hover:bg-[#26262E] border border-[#282830] text-xs font-bold text-[#2FB36A] inline-flex items-center gap-1.5 cursor-pointer shrink-0"
                     >
@@ -1889,7 +2038,7 @@ export const ClubView: React.FC = () => {
         </div>
       )}
 
-      {/* Modal: Crear Nueva Tarjeta conectada a WalletWallet */}
+      {/* Modal: Crear Nueva Tarjeta */}
       {showNewCardModal && (
         <div className="fixed inset-0 z-50 bg-black/75 flex items-center justify-center p-4">
           <div className="max-w-md w-full rounded-2xl bg-[#141418] border border-[#282830] p-5 space-y-4">
@@ -1952,19 +2101,19 @@ export const ClubView: React.FC = () => {
                 </div>
                 <div>
                   <label className="block text-xs font-semibold text-[#F4F4F6] mb-1">
-                    Color Preset
+                    Color
                   </label>
                   <select
                     value={newCardPreset}
                     onChange={(e) => setNewCardPreset(e.target.value as PresetColorKey)}
                     className="w-full px-3 py-2 rounded-xl bg-[#0C0C0E] border border-[#282830] text-xs text-[#F4F4F6]"
                   >
-                    <option value="dark">Dark</option>
-                    <option value="blue">Blue</option>
-                    <option value="green">Green</option>
-                    <option value="red">Red</option>
-                    <option value="purple">Purple</option>
-                    <option value="orange">Orange</option>
+                    <option value="dark">Oscuro</option>
+                    <option value="blue">Azul</option>
+                    <option value="green">Verde</option>
+                    <option value="red">Rojo</option>
+                    <option value="purple">Violeta</option>
+                    <option value="orange">Naranja</option>
                   </select>
                 </div>
               </div>
@@ -1990,13 +2139,13 @@ export const ClubView: React.FC = () => {
         </div>
       )}
 
-      {/* Modal de Ajuste / Descuento Manual con Motivo Obligatorio */}
+      {/* Modal de Anular Sello o Ajustar Saldo con Motivo Obligatorio */}
       {adjustTarget && (
         <div className="fixed inset-0 z-50 bg-black/75 flex items-center justify-center p-4">
           <div className="max-w-md w-full rounded-2xl bg-[#141418] border border-[#282830] p-5 space-y-4">
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-bold text-[#F4F4F6]">
-                Ajustar sellos de {adjustTarget.name}
+                Anular o ajustar sellos de {adjustTarget.name}
               </h3>
               <button
                 type="button"
@@ -2010,20 +2159,40 @@ export const ClubView: React.FC = () => {
             <form onSubmit={handleAdjustSubmit} className="space-y-3.5">
               <div>
                 <label className="block text-xs font-semibold text-[#F4F4F6] mb-1">
-                  Variación de sellos (ej. -1 para descontar o +2 para sumar)
+                  Tipo de acción
                 </label>
-                <input
-                  type="number"
-                  required
-                  value={adjustDelta}
-                  onChange={(e) => setAdjustDelta(parseInt(e.target.value, 10) || 0)}
+                <select
+                  value={adjustMode}
+                  onChange={(e) => {
+                    const next = e.target.value as 'void' | 'adjust';
+                    setAdjustMode(next);
+                    if (next === 'void') setAdjustDelta(-1);
+                  }}
                   className="w-full px-3 py-2 rounded-xl bg-[#0C0C0E] border border-[#282830] text-xs text-[#F4F4F6]"
-                />
+                >
+                  <option value="void">Anular último sello (-1)</option>
+                  <option value="adjust">Ajustar saldo manual</option>
+                </select>
               </div>
+
+              {adjustMode === 'adjust' && (
+                <div>
+                  <label className="block text-xs font-semibold text-[#F4F4F6] mb-1">
+                    Variación de sellos (ej. -1 para descontar o +2 para sumar)
+                  </label>
+                  <input
+                    type="number"
+                    required
+                    value={adjustDelta}
+                    onChange={(e) => setAdjustDelta(parseInt(e.target.value, 10) || 0)}
+                    className="w-full px-3 py-2 rounded-xl bg-[#0C0C0E] border border-[#282830] text-xs text-[#F4F4F6]"
+                  />
+                </div>
+              )}
 
               <div>
                 <label className="block text-xs font-semibold text-[#F4F4F6] mb-1">
-                  Motivo de la corrección (mínimo 10 caracteres)
+                  Motivo obligatorio (mínimo 10 caracteres)
                 </label>
                 <input
                   type="text"
@@ -2034,6 +2203,9 @@ export const ClubView: React.FC = () => {
                   placeholder="Ej: Sello cargado por error en ticket anulado"
                   className="w-full px-3 py-2 rounded-xl bg-[#0C0C0E] border border-[#282830] text-xs text-[#F4F4F6]"
                 />
+                <p className="text-[11px] text-[#9E9EA8] mt-1">
+                  Queda registrado en la lista de correcciones.
+                </p>
               </div>
 
               <div className="flex justify-end gap-2">
@@ -2049,7 +2221,121 @@ export const ClubView: React.FC = () => {
                   disabled={submittingAdjust}
                   className="px-3.5 py-2 rounded-xl bg-[#D95B26] text-white text-xs font-bold cursor-pointer"
                 >
-                  {submittingAdjust ? 'Guardando...' : 'Confirmar ajuste'}
+                  {submittingAdjust ? 'Guardando...' : 'Confirmar y registrar'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de Exportar CSV con Motivo Obligatorio (solo Dueño) */}
+      {showExportModal && isOwner && (
+        <div className="fixed inset-0 z-50 bg-black/75 flex items-center justify-center p-4">
+          <div className="max-w-md w-full rounded-2xl bg-[#141418] border border-[#282830] p-5 space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-bold text-[#F4F4F6]">
+                Exportar socios en CSV
+              </h3>
+              <button
+                type="button"
+                onClick={() => setShowExportModal(false)}
+                className="p-1 text-[#9E9EA8] hover:text-white cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleExportMembersCsvSubmit} className="space-y-3.5">
+              <div>
+                <label className="block text-xs font-semibold text-[#F4F4F6] mb-1">
+                  Motivo de la exportación (mínimo 10 caracteres)
+                </label>
+                <input
+                  type="text"
+                  required
+                  minLength={10}
+                  value={exportReason}
+                  onChange={(e) => setExportReason(e.target.value)}
+                  placeholder="Ej: Respaldo mensual de socios del club"
+                  className="w-full px-3 py-2 rounded-xl bg-[#0C0C0E] border border-[#282830] text-xs text-[#F4F4F6]"
+                />
+                <p className="text-[11px] text-[#9E9EA8] mt-1">
+                  Toda exportación pide un motivo y queda registrada en la lista de correcciones.
+                </p>
+              </div>
+
+              <div className="flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowExportModal(false)}
+                  className="px-3.5 py-2 rounded-xl bg-[#1C1C22] text-xs font-bold text-[#9E9EA8] cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={submittingExport}
+                  className="px-3.5 py-2 rounded-xl bg-[#D95B26] text-white text-xs font-bold cursor-pointer"
+                >
+                  {submittingExport ? 'Exportando...' : 'Descargar CSV'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de Borrar Socio con Motivo Obligatorio (solo Dueño) */}
+      {deleteTarget && isOwner && (
+        <div className="fixed inset-0 z-50 bg-black/75 flex items-center justify-center p-4">
+          <div className="max-w-md w-full rounded-2xl bg-[#141418] border border-[#282830] p-5 space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-bold text-[#f87171]">
+                Borrar socio: {deleteTarget.name}
+              </h3>
+              <button
+                type="button"
+                onClick={() => setDeleteTarget(null)}
+                className="p-1 text-[#9E9EA8] hover:text-white cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleDeleteMemberSubmit} className="space-y-3.5">
+              <div>
+                <label className="block text-xs font-semibold text-[#F4F4F6] mb-1">
+                  Motivo para borrar al socio (mínimo 10 caracteres)
+                </label>
+                <input
+                  type="text"
+                  required
+                  minLength={10}
+                  value={deleteReason}
+                  onChange={(e) => setDeleteReason(e.target.value)}
+                  placeholder="Ej: Solicitud de baja de cuenta pedida por el cliente"
+                  className="w-full px-3 py-2 rounded-xl bg-[#0C0C0E] border border-[#282830] text-xs text-[#F4F4F6]"
+                />
+                <p className="text-[11px] text-[#9E9EA8] mt-1">
+                  Esta acción queda registrada en la lista de correcciones.
+                </p>
+              </div>
+
+              <div className="flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setDeleteTarget(null)}
+                  className="px-3.5 py-2 rounded-xl bg-[#1C1C22] text-xs font-bold text-[#9E9EA8] cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={submittingDelete}
+                  className="px-3.5 py-2 rounded-xl bg-[#ef4444] text-white text-xs font-bold cursor-pointer"
+                >
+                  {submittingDelete ? 'Borrando...' : 'Confirmar borrado'}
                 </button>
               </div>
             </form>

@@ -9,6 +9,7 @@ export interface WalletPassCardProps {
   stampsRequired: number;
   rewardText: string;
   barcodeToken: string;
+  shortCode?: string;
   colorPreset?: ColorPreset;
   customColor?: string;
   logoURL?: string;
@@ -30,10 +31,9 @@ export function resolvePassBackgroundColor(
 }
 
 /**
- * Espejo exacto de la tarjeta generada por WalletWallet (buildBody).
- * Se usa tanto en la vista del cliente (Toquecitos y Hub público) como en la vista previa del comercio.
- * Solo las 3 etiquetas nativas de Wallet (SOCIO, SELLOS, PREMIO) van en mayúsculas.
- * El QR nunca muestra texto ni código debajo (barcodeAltText: '').
+ * Tarjeta del cliente:
+ * Muestra en grande su código corto (para poder dictarlo al cajero) y el QR.
+ * El QR y el código corto no cambian nunca.
  */
 export const WalletPassCard: React.FC<WalletPassCardProps> = ({
   businessName,
@@ -42,6 +42,7 @@ export const WalletPassCard: React.FC<WalletPassCardProps> = ({
   stampsRequired,
   rewardText,
   barcodeToken,
+  shortCode,
   colorPreset = 'dark',
   customColor,
   logoURL,
@@ -55,10 +56,8 @@ export const WalletPassCard: React.FC<WalletPassCardProps> = ({
   const cleanBusinessName = (businessName || 'Comercio').slice(0, 40);
   const cleanMemberName = memberName ? memberName.trim().slice(0, 40) : '';
   const cleanRewardText = (rewardText || 'Beneficio al completar tus sellos').slice(0, 60);
-  const safeToken =
-    barcodeToken && barcodeToken.trim().length >= 16
-      ? barcodeToken.trim()
-      : 'a1b2c3d4e5f60718293a4b5c6d7e8f90';
+
+  const immutableCode = (shortCode || barcodeToken || 'K7M2-9XQ4').trim().toUpperCase();
 
   if (compact) {
     return (
@@ -160,7 +159,7 @@ export const WalletPassCard: React.FC<WalletPassCardProps> = ({
       </div>
 
       {/* Bloque secundario (secondaryFields): PREMIO */}
-      <div className="mb-7">
+      <div className="mb-6">
         <div className="text-[11px] font-semibold tracking-wider text-white/65 mb-1">
           PREMIO
         </div>
@@ -169,17 +168,26 @@ export const WalletPassCard: React.FC<WalletPassCardProps> = ({
         </div>
       </div>
 
-      {/* Pie centrado: Código QR real sobre contenedor blanco limpio, SIN texto debajo */}
-      <div className="flex justify-center pt-1 pb-1">
+      {/* Pie centrado: Código QR inmutable + Código corto en grande para dictar al cajero */}
+      <div className="flex flex-col items-center justify-center pt-1 pb-1 space-y-3">
         <div className="bg-white p-3.5 rounded-2xl shadow-md inline-flex items-center justify-center">
           <RealQrCode
-            value={safeToken}
+            value={immutableCode}
             size={148}
             darkColor="#000000"
             lightColor="#FFFFFF"
             margin={0}
             alt="Código QR de tu tarjeta de sellos"
           />
+        </div>
+
+        <div className="text-center">
+          <span className="block text-[11px] text-white/70 font-medium">
+            Tu código para dictar en caja
+          </span>
+          <span className="block text-2xl sm:text-3xl font-mono font-extrabold tracking-widest text-white mt-0.5 select-all">
+            {immutableCode}
+          </span>
         </div>
       </div>
     </div>
