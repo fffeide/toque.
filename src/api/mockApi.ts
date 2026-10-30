@@ -497,14 +497,14 @@ class MockApi implements ToqueApi {
       name: 'Mostrador Principal',
       role: 'caja',
       status: 'active',
-      reviewUrl: 'https://maps.google.com',
+      reviewUrl: '',
       mode: 'smart_hub',
       tileColor: 'black',
       claimStatus: 'claimed',
       scansCount: 0,
       reviewClicksCount: 0,
-      activeReceiptId: 'rcp-burger-1001',
-      activeReceiptExpiresAt: new Date(Date.now() + 3600000).toISOString(),
+      activeReceiptId: null,
+      activeReceiptExpiresAt: null,
       createdAt: new Date().toISOString(),
       activatedAt: new Date().toISOString(),
     },
@@ -521,64 +521,29 @@ class MockApi implements ToqueApi {
       { key: 'details', enabled: true },
     ],
     accentColor: '#D95B26',
-    googleReviewUrl: 'https://maps.google.com',
+    googleReviewUrl: '',
     socials: {
-      instagram: '@laburger.ba',
-      whatsapp: '+5491144556677',
-      web: 'https://laburger.com.ar',
+      instagram: '',
+      whatsapp: '',
+      web: '',
+      tiktok: '',
+      facebook: '',
     },
     products: [],
     details: {
-      address: 'Av. Corrientes 1840, CABA',
-      hours: 'Lun a Dom 12:00 a 00:00',
+      address: '',
+      hours: '',
+      phone: '',
     },
     showToqueFooter: true,
     planPaid: true,
     networkEnabled: false,
+    hubConfigured: false,
   };
 
-  private sales: Sale[] = [
-    {
-      id: 'sale-burger-1001',
-      businessId: 'la-burger',
-      cartelId: 'cartel-burger-01',
-      cartelCode: 'BURGER01',
-      cartelName: 'Mostrador Principal',
-      receiptId: 'rcp-burger-1001',
-      amount: 16500,
-      currency: 'ARS',
-      items: [
-        { id: 'it-1', name: 'Combo Doble Smash con Papas', price: 13500, quantity: 1 },
-        { id: 'it-2', name: 'Limonada Menta y Jengibre', price: 3000, quantity: 1 },
-      ],
-      method: 'mp_qr',
-      status: 'paid',
-      createdAt: new Date(Date.now() - 1800000).toISOString(),
-      paidAt: new Date(Date.now() - 1800000).toISOString(),
-      cashierName: 'Mateo Díaz',
-      cashierEmail: 'cajero@comercio.com',
-    },
-  ];
+  private sales: Sale[] = [];
 
-  private receipts: Receipt[] = [
-    {
-      id: 'rcp-burger-1001',
-      saleId: 'sale-burger-1001',
-      businessId: 'la-burger',
-      cartelCode: 'BURGER01',
-      status: 'ready',
-      expiresAt: new Date(Date.now() + 3600000).toISOString(),
-      businessName: 'La Burger',
-      items: [
-        { id: 'it-1', name: 'Combo Doble Smash con Papas', price: 13500, quantity: 1 },
-        { id: 'it-2', name: 'Limonada Menta y Jengibre', price: 3000, quantity: 1 },
-      ],
-      total: 16500,
-      currency: 'ARS',
-      method: 'mp_qr',
-      createdAt: new Date(Date.now() - 1800000).toISOString(),
-    },
-  ];
+  private receipts: Receipt[] = [];
 
   private networkActivations: NetworkActivation[] = [];
   private mpStatus: MercadoPagoStatus = {
@@ -589,19 +554,152 @@ class MockApi implements ToqueApi {
 
   constructor() {
     this.loadPersistedState();
-    this.businessClubConfigs.set('la-burger', { ...this.clubConfig });
-    this.businessClubCards.set('la-burger', [{ ...this.clubConfig }]);
-    this.businessHubConfigs.set('la-burger', { ...this.hubConfig });
+    const bizId = this.getActiveBusinessId();
+    if (!this.businessClubConfigs.has(bizId)) {
+      this.businessClubConfigs.set(bizId, { ...this.clubConfig });
+    }
+    if (!this.businessClubCards.has(bizId)) {
+      this.businessClubCards.set(bizId, [{ ...this.clubConfig }]);
+    }
+    if (!this.businessHubConfigs.has(bizId)) {
+      this.businessHubConfigs.set(bizId, { ...this.hubConfig });
+    }
   }
 
-  // Estado mantenido únicamente en memoria durante la sesión (sin localStorage como base de datos)
-  private loadPersistedState(): void {}
+  private getClientDeviceToken(): string {
+    if (typeof window === 'undefined') return 'server-device';
+    try {
+      let token = window.sessionStorage.getItem('toque_device_claim_token_v1');
+      if (!token) {
+        token = `dev-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 9)}`;
+        window.sessionStorage.setItem('toque_device_claim_token_v1', token);
+      }
+      return token;
+    } catch {
+      return 'fallback-device';
+    }
+  }
 
-  private persistClubData(): void {}
+  private loadPersistedState(): void {
+    if (typeof window === 'undefined') return;
+    try {
+      const clubRaw = window.sessionStorage.getItem('toque_unified_club_v1');
+      if (clubRaw) {
+        const parsed = JSON.parse(clubRaw);
+        if (parsed.recognizedClient !== undefined) {
+          this.recognizedClient = parsed.recognizedClient;
+        }
+        if (Array.isArray(parsed.clientAccountsEntries)) {
+          this.clientAccountsByEmail = new Map(parsed.clientAccountsEntries);
+        }
+        if (Array.isArray(parsed.clubMembers)) {
+          this.clubMembers = parsed.clubMembers;
+        }
+        if (parsed.memberRawEmails && typeof parsed.memberRawEmails === 'object') {
+          this.memberRawEmails = parsed.memberRawEmails;
+        }
+        if (Array.isArray(parsed.toquecitos)) {
+          this.toquecitos = parsed.toquecitos;
+        }
+        if (Array.isArray(parsed.consumerUsersEntries)) {
+          this.consumerUsers = new Map(parsed.consumerUsersEntries);
+        }
+        if (Array.isArray(parsed.consumerReceiptsEntries)) {
+          this.consumerReceipts = new Map(parsed.consumerReceiptsEntries);
+        }
+      }
 
-  private persistPosData(): void {}
+      const posRaw = window.sessionStorage.getItem('toque_unified_pos_v1');
+      if (posRaw) {
+        const parsed = JSON.parse(posRaw);
+        if (Array.isArray(parsed.sales)) {
+          this.sales = parsed.sales;
+        }
+        if (Array.isArray(parsed.receipts)) {
+          this.receipts = parsed.receipts;
+        }
+        if (Array.isArray(parsed.carteles)) {
+          this.carteles = parsed.carteles;
+        }
+      }
 
-  private persistPlanAndBusiness(): void {}
+      const bizRaw = window.sessionStorage.getItem('toque_unified_biz_v1');
+      if (bizRaw) {
+        const parsed = JSON.parse(bizRaw);
+        if (parsed.businessProfile) {
+          this.businessProfile = parsed.businessProfile;
+        }
+        if (parsed.clubConfig) {
+          this.clubConfig = parsed.clubConfig;
+        }
+        if (parsed.hubConfig) {
+          this.hubConfig = parsed.hubConfig;
+        }
+        if (parsed.planState) {
+          this.planState = parsed.planState;
+        }
+        const bizId = this.businessProfile.id || 'la-burger';
+        this.businesses.set(bizId, { ...this.businessProfile });
+        this.businessClubConfigs.set(bizId, { ...this.clubConfig });
+        this.businessHubConfigs.set(bizId, { ...this.hubConfig });
+      }
+    } catch {
+      // Ignore storage read errors
+    }
+  }
+
+  private persistClubData(): void {
+    if (typeof window === 'undefined') return;
+    try {
+      window.sessionStorage.setItem(
+        'toque_unified_club_v1',
+        JSON.stringify({
+          recognizedClient: this.recognizedClient,
+          clientAccountsEntries: Array.from(this.clientAccountsByEmail.entries()),
+          clubMembers: this.clubMembers,
+          memberRawEmails: this.memberRawEmails,
+          toquecitos: this.toquecitos,
+          consumerUsersEntries: Array.from(this.consumerUsers.entries()),
+          consumerReceiptsEntries: Array.from(this.consumerReceipts.entries()),
+        })
+      );
+    } catch {
+      // Ignore storage write errors
+    }
+  }
+
+  private persistPosData(): void {
+    if (typeof window === 'undefined') return;
+    try {
+      window.sessionStorage.setItem(
+        'toque_unified_pos_v1',
+        JSON.stringify({
+          sales: this.sales,
+          receipts: this.receipts,
+          carteles: this.carteles,
+        })
+      );
+    } catch {
+      // Ignore storage write errors
+    }
+  }
+
+  private persistPlanAndBusiness(): void {
+    if (typeof window === 'undefined') return;
+    try {
+      window.sessionStorage.setItem(
+        'toque_unified_biz_v1',
+        JSON.stringify({
+          businessProfile: this.businessProfile,
+          clubConfig: this.clubConfig,
+          hubConfig: this.hubConfig,
+          planState: this.planState,
+        })
+      );
+    } catch {
+      // Ignore storage write errors
+    }
+  }
 
   private isUnpaidLockdownActive(): boolean {
     if (this.planState.status === 'active' || this.planState.status === 'custom') {
@@ -1548,7 +1646,62 @@ class MockApi implements ToqueApi {
       birthMonth: knownAcc?.birthMonth || this.recognizedClient?.birthMonth || firstCard?.birthMonth,
     };
     this.clientAccountsByEmail.set(targetEmail, this.recognizedClient);
+
+    // Unificar automáticamente con la cuenta de Toquecitos (ConsumerUser y comprobantes)
+    const existingConsumer = Array.from(this.consumerUsers.values()).find(
+      (u) => u.emailOrPhone.toLowerCase() === targetEmail || u.id === accountId
+    );
+    const consumerId = existingConsumer?.id || accountId;
+    const unifiedConsumerUser: ConsumerUser = existingConsumer
+      ? { ...existingConsumer, displayName: name || existingConsumer.displayName, emailOrPhone: targetEmail }
+      : {
+          id: consumerId,
+          emailOrPhone: targetEmail,
+          displayName: name,
+          ageGroup: 'adult',
+          consentSaveReceipts: true,
+          consentMarketingNetwork: true,
+          createdAt: new Date().toISOString(),
+          syncedAt: new Date().toISOString(),
+        };
+    this.consumerUsers.set(consumerId, unifiedConsumerUser);
+
+    // Vincular comprobantes reclamados en este navegador a la cuenta unificada
+    const deviceToken = this.getClientDeviceToken();
+    const existingConsumerReceipts = this.consumerReceipts.get(consumerId) || [];
+    for (const r of this.receipts) {
+      if (r.claimedByDeviceId === deviceToken || r.claimedByAccountId === accountId) {
+        r.claimedByAccountId = accountId;
+        if (!existingConsumerReceipts.some((cr) => cr.id === r.id)) {
+          existingConsumerReceipts.unshift({
+            id: r.id,
+            consumerId,
+            tenantId: r.businessId,
+            businessId: r.businessId,
+            merchantName: r.businessName,
+            businessAddress: r.businessAddress,
+            businessHours: r.businessHours,
+            cartelCode: r.cartelCode,
+            amountArs: r.total,
+            total: r.total,
+            cashTendered: r.cashTendered,
+            changeDue: r.changeDue,
+            currency: r.currency,
+            discountSavedArs: r.discountArs || 0,
+            category: 'Comercio',
+            receiptNote: `Comprobante #${r.id.slice(-6).toUpperCase()}`,
+            method: r.method,
+            items: r.items && r.items.length > 0 ? r.items : undefined,
+            createdAt: r.createdAt,
+            savedAt: r.claimedAt || new Date().toISOString(),
+          });
+        }
+      }
+    }
+    this.consumerReceipts.set(consumerId, existingConsumerReceipts);
+
     this.persistClubData();
+    this.persistPosData();
 
     const myToquecitos = this.toquecitos.filter((t) => t.accountId === accountId);
 
@@ -3381,16 +3534,35 @@ class MockApi implements ToqueApi {
     await this.getPlanState();
     const { business, cartel, clubCfg, hubCfg } = this.resolveCartelAndBusiness(code);
     const lockdown = this.isUnpaidLockdownActive();
+    const deviceToken = this.getClientDeviceToken();
 
-    // Buscar comprobante activo del cartel emitido recientemente (dentro de los 2 minutos o ventana de blur)
+    // Buscar comprobante activo del cartel emitido recientemente.
+    // Como el QR del Hub es fijo (está impreso en el mostrador), el primer cliente que abre el Hub
+    // cuando hay un comprobante 'ready' lo reclama de forma exclusiva para su dispositivo/cuenta.
+    // Nadie más que escanee después el mismo QR fijo puede ver el comprobante de otro cliente.
     let activeReceipt: Receipt | null = null;
     if (cartel.activeReceiptId) {
       const found = this.receipts.find((r) => r.id === cartel.activeReceiptId);
       if (found && found.status !== 'cancelled') {
         const expMs = new Date(found.expiresAt).getTime();
-        // Solo considerarlo activo si fue emitido hace menos de 5 minutos
-        if (!Number.isNaN(expMs) && Date.now() - expMs < 300000) {
-          activeReceipt = found;
+        const withinWindow = !Number.isNaN(expMs) && Date.now() - expMs < 300000;
+        if (withinWindow) {
+          if (!found.claimedByDeviceId) {
+            found.claimedByDeviceId = deviceToken;
+            found.status = 'claimed';
+            found.claimedAt = new Date().toISOString();
+            if (this.recognizedClient?.accountId) {
+              found.claimedByAccountId = this.recognizedClient.accountId;
+            }
+            this.persistPosData();
+          }
+          if (
+            found.claimedByDeviceId === deviceToken ||
+            (this.recognizedClient?.accountId &&
+              found.claimedByAccountId === this.recognizedClient.accountId)
+          ) {
+            activeReceipt = found;
+          }
         }
       }
     }
@@ -3461,7 +3633,7 @@ class MockApi implements ToqueApi {
         cartel.reviewUrl ||
         hubCfg.googleReviewUrl ||
         business.reviewUrl ||
-        'https://maps.google.com',
+        '',
       blocks: hubCfg.blocks,
       receipt: activeReceipt,
       activeReceipt,
@@ -3519,9 +3691,25 @@ class MockApi implements ToqueApi {
   async getReceiptById(receiptId: string): Promise<Receipt | null> {
     this.loadPersistedState();
     const target = (receiptId || '').trim().toLowerCase();
-    return (
-      this.receipts.find((r) => r.id.toLowerCase() === target) || null
-    );
+    const found = this.receipts.find((r) => r.id.toLowerCase() === target) || null;
+    if (!found) return null;
+    const deviceToken = this.getClientDeviceToken();
+    if (!found.claimedByDeviceId) {
+      found.claimedByDeviceId = deviceToken;
+      found.status = 'claimed';
+      found.claimedAt = new Date().toISOString();
+      if (this.recognizedClient?.accountId) {
+        found.claimedByAccountId = this.recognizedClient.accountId;
+      }
+      this.persistPosData();
+    } else if (
+      found.claimedByDeviceId !== deviceToken &&
+      (!this.recognizedClient?.accountId ||
+        found.claimedByAccountId !== this.recognizedClient.accountId)
+    ) {
+      return null;
+    }
+    return found;
   }
 
   subscribeToReceipt(
@@ -3543,8 +3731,21 @@ class MockApi implements ToqueApi {
     const target = (id || '').trim().toLowerCase();
     const receipt = this.receipts.find((r) => r.id.toLowerCase() === target);
     if (!receipt) throw new Error('El comprobante no está disponible.');
+    const deviceToken = this.getClientDeviceToken();
+    if (
+      receipt.claimedByDeviceId &&
+      receipt.claimedByDeviceId !== deviceToken &&
+      (!this.recognizedClient?.accountId ||
+        receipt.claimedByAccountId !== this.recognizedClient.accountId)
+    ) {
+      throw new Error('Este comprobante ya fue reclamado por otro cliente.');
+    }
     receipt.status = 'claimed';
-    receipt.claimedAt = new Date().toISOString();
+    receipt.claimedAt = receipt.claimedAt || new Date().toISOString();
+    receipt.claimedByDeviceId = receipt.claimedByDeviceId || deviceToken;
+    if (this.recognizedClient?.accountId) {
+      receipt.claimedByAccountId = this.recognizedClient.accountId;
+    }
     this.persistPosData();
     this.receiptListeners.get(receipt.id)?.forEach((cb) => cb({ ...receipt }));
     this.notifyHubListeners(receipt.cartelCode);
@@ -3774,13 +3975,19 @@ class MockApi implements ToqueApi {
   async createSale(data: {
     cartelId: string;
     amount: number;
+    cashTendered?: number;
+    changeDue?: number;
+    discountArs?: number;
     items?: SaleItem[];
     method: PaymentMethod;
   }): Promise<{ sale: Sale; qrData?: string; receipt?: Receipt }> {
+    this.loadPersistedState();
     const cartel = this.carteles.find((c) => c.id === data.cartelId) || this.carteles[0];
     const nowIso = new Date().toISOString();
     const saleId = `sale-${Date.now()}`;
     const receiptId = `rcp-${Date.now()}`;
+    const configuredAddress = this.hubConfig.details?.address?.trim() || undefined;
+    const configuredHours = this.hubConfig.details?.hours?.trim() || undefined;
 
     const sale: Sale = {
       id: saleId,
@@ -3790,6 +3997,9 @@ class MockApi implements ToqueApi {
       cartelName: cartel.name,
       receiptId,
       amount: data.amount,
+      cashTendered: data.cashTendered,
+      changeDue: data.changeDue,
+      discountArs: data.discountArs,
       currency: 'ARS',
       items: data.items || [],
       method: data.method,
@@ -3809,8 +4019,13 @@ class MockApi implements ToqueApi {
       status: 'ready',
       expiresAt: new Date(Date.now() + 120000).toISOString(),
       businessName: this.businessProfile.name,
+      businessAddress: configuredAddress,
+      businessHours: configuredHours,
       items: sale.items,
       total: sale.amount,
+      cashTendered: sale.cashTendered,
+      changeDue: sale.changeDue,
+      discountArs: sale.discountArs,
       currency: 'ARS',
       method: sale.method,
       createdAt: nowIso,
@@ -3827,6 +4042,7 @@ class MockApi implements ToqueApi {
   }
 
   async getSale(id: string): Promise<Sale> {
+    this.loadPersistedState();
     const sale = this.sales.find((s) => s.id === id);
     if (!sale) throw new Error('Operación no encontrada.');
     return sale;
@@ -3840,6 +4056,8 @@ class MockApi implements ToqueApi {
     if (existingReceipt) {
       return { sale, receipt: existingReceipt };
     }
+    const configuredAddress = this.hubConfig.details?.address?.trim() || undefined;
+    const configuredHours = this.hubConfig.details?.hours?.trim() || undefined;
     const receipt: Receipt = {
       id: `rcp-${Date.now()}`,
       saleId: sale.id,
@@ -3848,8 +4066,13 @@ class MockApi implements ToqueApi {
       status: 'ready',
       expiresAt: new Date(Date.now() + 120000).toISOString(),
       businessName: this.businessProfile.name,
+      businessAddress: configuredAddress,
+      businessHours: configuredHours,
       items: sale.items,
       total: sale.amount,
+      cashTendered: sale.cashTendered,
+      changeDue: sale.changeDue,
+      discountArs: sale.discountArs,
       currency: 'ARS',
       method: sale.method,
       createdAt: new Date().toISOString(),
@@ -3872,6 +4095,7 @@ class MockApi implements ToqueApi {
   }
 
   async listSales(): Promise<Sale[]> {
+    this.loadPersistedState();
     const bizId = this.getActiveBusinessId();
     return this.sales.filter((s) => s.businessId === bizId);
   }
@@ -4016,22 +4240,47 @@ class MockApi implements ToqueApi {
     user: ConsumerUser;
     receipts: ConsumerReceipt[];
   }) {
-    this.consumerUsers.set(payload.user.id, payload.user);
-    this.consumerReceipts.set(payload.user.id, payload.receipts);
+    this.loadPersistedState();
+    const cleanContact = (payload.user.emailOrPhone || '').trim().toLowerCase();
+    const accountId =
+      this.recognizedClient?.accountId ||
+      this.clientAccountsByEmail.get(cleanContact)?.accountId ||
+      payload.user.id;
+
+    const unifiedUser: ConsumerUser = {
+      ...payload.user,
+      id: accountId,
+      emailOrPhone: cleanContact || payload.user.emailOrPhone,
+    };
+
+    this.consumerUsers.set(accountId, unifiedUser);
+    this.consumerReceipts.set(accountId, payload.receipts);
+
+    if (cleanContact && cleanContact.includes('@')) {
+      const clientAcc = {
+        accountId,
+        name: unifiedUser.displayName || cleanContact.split('@')[0],
+        email: cleanContact,
+      };
+      this.recognizedClient = clientAcc;
+      this.clientAccountsByEmail.set(cleanContact, clientAcc);
+    }
+
+    this.persistClubData();
 
     try {
       const res = await fetch('/api/consumer/sync', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
+        body: JSON.stringify({ user: unifiedUser, receipts: payload.receipts }),
       });
       if (res.ok) {
         const data = await res.json();
         return {
           success: true,
-          consumerId: data.consumerId || payload.user.id,
-          recoveryCode: data.recoveryCode || `TQ-${payload.user.id.slice(0, 6).toUpperCase()}`,
-          user: payload.user,
+          consumerId: data.consumerId || unifiedUser.id,
+          recoveryCode: data.recoveryCode || `TQ-${unifiedUser.id.slice(0, 6).toUpperCase()}`,
+          user: unifiedUser,
           receipts: payload.receipts,
         };
       }
@@ -4041,9 +4290,9 @@ class MockApi implements ToqueApi {
 
     return {
       success: true,
-      consumerId: payload.user.id,
-      recoveryCode: `TQ-${payload.user.id.slice(0, 6).toUpperCase()}`,
-      user: payload.user,
+      consumerId: unifiedUser.id,
+      recoveryCode: `TQ-${unifiedUser.id.slice(0, 6).toUpperCase()}`,
+      user: unifiedUser,
       receipts: payload.receipts,
     };
   }
@@ -4053,7 +4302,15 @@ class MockApi implements ToqueApi {
     user?: ConsumerUser;
     receipts?: ConsumerReceipt[];
   }> {
-    const q = contactOrId.trim().toLowerCase();
+    this.loadPersistedState();
+    const q = (contactOrId || this.recognizedClient?.email || '').trim().toLowerCase();
+    if (!q) return { found: false };
+
+    // Si existe cuenta en Club, sincronizarla automáticamente con la bóveda de Toquecitos
+    if (q.includes('@')) {
+      await this.recognizeAccount(q);
+    }
+
     for (const u of this.consumerUsers.values()) {
       if (u.id.toLowerCase() === q || u.emailOrPhone.toLowerCase() === q) {
         return {

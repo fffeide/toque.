@@ -1,9 +1,11 @@
 import React from 'react';
 import { RealQrCode } from '../ui/RealQrCode';
 import { ColorPreset, COLOR_PRESET_HEX } from '../../lib/walletwalletClient';
+export type { ColorPreset };
 
 export interface WalletPassCardProps {
   businessName: string;
+  cardTitle?: string;
   memberName?: string;
   stamps: number;
   stampsRequired: number;
@@ -32,11 +34,11 @@ export function resolvePassBackgroundColor(
 
 /**
  * Tarjeta del cliente:
- * Muestra en grande su código corto (para poder dictarlo al cajero) y el QR.
- * El QR y el código corto no cambian nunca.
+ * Muestra siempre el código corto debajo del QR y los campos fijos SELLOS, PREMIO y SOCIO.
  */
 export const WalletPassCard: React.FC<WalletPassCardProps> = ({
   businessName,
+  cardTitle,
   memberName,
   stamps,
   stampsRequired,
@@ -53,7 +55,7 @@ export const WalletPassCard: React.FC<WalletPassCardProps> = ({
 }) => {
   const effectiveLogo = logoURL || logoUrl;
   const bgColor = resolvePassBackgroundColor(colorPreset, customColor);
-  const cleanBusinessName = (businessName || 'Comercio').slice(0, 40);
+  const cleanTitle = (cardTitle || businessName || 'Comercio').slice(0, 44);
   const cleanMemberName = memberName ? memberName.trim().slice(0, 40) : '';
   const cleanRewardText = (rewardText || 'Beneficio al completar tus sellos').slice(0, 60);
 
@@ -65,52 +67,57 @@ export const WalletPassCard: React.FC<WalletPassCardProps> = ({
         type="button"
         onClick={onClick}
         style={{ backgroundColor: bgColor }}
-        className={`w-full text-left rounded-2xl p-5 border border-white/10 shadow-lg transition-transform active:scale-[0.99] hover:border-white/20 focus:outline-none ${className}`}
+        className={`w-full text-left rounded-2xl p-4 border border-white/10 shadow-lg transition-transform active:scale-[0.99] hover:border-white/20 focus:outline-none ${className}`}
       >
-        <div className="flex items-start justify-between gap-3 mb-4">
-          <div className="flex items-center gap-2.5 min-w-0">
+        <div className="flex items-start justify-between gap-2.5 mb-3">
+          <div className="flex items-center gap-2 min-w-0">
             {effectiveLogo ? (
               <img
                 src={effectiveLogo}
-                alt={cleanBusinessName}
-                className="w-8 h-8 rounded-lg object-cover bg-black/20 shrink-0 border border-white/10"
+                alt={cleanTitle}
+                className="w-7 h-7 rounded-lg object-cover bg-black/20 shrink-0 border border-white/10"
               />
             ) : null}
-            <span className="font-semibold text-white text-base truncate">
-              {cleanBusinessName}
+            <span className="font-semibold text-white text-sm truncate">
+              {cleanTitle}
             </span>
           </div>
 
           {cleanMemberName ? (
             <div className="text-right shrink-0">
-              <div className="text-[10px] font-semibold tracking-wider text-white/60">
+              <div className="text-[9px] font-semibold tracking-wider text-white/60">
                 SOCIO
               </div>
-              <div className="text-xs font-medium text-white truncate max-w-[110px]">
+              <div className="text-[11px] font-medium text-white truncate max-w-[100px]">
                 {cleanMemberName}
               </div>
             </div>
           ) : null}
         </div>
 
-        <div className="flex items-end justify-between gap-4">
+        <div className="flex items-end justify-between gap-3">
           <div>
-            <div className="text-[10px] font-semibold tracking-wider text-white/60 mb-0.5">
+            <div className="text-[9px] font-semibold tracking-wider text-white/60 mb-0.5">
               SELLOS
             </div>
-            <div className="text-2xl font-bold text-white tracking-tight leading-none">
+            <div className="text-xl font-bold text-white tracking-tight leading-none">
               {stamps} / {stampsRequired}
             </div>
           </div>
 
           <div className="text-right min-w-0 flex-1">
-            <div className="text-[10px] font-semibold tracking-wider text-white/60 mb-0.5">
+            <div className="text-[9px] font-semibold tracking-wider text-white/60 mb-0.5">
               PREMIO
             </div>
             <div className="text-xs font-medium text-white/95 truncate">
               {cleanRewardText}
             </div>
           </div>
+        </div>
+
+        <div className="mt-3 pt-2.5 border-t border-white/10 flex items-center justify-between text-[11px]">
+          <span className="text-white/60">Código de tarjeta</span>
+          <span className="font-mono font-bold tracking-wider text-white">{immutableCode}</span>
         </div>
       </button>
     );
@@ -119,20 +126,20 @@ export const WalletPassCard: React.FC<WalletPassCardProps> = ({
   return (
     <div
       style={{ backgroundColor: bgColor }}
-      className={`w-full rounded-[24px] p-6 text-white border border-white/15 shadow-2xl flex flex-col justify-between select-none ${className}`}
+      className={`w-full rounded-[24px] p-5 sm:p-6 text-white border border-white/15 shadow-2xl flex flex-col justify-between select-none ${className}`}
     >
-      {/* Fila superior: Logo + Nombre del negocio a la izquierda | SOCIO + nombre a la derecha */}
-      <div className="flex items-start justify-between gap-3 mb-6">
+      {/* Fila superior: Logo + Nombre de tarjeta/negocio a la izquierda | SOCIO + nombre a la derecha */}
+      <div className="flex items-start justify-between gap-3 mb-5">
         <div className="flex items-center gap-2.5 min-w-0">
           {effectiveLogo ? (
             <img
               src={effectiveLogo}
-              alt={cleanBusinessName}
-              className="w-9 h-9 rounded-lg object-cover bg-black/25 shrink-0 border border-white/10"
+              alt={cleanTitle}
+              className="w-8 h-8 rounded-lg object-cover bg-black/25 shrink-0 border border-white/10"
             />
           ) : null}
           <span className="font-semibold text-[15px] leading-snug text-white truncate">
-            {cleanBusinessName}
+            {cleanTitle}
           </span>
         </div>
 
@@ -149,18 +156,18 @@ export const WalletPassCard: React.FC<WalletPassCardProps> = ({
       </div>
 
       {/* Centro (primaryFields): SELLOS */}
-      <div className="mb-5">
-        <div className="text-[11px] font-semibold tracking-wider text-white/65 mb-1">
+      <div className="mb-4">
+        <div className="text-[10px] font-semibold tracking-wider text-white/65 mb-1">
           SELLOS
         </div>
-        <div className="text-4xl font-bold text-white tracking-tight leading-none">
+        <div className="text-3xl sm:text-4xl font-bold text-white tracking-tight leading-none">
           {stamps} / {stampsRequired}
         </div>
       </div>
 
       {/* Bloque secundario (secondaryFields): PREMIO */}
-      <div className="mb-6">
-        <div className="text-[11px] font-semibold tracking-wider text-white/65 mb-1">
+      <div className="mb-5">
+        <div className="text-[10px] font-semibold tracking-wider text-white/65 mb-1">
           PREMIO
         </div>
         <div className="text-sm font-medium text-white/95 leading-snug break-words">
@@ -168,12 +175,12 @@ export const WalletPassCard: React.FC<WalletPassCardProps> = ({
         </div>
       </div>
 
-      {/* Pie centrado: Código QR inmutable + Código corto en grande para dictar al cajero */}
-      <div className="flex flex-col items-center justify-center pt-1 pb-1 space-y-3">
-        <div className="bg-white p-3.5 rounded-2xl shadow-md inline-flex items-center justify-center">
+      {/* Pie centrado: Código QR inmutable + Código corto SIEMPRE visible debajo del QR */}
+      <div className="flex flex-col items-center justify-center pt-1 pb-1 space-y-2.5">
+        <div className="bg-white p-3 rounded-2xl shadow-md inline-flex items-center justify-center">
           <RealQrCode
             value={immutableCode}
-            size={148}
+            size={140}
             darkColor="#000000"
             lightColor="#FFFFFF"
             margin={0}
@@ -182,11 +189,11 @@ export const WalletPassCard: React.FC<WalletPassCardProps> = ({
         </div>
 
         <div className="text-center">
-          <span className="block text-[11px] text-white/70 font-medium">
-            Tu código para dictar en caja
-          </span>
-          <span className="block text-2xl sm:text-3xl font-mono font-extrabold tracking-widest text-white mt-0.5 select-all">
+          <span className="block text-xl sm:text-2xl font-mono font-extrabold tracking-widest text-white select-all">
             {immutableCode}
+          </span>
+          <span className="block text-[10px] text-white/65 font-medium mt-0.5">
+            Código para mostrar o dictar en caja
           </span>
         </div>
       </div>

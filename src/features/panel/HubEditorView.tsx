@@ -9,6 +9,7 @@ import { formatCurrency } from '../../lib/formatters';
 import { WalletPassCard } from '../../components/wallet/WalletPassCard';
 import { GoogleAddressPicker } from '../../components/maps/GoogleAddressPicker';
 import { BusinessHoursEditor } from '../../components/schedule/BusinessHoursEditor';
+import { RealQrCode } from '../../components/ui/RealQrCode';
 import {
   Smartphone,
   GripVertical,
@@ -21,6 +22,8 @@ import {
   Globe,
   ExternalLink,
   Lock,
+  CheckCircle2,
+  Copy,
 } from 'lucide-react';
 
 const BLOCK_LABELS: Record<HubBlockKey, string> = {
@@ -123,8 +126,13 @@ export const HubEditorView: React.FC = () => {
         setActiveCartelCode(firstCode);
         const cleanGoogleUrl =
           data.googleReviewUrl === 'https://maps.google.com' ? '' : data.googleReviewUrl || '';
+        const alreadyHasData = Boolean(
+          data.hubConfigured ||
+            (data.details?.address?.trim() && data.details?.hours?.trim())
+        );
         setConfig({
           ...data,
+          hubConfigured: alreadyHasData,
           googleReviewUrl: cleanGoogleUrl,
           businessName: data.businessName || biz?.name || clubCfg?.organizationName || 'La Burger',
           rewardText:
@@ -133,7 +141,7 @@ export const HubEditorView: React.FC = () => {
             clubCfg?.rewardText ||
             'Beneficio al completar tus sellos',
           stampsRequired:
-            data.stampsRequired || clubCfg?.targetStamps || clubCfg?.stampsRequired || 10,
+            data.stampsRequired || clubCfg?.targetStamps || clubCfg?.stampsRequired || 5,
           colorPreset: data.colorPreset || clubCfg?.colorPreset || 'dark',
           customColor: data.customColor || clubCfg?.customColor,
           logoUrl: data.logoUrl || clubCfg?.logoUrl,
@@ -173,20 +181,44 @@ export const HubEditorView: React.FC = () => {
     setDragOverIndex(null);
   };
 
-  const handleSave = async () => {
+  const handleSave = async (markConfigured = false) => {
     if (!config) return;
+    if (markConfigured) {
+      if (!config.businessName?.trim()) {
+        showToast('Ingresá el nombre de tu comercio', 'error');
+        return;
+      }
+      if (!config.details.address?.trim()) {
+        showToast('Ingresá la dirección real de tu local antes de crear el Hub', 'error');
+        return;
+      }
+      if (!config.details.hours?.trim()) {
+        showToast('Configurá los horarios de atención antes de crear el Hub', 'error');
+        return;
+      }
+    }
+
     setIsSaving(true);
     try {
       const normalizedBlocks = normalizeHubBlocks(config.blocks);
-      const updated = await api.updateHubConfig({
+      const nextConfig: HubConfig = {
         ...config,
+        hubConfigured: markConfigured ? true : config.hubConfigured,
         blocks: normalizedBlocks,
-      });
+      };
+      if (nextConfig.businessName?.trim()) {
+        await api.updateBusinessProfile({ name: nextConfig.businessName.trim() }).catch(() => {});
+      }
+      const updated = await api.updateHubConfig(nextConfig);
       setConfig({
         ...updated,
+        hubConfigured: markConfigured ? true : updated.hubConfigured,
         blocks: normalizeHubBlocks(updated.blocks),
       });
-      showToast('Configuración del Hub guardada', 'success');
+      showToast(
+        markConfigured ? '¡Hub creado con los datos reales de tu local!' : 'Configuración del Hub guardada',
+        'success'
+      );
     } catch {
       showToast('Error al guardar cambios', 'error');
     } finally {
@@ -215,6 +247,135 @@ export const HubEditorView: React.FC = () => {
   const isPlanPaid = Boolean(config.planPaid);
   const waMePreview = buildWhatsAppWaMeLink(config.socials.whatsapp);
   const featuredProducts = config.products.filter((p) => p.featuredInHub !== false);
+  const fixedHubUrl = `${window.location.origin}/u/${activeCartelCode}`;
+
+  // Paso previo obligatorio antes de crear el Hub: pedir toda la información real del comercio
+  if (!config.hubConfigured) {
+    return (
+      <div className="max-w-3xl mx-auto space-y-6">
+        <div>
+          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#D95B26]/15 border border-[#D95B26]/30 text-[#D95B26] text-xs font-bold mb-2">
+            Configuración inicial del Hub
+          </span>
+          <h1 className="text-2xl font-bold text-[#f1f1ee] tracking-tight">
+            Completá los datos de tu local para crear tu Hub
+          </h1>
+          <p className="text-xs text-[#a1a1aa] mt-1">
+            Esta información se usa en el Hub y en los comprobantes de tus clientes. Nunca mostramos datos inventados: solo se incluye lo que cargues acá.
+          </p>
+        </div>
+
+        <Card className="p-6 space-y-6">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-semibold text-[#f1f1ee] mb-1.5">
+                Nombre del comercio *
+              </label>
+              <input
+                type="text"
+                value={config.businessName || ''}
+                onChange={(e) => setConfig({ ...config, businessName: e.target.value })}
+                placeholder="Ej. La Burger"
+                className="w-full px-3.5 py-2.5 rounded-xl bg-[#161619] border border-[#28282a] text-sm text-[#f1f1ee] focus:outline-none focus:border-[#D95B26]"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-[#f1f1ee] mb-1.5">
+                WhatsApp / Teléfono de contacto (Opcional)
+              </label>
+              <input
+                type="tel"
+                value={config.socials.whatsapp || ''}
+                onChange={(e) =>
+                  setConfig({
+                    ...config,
+                    socials: { ...config.socials, whatsapp: e.target.value },
+                  })
+                }
+                placeholder="+54 9 11 ..."
+                className="w-full px-3.5 py-2.5 rounded-xl bg-[#161619] border border-[#28282a] text-sm text-[#f1f1ee] focus:outline-none focus:border-[#D95B26]"
+              />
+            </div>
+          </div>
+
+          <div className="pt-2 border-t border-[#28282a]">
+            <label className="block text-xs font-semibold text-[#f1f1ee] mb-2">
+              Dirección del local *
+            </label>
+            <GoogleAddressPicker
+              value={config.details.address || ''}
+              onChange={(address) =>
+                setConfig({
+                  ...config,
+                  details: { ...config.details, address },
+                })
+              }
+            />
+          </div>
+
+          <div className="pt-2 border-t border-[#28282a]">
+            <label className="block text-xs font-semibold text-[#f1f1ee] mb-2">
+              Horarios de atención *
+            </label>
+            <BusinessHoursEditor
+              value={config.details.hours || ''}
+              onChange={(hours) =>
+                setConfig({
+                  ...config,
+                  details: { ...config.details, hours },
+                })
+              }
+            />
+          </div>
+
+          <div className="pt-2 border-t border-[#28282a] grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-semibold text-[#f1f1ee] mb-1.5">
+                Link de Google Maps (Opcional)
+              </label>
+              <input
+                type="url"
+                value={config.googleReviewUrl || ''}
+                onChange={(e) => setConfig({ ...config, googleReviewUrl: e.target.value })}
+                placeholder="https://maps.app.goo.gl/..."
+                className="w-full px-3.5 py-2.5 rounded-xl bg-[#161619] border border-[#28282a] text-sm text-[#f1f1ee] focus:outline-none focus:border-[#D95B26]"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-[#f1f1ee] mb-1.5">
+                Instagram (Opcional)
+              </label>
+              <input
+                type="text"
+                value={config.socials.instagram || ''}
+                onChange={(e) =>
+                  setConfig({
+                    ...config,
+                    socials: { ...config.socials, instagram: e.target.value },
+                  })
+                }
+                placeholder="@tucomercio"
+                className="w-full px-3.5 py-2.5 rounded-xl bg-[#161619] border border-[#28282a] text-sm text-[#f1f1ee] focus:outline-none focus:border-[#D95B26]"
+              />
+            </div>
+          </div>
+
+          <div className="pt-4 border-t border-[#28282a] flex items-center justify-end gap-3">
+            <Button
+              variant="ultramar"
+              loading={isSaving}
+              icon={<CheckCircle2 className="w-4 h-4" />}
+              onClick={() => handleSave(true)}
+            >
+              Crear mi Hub con estos datos
+            </Button>
+          </div>
+        </Card>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -222,7 +383,7 @@ export const HubEditorView: React.FC = () => {
         <div>
           <h1 className="text-2xl font-bold text-[#f1f1ee] tracking-tight">Hub</h1>
           <p className="text-xs text-[#a1a1aa] mt-0.5">
-            Personalizá qué ven tus clientes cuando apoyan el teléfono o escanean tu cartel Toque.
+            Personalizá qué ven tus clientes cuando apoyan el teléfono o escanean el QR fijo de tu mostrador.
           </p>
         </div>
 
@@ -233,7 +394,7 @@ export const HubEditorView: React.FC = () => {
             rel="noopener noreferrer"
             className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-[#18181b] hover:bg-[#242429] text-xs font-medium text-[#f1f1ee] border border-[#28282a] transition-colors"
           >
-            <span>Ver Hub en vivo</span>
+            <span>Ver Hub</span>
             <ExternalLink className="w-3.5 h-3.5 text-[#D95B26]" />
           </Link>
 
@@ -242,12 +403,43 @@ export const HubEditorView: React.FC = () => {
             size="sm"
             loading={isSaving}
             icon={<Save className="w-4 h-4" />}
-            onClick={handleSave}
+            onClick={() => handleSave(false)}
           >
             Guardar cambios
           </Button>
         </div>
       </div>
+
+      {/* QR fijo del Hub del comercio para instalar en mostrador */}
+      <Card className="p-5 flex flex-col sm:flex-row items-center justify-between gap-4 bg-[#141414] border-[#242424]">
+        <div className="flex items-center gap-4">
+          <div className="bg-white p-2.5 rounded-2xl shrink-0">
+            <RealQrCode value={fixedHubUrl} size={72} margin={0} />
+          </div>
+          <div className="space-y-1">
+            <span className="inline-block text-[11px] font-bold text-[#2fb36a]">
+              QR fijo único de tu mostrador ({activeCartelCode})
+            </span>
+            <h2 className="text-sm font-bold text-[#f1f1ee]">
+              Este QR no cambia nunca: es el que dejás impreso en caja
+            </h2>
+            <p className="text-xs text-[#a1a1aa]">
+              Cada vez que cobrás, el cliente que escanea recibe su propio comprobante de forma privada (nadie más puede verlo).
+            </p>
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={() => {
+            navigator.clipboard.writeText(fixedHubUrl).catch(() => {});
+            showToast('Link del Hub copiado', 'success');
+          }}
+          className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-[#1C1C22] hover:bg-[#26262E] border border-[#282830] text-xs font-semibold text-[#f1f1ee] shrink-0 cursor-pointer"
+        >
+          <Copy className="w-3.5 h-3.5 text-[#D95B26]" />
+          <span>Copiar link</span>
+        </button>
+      </Card>
 
       {/* Estado del Plan para desbloqueo de bloques adicionales */}
       {!isPlanPaid && (
@@ -587,7 +779,7 @@ export const HubEditorView: React.FC = () => {
                   <h3 className="font-bold text-xs text-[#0c0c0c]">
                     {config.businessName || 'Mi Comercio'}
                   </h3>
-                  <p className="text-[10px] text-[#52525b]">Cartel inteligente activo</p>
+                  <p className="text-[10px] text-[#52525b]">Mostrador · {activeCartelCode}</p>
                 </div>
               </div>
             </div>
@@ -610,9 +802,9 @@ export const HubEditorView: React.FC = () => {
                         <span className="text-[10px] text-[#52525b]">Recién emitido</span>
                       </div>
                       <div className="flex justify-between items-center pt-1">
-                        <span className="text-xs text-[#0c0c0c]">Ticket troquelado en vivo</span>
+                        <span className="text-xs text-[#0c0c0c]">Ticket troquelado</span>
                         <span className="font-extrabold text-xs font-mono bg-[#0c0c0c] text-[#bec8ff] px-2 py-0.5 rounded-md">
-                          Activo
+                          Privado por cliente
                         </span>
                       </div>
                     </div>
@@ -637,9 +829,10 @@ export const HubEditorView: React.FC = () => {
                         businessName={config.businessName || 'Mi Comercio'}
                         memberName="Socio"
                         stamps={1}
-                        stampsRequired={config.stampsRequired || 10}
+                        stampsRequired={config.stampsRequired || 5}
                         rewardText={config.rewardText || 'Beneficio al completar tus sellos'}
-                        barcodeToken="token-vista-previa-segura-01"
+                        barcodeToken="K7M2-9XQ4"
+                        shortCode="K7M2-9XQ4"
                         colorPreset={config.colorPreset || 'dark'}
                         customColor={config.customColor}
                         logoUrl={config.logoUrl}

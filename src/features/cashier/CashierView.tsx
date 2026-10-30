@@ -443,18 +443,24 @@ export const CashierView: React.FC = () => {
     setExpressionStr((prev) => (prev.length <= 1 ? '0' : prev.slice(0, -1)));
   }, []);
 
+  const [cashTenderedInput, setCashTenderedInput] = useState<string>('');
+
+  const parsedCashTendered = useMemo(() => {
+    const clean = cashTenderedInput.replace(/[^0-9]/g, '');
+    if (!clean) return 0;
+    return parseInt(clean, 10) || 0;
+  }, [cashTenderedInput]);
+
+  const changeDue = useMemo(() => {
+    if (method !== 'cash' || parsedCashTendered <= 0 || amount <= 0) return 0;
+    return Math.max(0, parsedCashTendered - amount);
+  }, [method, parsedCashTendered, amount]);
+
   const handleClear = useCallback(() => {
     setExpressionStr('0');
     setScannedItems([]);
+    setCashTenderedInput('');
   }, []);
-
-  const handleQuickAmount = (val: number) => {
-    setExpressionStr((prev) => {
-      if (prev === '0') return String(val);
-      if (/[+\-*]$/.test(prev)) return prev + String(val);
-      return `${prev}+${val}`;
-    });
-  };
 
   const syncAmountWithItems = (items: SaleItem[]) => {
     setScannedItems(items);
@@ -529,12 +535,29 @@ export const CashierView: React.FC = () => {
       showToast('Ingresá un importe mayor a $0', 'error');
       return;
     }
+    if (method === 'cash' && parsedCashTendered > 0 && parsedCashTendered < amount) {
+      showToast('El efectivo recibido es menor al total a cobrar', 'error');
+      return;
+    }
 
     setIsSubmitting(true);
     try {
+      const effectiveTendered =
+        method === 'cash'
+          ? parsedCashTendered > 0
+            ? parsedCashTendered
+            : amount
+          : undefined;
+      const effectiveChange =
+        method === 'cash' && effectiveTendered
+          ? Math.max(0, effectiveTendered - amount)
+          : undefined;
+
       const res = await api.createSale({
         cartelId: selectedCartel.id,
         amount,
+        cashTendered: effectiveTendered,
+        changeDue: effectiveChange,
         method,
         items: scannedItems.length > 0 ? scannedItems : undefined,
       });
@@ -547,6 +570,7 @@ export const CashierView: React.FC = () => {
       }
       setExpressionStr('0');
       setScannedItems([]);
+      setCashTenderedInput('');
       showToast(
         `Comprobante ${res.receipt?.id || ''} activo en ${selectedCartel.code} por 2 minutos`,
         'success'
@@ -556,7 +580,15 @@ export const CashierView: React.FC = () => {
     } finally {
       setIsSubmitting(false);
     }
-  }, [selectedCartel, amount, method, scannedItems, cleanActiveCashierName, showToast]);
+  }, [
+    selectedCartel,
+    amount,
+    method,
+    parsedCashTendered,
+    scannedItems,
+    cleanActiveCashierName,
+    showToast,
+  ]);
 
   // Soporte silencioso para teclado numérico físico (+, -, *, ., Enter)
   useEffect(() => {
@@ -777,17 +809,8 @@ export const CashierView: React.FC = () => {
           </div>
         </div>
 
-        {/* Botón Sumar Sello + Selector de Cartel + Modo Oscuro/Claro + Elegir Perfil */}
+        {/* Selector de Cartel + Modo Oscuro/Claro + Elegir Perfil */}
         <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() => setShowStampModal(true)}
-            className="px-3 h-8 rounded-xl bg-[#D95B26] hover:bg-[#e06530] text-white flex items-center gap-1.5 text-xs font-bold transition-colors cursor-pointer shrink-0 shadow-sm"
-          >
-            <Award className="w-3.5 h-3.5" />
-            <span>Sumar sello</span>
-          </button>
-
           <div className="hidden sm:flex items-center gap-1.5 bg-[#1C1C22] border border-[#282830] rounded-xl px-2.5 py-1.5">
             <QrCode className="w-3.5 h-3.5 text-[#D95B26] shrink-0" />
             <select
@@ -912,20 +935,6 @@ export const CashierView: React.FC = () => {
               </div>
             )}
 
-            {/* Montos más usados del POS */}
-            <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
-              {mostUsedAmounts.map((val) => (
-                <button
-                  key={val}
-                  type="button"
-                  onClick={() => handleQuickAmount(val)}
-                  className="py-2 px-2 rounded-xl bg-[#141418] hover:bg-[#1C1C22] border border-[#282830] text-xs font-mono font-semibold text-[#F4F4F0] transition-colors cursor-pointer stat-badge"
-                >
-                  +${val.toLocaleString('es-AR')}
-                </button>
-              ))}
-            </div>
-
             {/* Teclado Numérico + Operadores Matemáticos (+, -, ×, =) */}
             <div className="grid grid-cols-4 gap-2">
               {['7', '8', '9'].map((digit) => (
@@ -1014,62 +1023,127 @@ export const CashierView: React.FC = () => {
             </div>
 
             {/* Selección de método de pago */}
-            <div>
-              <span className="block text-xs font-semibold text-[#A1A1AA] mb-1.5 stat-detail">
-                Método de pago
-              </span>
-              <div className="grid grid-cols-3 gap-2">
-                <button
-                  type="button"
-                  onClick={() => setMethod('cash')}
-                  className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer flex items-center gap-2 stat-badge ${
-                    method === 'cash'
-                      ? 'bg-[#2FB36A]/15 border-[#2FB36A] text-[#F4F4F0]'
-                      : 'bg-[#141418] border-[#282830] text-[#A1A1AA] hover:text-[#F4F4F0]'
-                  }`}
-                >
-                  <Banknote
-                    className={`w-4 h-4 ${
-                      method === 'cash' ? 'text-[#2FB36A]' : 'text-[#A1A1AA]'
+            <div className="space-y-3">
+              <div>
+                <span className="block text-xs font-semibold text-[#A1A1AA] mb-1.5 stat-detail">
+                  Método de pago
+                </span>
+                <div className="grid grid-cols-3 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setMethod('cash')}
+                    className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer flex items-center gap-2 stat-badge ${
+                      method === 'cash'
+                        ? 'bg-[#2FB36A]/15 border-[#2FB36A] text-[#F4F4F0]'
+                        : 'bg-[#141418] border-[#282830] text-[#A1A1AA] hover:text-[#F4F4F0]'
                     }`}
-                  />
-                  <span className="text-xs font-bold">Efectivo</span>
-                </button>
+                  >
+                    <Banknote
+                      className={`w-4 h-4 ${
+                        method === 'cash' ? 'text-[#2FB36A]' : 'text-[#A1A1AA]'
+                      }`}
+                    />
+                    <span className="text-xs font-bold">Efectivo</span>
+                  </button>
 
-                <button
-                  type="button"
-                  onClick={() => setMethod('card')}
-                  className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer flex items-center gap-2 stat-badge ${
-                    method === 'card'
-                      ? 'bg-[#BEC8FF]/15 border-[#BEC8FF] text-[#F4F4F0]'
-                      : 'bg-[#141418] border-[#282830] text-[#A1A1AA] hover:text-[#F4F4F0]'
-                  }`}
-                >
-                  <CreditCard
-                    className={`w-4 h-4 ${
-                      method === 'card' ? 'text-[#BEC8FF]' : 'text-[#A1A1AA]'
+                  <button
+                    type="button"
+                    onClick={() => setMethod('card')}
+                    className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer flex items-center gap-2 stat-badge ${
+                      method === 'card'
+                        ? 'bg-[#BEC8FF]/15 border-[#BEC8FF] text-[#F4F4F0]'
+                        : 'bg-[#141418] border-[#282830] text-[#A1A1AA] hover:text-[#F4F4F0]'
                     }`}
-                  />
-                  <span className="text-xs font-bold">Tarjeta</span>
-                </button>
+                  >
+                    <CreditCard
+                      className={`w-4 h-4 ${
+                        method === 'card' ? 'text-[#BEC8FF]' : 'text-[#A1A1AA]'
+                      }`}
+                    />
+                    <span className="text-xs font-bold">Tarjeta</span>
+                  </button>
 
-                <button
-                  type="button"
-                  onClick={() => setMethod('mercadopago')}
-                  className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer flex items-center gap-2 stat-badge ${
-                    method === 'mercadopago'
-                      ? 'bg-[#D95B26]/15 border-[#D95B26] text-[#F4F4F0]'
-                      : 'bg-[#141418] border-[#282830] text-[#A1A1AA] hover:text-[#F4F4F0]'
-                  }`}
-                >
-                  <QrCode
-                    className={`w-4 h-4 ${
-                      method === 'mercadopago' ? 'text-[#D95B26]' : 'text-[#A1A1AA]'
+                  <button
+                    type="button"
+                    onClick={() => setMethod('mercadopago')}
+                    className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer flex items-center gap-2 stat-badge ${
+                      method === 'mercadopago'
+                        ? 'bg-[#D95B26]/15 border-[#D95B26] text-[#F4F4F0]'
+                        : 'bg-[#141418] border-[#282830] text-[#A1A1AA] hover:text-[#F4F4F0]'
                     }`}
-                  />
-                  <span className="text-xs font-bold">QR</span>
-                </button>
+                  >
+                    <QrCode
+                      className={`w-4 h-4 ${
+                        method === 'mercadopago' ? 'text-[#D95B26]' : 'text-[#A1A1AA]'
+                      }`}
+                    />
+                    <span className="text-xs font-bold">QR</span>
+                  </button>
+                </div>
               </div>
+
+              {/* Cálculo de vuelto cuando el cajero selecciona Efectivo */}
+              {method === 'cash' && (
+                <div className="p-3.5 rounded-2xl bg-[#141418] border border-[#2FB36A]/40 space-y-2.5">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <label className="text-xs font-semibold text-[#F4F4F0]">
+                      Paga con efectivo ($)
+                    </label>
+                    <div className="flex flex-wrap gap-1.5">
+                      {amount > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => setCashTenderedInput(String(amount))}
+                          className="px-2 py-1 rounded-lg bg-[#1C1C22] hover:bg-[#282830] border border-[#282830] text-[11px] font-semibold text-[#2FB36A] cursor-pointer"
+                        >
+                          Exacto
+                        </button>
+                      )}
+                      {[5000, 10000, 20000, 50000].map((bill) => (
+                        <button
+                          key={bill}
+                          type="button"
+                          onClick={() => setCashTenderedInput(String(bill))}
+                          className="px-2 py-1 rounded-lg bg-[#1C1C22] hover:bg-[#282830] border border-[#282830] text-[11px] font-mono font-semibold text-[#F4F4F0] cursor-pointer"
+                        >
+                          ${bill.toLocaleString('es-AR')}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3 items-center">
+                    <div className="flex items-center gap-1.5 bg-[#0C0C0E] border border-[#282830] rounded-xl px-3 py-2 focus-within:border-[#2FB36A]">
+                      <span className="text-xs font-bold text-[#2FB36A]">$</span>
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        value={cashTenderedInput}
+                        onChange={(e) =>
+                          setCashTenderedInput(e.target.value.replace(/[^0-9]/g, ''))
+                        }
+                        placeholder={amount > 0 ? String(amount) : '0'}
+                        className="w-full bg-transparent text-sm font-mono font-bold text-[#F4F4F0] focus:outline-none"
+                      />
+                    </div>
+
+                    <div className="px-3 py-2 rounded-xl bg-[#0C0C0E] border border-[#282830] flex items-center justify-between">
+                      <span className="text-xs text-[#A1A1AA]">Vuelto</span>
+                      <span
+                        className={`text-sm font-mono font-extrabold ${
+                          parsedCashTendered > 0 && parsedCashTendered < amount
+                            ? 'text-red-400'
+                            : 'text-[#2FB36A]'
+                        }`}
+                      >
+                        {parsedCashTendered > 0 && parsedCashTendered < amount
+                          ? `Faltan $${(amount - parsedCashTendered).toLocaleString('es-AR')}`
+                          : `$${changeDue.toLocaleString('es-AR')}`}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
 
             <Button
@@ -1098,13 +1172,20 @@ export const CashierView: React.FC = () => {
                     )}
                   </div>
                   <div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
                       <h3 className="font-bold text-xs text-[#F4F4F0]">
                         Comprobante #{emittedReceipt.id}
                       </h3>
                       <span className="text-xs font-mono font-bold text-[#BEC8FF]">
                         {formatCurrency(emittedReceipt.total)} ({methodBadgeLabel(emittedReceipt.method)})
                       </span>
+                      {emittedReceipt.method === 'cash' &&
+                        typeof emittedReceipt.changeDue === 'number' &&
+                        emittedReceipt.changeDue > 0 && (
+                          <span className="text-xs font-mono font-bold text-[#2FB36A]">
+                            · Vuelto: {formatCurrency(emittedReceipt.changeDue)}
+                          </span>
+                        )}
                     </div>
                     <p className="text-[11px] text-[#A1A1AA] stat-detail">
                       {emittedReceipt.status === 'claimed'
@@ -1142,9 +1223,9 @@ export const CashierView: React.FC = () => {
           )}
         </div>
 
-        {/* Columna Derecha: Lector de productos + Últimos cobros (5 cols) */}
+        {/* Columna Derecha: Lector de productos + Últimos cobros + Sumar sello debajo (5 cols) */}
         <div className="lg:col-span-5 space-y-5">
-          {/* 1. Lector de productos (sin subtítulo ni contador en Catálogo) */}
+          {/* 1. Lector de productos */}
           <Card className="stat-card p-4 space-y-3.5">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
@@ -1208,7 +1289,7 @@ export const CashierView: React.FC = () => {
             )}
           </Card>
 
-          {/* 2. Últimos cobros (sin rol entre paréntesis) */}
+          {/* 2. Últimos cobros */}
           <Card padding="none" className="stat-card overflow-hidden">
             <div className="p-4 border-b border-[#282830] flex items-center justify-between">
               <div>
@@ -1276,6 +1357,31 @@ export const CashierView: React.FC = () => {
                 ))}
               </div>
             )}
+          </Card>
+
+          {/* 3. Sumar sello — debajo de Últimos cobros */}
+          <Card className="stat-card p-4 space-y-3">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-[#D95B26]/15 border border-[#D95B26]/30 text-[#D95B26] flex items-center justify-center shrink-0">
+                  <Award className="w-4 h-4" />
+                </div>
+                <div>
+                  <h2 className="font-bold text-xs text-[#F4F4F0]">Sumar sello</h2>
+                  <p className="text-[11px] text-[#A1A1AA]">
+                    Ingresá el código de la tarjeta o escaneá el QR del cliente
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowStampModal(true)}
+                className="px-3.5 py-2 rounded-xl bg-[#D95B26] hover:bg-[#e06530] text-white flex items-center gap-1.5 text-xs font-bold transition-colors cursor-pointer shrink-0 shadow-sm"
+              >
+                <Award className="w-3.5 h-3.5" />
+                <span>Sumar sello</span>
+              </button>
+            </div>
           </Card>
         </div>
       </main>

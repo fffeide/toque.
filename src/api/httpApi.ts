@@ -685,6 +685,9 @@ class HttpApi implements ToqueApi {
   async createSale(data: {
     cartelId: string;
     amount: number;
+    cashTendered?: number;
+    changeDue?: number;
+    discountArs?: number;
     items?: SaleItem[];
     method: PaymentMethod;
   }): Promise<{ sale: Sale; qrData?: string; receipt?: Receipt }> {

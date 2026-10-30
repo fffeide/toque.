@@ -7,21 +7,25 @@ import {
   Lock,
   CheckCircle2,
   MapPin,
-  Award,
+  ChevronDown,
 } from 'lucide-react';
+import { ColorPreset, resolvePassBackgroundColor } from '../wallet/WalletPassCard';
 
 export interface DieCutTicketData {
   id: string;
   businessName: string;
   businessAddress?: string;
+  businessHours?: string;
   amountArs: number;
   subtotalArs?: number;
   discountArs?: number;
+  cashTendered?: number;
+  changeDue?: number;
   paymentMethod?: string;
   dateTime: string;
   stampAdded?: string;
   rewardNote?: string;
-  itemsSummary: string;
+  itemsSummary?: string;
   items?: Array<{ name: string; quantity?: number; price: number }>;
   barcodeDigits?: [string, string, string];
   colorPreset?: string;
@@ -32,14 +36,24 @@ export interface DieCutTicketProps {
   receiptId?: string;
   businessName?: string;
   businessAddress?: string;
+  businessHours?: string;
   total?: number;
   subtotal?: number;
   discount?: number;
+  cashTendered?: number;
+  changeDue?: number;
   createdAt?: string;
   items?: Array<{ name: string; quantity?: number; qty?: number; price: number }>;
   method?: string;
   stamps?: number;
   stampsRequired?: number;
+  rewardText?: string;
+  cardTitle?: string;
+  colorPreset?: ColorPreset;
+  customColor?: string;
+  logoUrl?: string;
+  memberName?: string;
+  memberCode?: string;
   isDark?: boolean;
   onViewPass?: () => void;
   onDownloadPdf?: () => void;
@@ -48,6 +62,8 @@ export interface DieCutTicketProps {
   isExpiredBlur?: boolean;
   onOpenToquecitos?: () => void;
   isRegisteredInHub?: boolean;
+  clubRegisterContent?: React.ReactNode;
+  hideClubSection?: boolean;
 }
 
 function formatPaymentMethodLabel(m?: string): string {
@@ -55,7 +71,8 @@ function formatPaymentMethodLabel(m?: string): string {
   const low = m.toLowerCase();
   if (low === 'mercadopago' || low === 'mp_qr' || low === 'qr') return 'QR / Billetera virtual';
   if (low === 'cash' || low === 'efectivo') return 'Efectivo';
-  if (low === 'card' || low === 'tarjeta') return 'Tarjeta';
+  if (low === 'card' || low === 'card_manual' || low === 'tarjeta') return 'Tarjeta';
+  if (low === 'transfer' || low === 'transferencia') return 'Transferencia';
   return m;
 }
 
@@ -64,14 +81,23 @@ export const DieCutTicket: React.FC<DieCutTicketProps> = ({
   receiptId,
   businessName,
   businessAddress,
+  businessHours,
   total,
   subtotal,
   discount,
+  cashTendered,
+  changeDue,
   createdAt,
   items,
   method,
   stamps,
   stampsRequired,
+  rewardText,
+  cardTitle,
+  colorPreset = 'dark',
+  customColor,
+  logoUrl,
+  memberName,
   isDark = true,
   onViewPass,
   onDownloadPdf,
@@ -80,14 +106,19 @@ export const DieCutTicket: React.FC<DieCutTicketProps> = ({
   isExpiredBlur = false,
   onOpenToquecitos,
   isRegisteredInHub = false,
+  clubRegisterContent,
+  hideClubSection = false,
 }) => {
   const [copiedFeedback, setCopiedFeedback] = useState(false);
+  const [clubJoinExpanded, setClubJoinExpanded] = useState(false);
 
-  const normalizedItems = (providedTicket?.items || items || []).map((it: any) => ({
-    name: it.name,
-    quantity: it.quantity ?? it.qty ?? 1,
-    price: it.price ?? 0,
-  }));
+  const normalizedItems = (providedTicket?.items || items || [])
+    .filter((it: any) => it && typeof it.name === 'string' && it.name.trim().length > 0)
+    .map((it: any) => ({
+      name: it.name.trim(),
+      quantity: it.quantity ?? it.qty ?? 1,
+      price: it.price ?? 0,
+    }));
 
   const formattedDate = (() => {
     if (providedTicket?.dateTime) return providedTicket.dateTime;
@@ -103,34 +134,67 @@ export const DieCutTicket: React.FC<DieCutTicketProps> = ({
     });
   })();
 
-  const effectiveStamps = typeof stamps === 'number' ? stamps : 4;
+  const effectiveStamps = typeof stamps === 'number' ? stamps : isRegisteredInHub ? 1 : 0;
   const effectiveTarget = stampsRequired || 5;
+  const effectiveReward = rewardText || providedTicket?.rewardNote || 'Beneficio al completar tus sellos';
+  const effectiveAddress = (providedTicket?.businessAddress ?? businessAddress ?? '').trim() || undefined;
+  const effectiveHours = (providedTicket?.businessHours ?? businessHours ?? '').trim() || undefined;
+  const effectiveCashTendered = providedTicket?.cashTendered ?? cashTendered;
+  const effectiveChangeDue = providedTicket?.changeDue ?? changeDue;
 
-  const ticket: DieCutTicketData = providedTicket || {
-    id: receiptId || 'rcp-burger-1001',
-    businessName: businessName || 'La Burger',
-    businessAddress: businessAddress,
-    amountArs: total ?? 0,
-    subtotalArs: subtotal,
-    discountArs: discount,
-    paymentMethod: formatPaymentMethodLabel(method),
-    dateTime: formattedDate,
-    stampAdded: `+1 sello, ${effectiveStamps} / ${effectiveTarget}`,
-    itemsSummary:
-      normalizedItems.length > 0
-        ? normalizedItems.map((i) => `${i.quantity || 1}x ${i.name}`).join(' · ')
-        : 'Consumo en local',
-    items: normalizedItems,
-  };
+  const ticket: DieCutTicketData = providedTicket
+    ? {
+        ...providedTicket,
+        businessAddress: effectiveAddress,
+        businessHours: effectiveHours,
+        cashTendered: effectiveCashTendered,
+        changeDue: effectiveChangeDue,
+        items: normalizedItems,
+      }
+    : {
+        id: receiptId || 'rcp-0001',
+        businessName: businessName || 'Comercio',
+        businessAddress: effectiveAddress,
+        businessHours: effectiveHours,
+        amountArs: total ?? 0,
+        subtotalArs: subtotal,
+        discountArs: discount,
+        cashTendered: effectiveCashTendered,
+        changeDue: effectiveChangeDue,
+        paymentMethod: formatPaymentMethodLabel(method),
+        dateTime: formattedDate,
+        stampAdded: isRegisteredInHub
+          ? `${effectiveStamps} / ${effectiveTarget} sellos`
+          : `Meta: ${effectiveTarget} sellos`,
+        items: normalizedItems,
+      };
 
-  const itemsTotalSum =
-    ticket.items && ticket.items.length > 0
-      ? ticket.items.reduce((acc, it) => acc + (it.price || 0) * (it.quantity || 1), 0)
-      : ticket.amountArs;
+  const hasItems = Boolean(ticket.items && ticket.items.length > 0);
+  const itemsTotalSum = hasItems
+    ? ticket.items!.reduce((acc, it) => acc + (it.price || 0) * (it.quantity || 1), 0)
+    : ticket.amountArs;
 
-  const computedSubtotal = ticket.subtotalArs ?? Math.max(itemsTotalSum, ticket.amountArs);
+  const computedSubtotal = ticket.subtotalArs ?? (hasItems ? itemsTotalSum : ticket.amountArs);
   const computedDiscount =
-    ticket.discountArs ?? Math.max(0, computedSubtotal - ticket.amountArs);
+    typeof ticket.discountArs === 'number' && ticket.discountArs > 0
+      ? ticket.discountArs
+      : hasItems && computedSubtotal > ticket.amountArs
+      ? computedSubtotal - ticket.amountArs
+      : 0;
+  const hasDiscount = computedDiscount > 0;
+
+  const isCashPayment =
+    (method || '').toLowerCase() === 'cash' ||
+    (ticket.paymentMethod || '').toLowerCase().includes('efectivo');
+  const hasCashChange =
+    isCashPayment &&
+    typeof ticket.cashTendered === 'number' &&
+    ticket.cashTendered > 0;
+  const calculatedChange = hasCashChange
+    ? Math.max(0, ticket.changeDue ?? ticket.cashTendered! - ticket.amountArs)
+    : 0;
+
+  const passBgColor = resolvePassBackgroundColor(colorPreset, customColor);
 
   const handleDownload = () => {
     if (onSaveImage) {
@@ -142,108 +206,161 @@ export const DieCutTicket: React.FC<DieCutTicketProps> = ({
       return;
     }
     try {
+      const itemsCount = hasItems ? Math.min(ticket.items!.length, 10) : 0;
+      const baseHeight =
+        520 +
+        (ticket.businessAddress ? 28 : 0) +
+        (ticket.businessHours ? 28 : 0) +
+        (hasItems ? 60 + itemsCount * 32 + 34 : 0) +
+        (hasDiscount ? 64 : 0) +
+        (hasCashChange ? 68 : 0);
+
       const canvas = document.createElement('canvas');
       canvas.width = 760;
-      canvas.height = 1080;
+      canvas.height = baseHeight;
       const ctx = canvas.getContext('2d');
       if (!ctx) return;
 
+      // Fondo igual al comprobante del Hub
+      ctx.fillStyle = '#0A0A0A';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
       ctx.fillStyle = '#141414';
-      ctx.fillRect(0, 0, 760, 1080);
-
-      ctx.fillStyle = '#2FB36A';
-      ctx.font = 'bold 22px Inter, sans-serif';
-      ctx.textAlign = 'center';
-      ctx.fillText('Cobro realizado', 380, 75);
-
-      ctx.fillStyle = '#FFFFFF';
-      ctx.font = 'bold 56px Inter, sans-serif';
-      ctx.fillText(`$${ticket.amountArs.toLocaleString('es-AR')}`, 380, 145);
-
-      ctx.fillStyle = '#A1A1AA';
-      ctx.font = '500 20px Inter, sans-serif';
-      ctx.fillText(ticket.dateTime, 380, 185);
-
-      ctx.fillStyle = '#FFFFFF';
-      ctx.font = 'bold 26px Inter, sans-serif';
-      ctx.fillText(ticket.businessName, 380, 235);
-      if (ticket.businessAddress) {
-        ctx.fillStyle = '#A1A1AA';
-        ctx.font = '500 18px Inter, sans-serif';
-        ctx.fillText(ticket.businessAddress, 380, 265);
-      }
-
-      ctx.strokeStyle = '#2E2E32';
-      ctx.setLineDash([8, 8]);
+      ctx.strokeStyle = '#242424';
+      ctx.lineWidth = 2;
       ctx.beginPath();
-      ctx.moveTo(60, 300);
-      ctx.lineTo(700, 300);
+      ctx.roundRect(28, 24, canvas.width - 56, canvas.height - 48, 28);
+      ctx.fill();
       ctx.stroke();
 
-      ctx.textAlign = 'left';
-      let y = 350;
-      ctx.fillStyle = '#8E8E93';
-      ctx.font = '600 18px Inter, sans-serif';
-      ctx.fillText(`Medio de pago: ${ticket.paymentMethod || formatPaymentMethodLabel(method)}`, 60, y);
-      y += 34;
-      ctx.fillText(`N.º de comprobante: ${ticket.id}`, 60, y);
-      y += 50;
+      let y = 78;
 
+      // Badge "Cobro realizado"
+      ctx.fillStyle = 'rgba(47, 179, 106, 0.15)';
+      ctx.beginPath();
+      ctx.roundRect(280, y - 24, 200, 34, 17);
+      ctx.fill();
+      ctx.fillStyle = '#2FB36A';
+      ctx.font = 'bold 16px Inter, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('✓ Cobro realizado', 380, y - 2);
+      y += 58;
+
+      // Monto total grande
       ctx.fillStyle = '#FFFFFF';
-      ctx.font = 'bold 20px Inter, sans-serif';
-      ctx.fillText('Detalle de ítems', 60, y);
-      y += 34;
-
-      const listToDraw =
-        ticket.items && ticket.items.length > 0
-          ? ticket.items
-          : [{ name: 'Consumo en local', quantity: 1, price: ticket.amountArs }];
-
-      for (const item of listToDraw.slice(0, 6)) {
-        ctx.textAlign = 'left';
-        ctx.fillStyle = '#E4E4E7';
-        ctx.font = '500 20px Inter, sans-serif';
-        ctx.fillText(`${item.quantity || 1}x ${item.name}`, 60, y);
-        ctx.textAlign = 'right';
-        ctx.fillText(
-          `$${((item.price || 0) * (item.quantity || 1)).toLocaleString('es-AR')}`,
-          700,
-          y
-        );
-        y += 32;
-      }
-
-      y += 20;
-      ctx.textAlign = 'left';
-      ctx.fillStyle = '#A1A1AA';
-      ctx.fillText('Subtotal', 60, y);
-      ctx.textAlign = 'right';
-      ctx.fillText(`$${computedSubtotal.toLocaleString('es-AR')}`, 700, y);
-      y += 30;
-
-      ctx.textAlign = 'left';
-      ctx.fillText('Descuentos', 60, y);
-      ctx.textAlign = 'right';
-      ctx.fillText(`-$${computedDiscount.toLocaleString('es-AR')}`, 700, y);
+      ctx.font = 'bold 54px Inter, sans-serif';
+      ctx.fillText(`$${ticket.amountArs.toLocaleString('es-AR')}`, 380, y);
       y += 36;
 
+      // Fecha y hora
+      ctx.fillStyle = '#9E9EA8';
+      ctx.font = '500 18px Inter, sans-serif';
+      ctx.fillText(ticket.dateTime, 380, y);
+      y += 28;
+
+      // Línea divisoria punteada
+      const drawDashedDivider = (posY: number) => {
+        ctx.save();
+        ctx.strokeStyle = '#2A2A2E';
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([6, 6]);
+        ctx.beginPath();
+        ctx.moveTo(64, posY);
+        ctx.lineTo(696, posY);
+        ctx.stroke();
+        ctx.restore();
+      };
+
+      drawDashedDivider(y);
+      y += 36;
+
+      const drawRow = (label: string, value: string, valueColor = '#FFFFFF', bold = false) => {
+        ctx.textAlign = 'left';
+        ctx.fillStyle = '#9E9EA8';
+        ctx.font = '500 18px Inter, sans-serif';
+        ctx.fillText(label, 64, y);
+        ctx.textAlign = 'right';
+        ctx.fillStyle = valueColor;
+        ctx.font = `${bold ? 'bold' : '600'} 18px Inter, sans-serif`;
+        ctx.fillText(value, 696, y);
+        y += 32;
+      };
+
+      drawRow('Comercio', ticket.businessName, '#FFFFFF', true);
+      if (ticket.businessAddress) {
+        drawRow('Dirección', ticket.businessAddress, '#D4D4D8');
+      }
+      if (ticket.businessHours) {
+        drawRow('Horarios', ticket.businessHours, '#D4D4D8');
+      }
+      drawRow('Medio de pago', ticket.paymentMethod || formatPaymentMethodLabel(method));
+      drawRow('N.º de comprobante', ticket.id);
+
+      y += 6;
+      drawDashedDivider(y);
+      y += 36;
+
+      // Solo dibujar Detalle de ítems si realmente hay ítems cargados
+      if (hasItems && ticket.items) {
+        ctx.textAlign = 'left';
+        ctx.fillStyle = '#9E9EA8';
+        ctx.font = '600 16px Inter, sans-serif';
+        ctx.fillText('Detalle de ítems', 64, y);
+        ctx.textAlign = 'right';
+        ctx.fillText('Importe', 696, y);
+        y += 30;
+
+        for (const item of ticket.items.slice(0, 10)) {
+          ctx.textAlign = 'left';
+          ctx.fillStyle = '#FFFFFF';
+          ctx.font = '500 18px Inter, sans-serif';
+          ctx.fillText(`${item.quantity || 1}x ${item.name}`, 64, y);
+          ctx.textAlign = 'right';
+          ctx.font = '600 18px Inter, sans-serif';
+          ctx.fillText(
+            `$${((item.price || 0) * (item.quantity || 1)).toLocaleString('es-AR')}`,
+            696,
+            y
+          );
+          y += 32;
+        }
+
+        y += 6;
+        drawDashedDivider(y);
+        y += 36;
+      }
+
+      // Solo dibujar Subtotal y Descuentos cuando correspondan
+      if (hasItems || hasDiscount) {
+        drawRow('Subtotal', `$${computedSubtotal.toLocaleString('es-AR')}`, '#D4D4D8');
+      }
+      if (hasDiscount) {
+        drawRow('Descuentos', `-$${computedDiscount.toLocaleString('es-AR')}`, '#2FB36A', true);
+      }
+
+      // Total
       ctx.textAlign = 'left';
       ctx.fillStyle = '#FFFFFF';
-      ctx.font = 'bold 24px Inter, sans-serif';
-      ctx.fillText('Total', 60, y);
+      ctx.font = 'bold 22px Inter, sans-serif';
+      ctx.fillText('Total', 64, y);
       ctx.textAlign = 'right';
-      ctx.fillStyle = '#2FB36A';
-      ctx.fillText(`$${ticket.amountArs.toLocaleString('es-AR')}`, 700, y);
-      y += 55;
+      ctx.fillStyle = '#FFFFFF';
+      ctx.fillText(`$${ticket.amountArs.toLocaleString('es-AR')}`, 696, y);
+      y += 34;
+
+      if (hasCashChange) {
+        drawRow('Pagó con', `$${ticket.cashTendered!.toLocaleString('es-AR')}`, '#D4D4D8');
+        drawRow('Vuelto', `$${calculatedChange.toLocaleString('es-AR')}`, '#2FB36A', true);
+      }
+
+      y += 8;
+      drawDashedDivider(y);
+      y += 38;
 
       ctx.textAlign = 'center';
-      ctx.fillStyle = '#2FB36A';
-      ctx.font = 'bold 22px Inter, sans-serif';
-      ctx.fillText(ticket.stampAdded || `+1 sello, ${effectiveStamps} / ${effectiveTarget}`, 380, y);
-
-      ctx.fillStyle = '#71717A';
-      ctx.font = '500 16px Inter, sans-serif';
-      ctx.fillText('Comprobante de compra. No es una factura.', 380, 1030);
+      ctx.fillStyle = '#9E9EA8';
+      ctx.font = '500 15px Inter, sans-serif';
+      ctx.fillText('Comprobante de compra. No es una factura.', 380, y);
 
       const a = document.createElement('a');
       a.href = canvas.toDataURL('image/png');
@@ -309,20 +426,20 @@ export const DieCutTicket: React.FC<DieCutTicketProps> = ({
       >
         {/* Comprobante completo estilo billetera virtual */}
         <div
-          className={`relative w-full rounded-3xl p-6 overflow-hidden transition-colors shadow-xl space-y-5 ${
+          className={`relative w-full rounded-3xl p-5 sm:p-6 overflow-hidden transition-colors shadow-xl space-y-4 ${
             isDark
               ? 'bg-[#141414] border border-[#242424] text-white'
               : 'bg-white border border-zinc-200/80 text-[#111111]'
           }`}
         >
           {/* 1. Estado ("Cobro realizado"), monto grande, fecha y hora */}
-          <div className="flex flex-col items-center text-center space-y-2 pb-4 border-b border-dashed border-current/15">
+          <div className="flex flex-col items-center text-center space-y-1.5 pb-4 border-b border-dashed border-current/15">
             <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#2FB36A]/15 border border-[#2FB36A]/30 text-[#2FB36A] text-xs font-bold">
-              <CheckCircle2 className="w-4 h-4" />
+              <CheckCircle2 className="w-3.5 h-3.5" />
               <span>Cobro realizado</span>
             </div>
 
-            <div className="text-4xl font-extrabold font-mono tracking-tight tabular-nums pt-1">
+            <div className="text-3xl sm:text-4xl font-extrabold font-mono tracking-tight tabular-nums pt-0.5">
               ${ticket.amountArs.toLocaleString('es-AR')}
             </div>
 
@@ -331,8 +448,8 @@ export const DieCutTicket: React.FC<DieCutTicketProps> = ({
             </p>
           </div>
 
-          {/* 2. Comercio (nombre y dirección si hay), medio de pago y número de comprobante */}
-          <div className="space-y-2.5 text-xs pb-4 border-b border-dashed border-current/15">
+          {/* 2. Comercio (solo datos reales configurados), medio de pago y número de comprobante */}
+          <div className="space-y-2 text-xs pb-4 border-b border-dashed border-current/15">
             <div className="flex items-start justify-between gap-3">
               <span className={isDark ? 'text-[#9E9EA8]' : 'text-zinc-500'}>Comercio</span>
               <div className="text-right">
@@ -345,6 +462,11 @@ export const DieCutTicket: React.FC<DieCutTicketProps> = ({
                   >
                     <MapPin className="w-3 h-3 text-[#D95B26] shrink-0" />
                     <span>{ticket.businessAddress}</span>
+                  </p>
+                )}
+                {ticket.businessHours && (
+                  <p className={`text-[11px] mt-0.5 ${isDark ? 'text-[#9E9EA8]' : 'text-zinc-500'}`}>
+                    {ticket.businessHours}
                   </p>
                 )}
               </div>
@@ -365,16 +487,16 @@ export const DieCutTicket: React.FC<DieCutTicketProps> = ({
             </div>
           </div>
 
-          {/* 3. Detalle de ítems con cantidad y precio */}
-          <div className="space-y-2.5 pb-4 border-b border-dashed border-current/15">
-            <div className="flex items-center justify-between text-[11px] font-semibold opacity-70">
-              <span>Detalle de ítems</span>
-              <span>Importe</span>
-            </div>
+          {/* 3. Detalle de ítems — SOLO se muestra si existen ítems reales cargados */}
+          {hasItems && (
+            <div className="space-y-2 pb-4 border-b border-dashed border-current/15">
+              <div className="flex items-center justify-between text-[11px] font-semibold opacity-70">
+                <span>Detalle de ítems</span>
+                <span>Importe</span>
+              </div>
 
-            <div className="space-y-2 text-xs">
-              {ticket.items && ticket.items.length > 0 ? (
-                ticket.items.map((item, index) => (
+              <div className="space-y-1.5 text-xs">
+                {ticket.items!.map((item, index) => (
                   <div key={index} className="flex items-center justify-between gap-2">
                     <span>
                       <strong className="font-mono">{item.quantity || 1}x</strong> {item.name}
@@ -383,71 +505,151 @@ export const DieCutTicket: React.FC<DieCutTicketProps> = ({
                       ${((item.price || 0) * (item.quantity || 1)).toLocaleString('es-AR')}
                     </span>
                   </div>
-                ))
-              ) : (
-                <div className="flex items-center justify-between gap-2">
-                  <span>1x {ticket.itemsSummary || 'Consumo en local'}</span>
-                  <span className="font-mono font-semibold">
-                    ${ticket.amountArs.toLocaleString('es-AR')}
-                  </span>
-                </div>
-              )}
+                ))}
+              </div>
             </div>
-          </div>
+          )}
 
-          {/* 4. Subtotal, descuentos y total */}
+          {/* 4. Subtotal (si hay ítems o descuento), Descuentos (solo si hay descuento), Total y Efectivo/Vuelto */}
           <div className="space-y-1.5 text-xs pb-4 border-b border-dashed border-current/15">
-            <div className="flex items-center justify-between">
-              <span className={isDark ? 'text-[#9E9EA8]' : 'text-zinc-500'}>Subtotal</span>
-              <span className="font-mono">${computedSubtotal.toLocaleString('es-AR')}</span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className={isDark ? 'text-[#9E9EA8]' : 'text-zinc-500'}>Descuentos</span>
-              <span className="font-mono text-[#2FB36A]">
-                -${computedDiscount.toLocaleString('es-AR')}
-              </span>
-            </div>
-            <div className="flex items-center justify-between pt-1.5 text-sm font-extrabold">
+            {(hasItems || hasDiscount) && (
+              <div className="flex items-center justify-between">
+                <span className={isDark ? 'text-[#9E9EA8]' : 'text-zinc-500'}>Subtotal</span>
+                <span className="font-mono">${computedSubtotal.toLocaleString('es-AR')}</span>
+              </div>
+            )}
+
+            {hasDiscount && (
+              <div className="flex items-center justify-between">
+                <span className={isDark ? 'text-[#9E9EA8]' : 'text-zinc-500'}>Descuentos</span>
+                <span className="font-mono text-[#2FB36A]">
+                  -${computedDiscount.toLocaleString('es-AR')}
+                </span>
+              </div>
+            )}
+
+            <div className="flex items-center justify-between pt-0.5 text-sm font-extrabold">
               <span>Total</span>
               <span className="font-mono text-base">
                 ${ticket.amountArs.toLocaleString('es-AR')}
               </span>
             </div>
-          </div>
 
-          {/* 5. Recuadro del sello sumado ("+1 sello, 4 / 5") */}
-          <div
-            className={`rounded-2xl p-3.5 flex items-center justify-between gap-3 ${
-              isDark
-                ? 'bg-[#0A0A0A] border border-[#242424]'
-                : 'bg-[#F5F6FA] border border-zinc-200/70'
-            }`}
-          >
-            <div className="flex items-center gap-3 min-w-0">
-              <div className="w-9 h-9 rounded-xl bg-[#D95B26]/15 border border-[#D95B26]/30 text-[#D95B26] flex items-center justify-center shrink-0">
-                <Award className="w-4 h-4" />
+            {hasCashChange && (
+              <div className="pt-2 mt-2 border-t border-current/10 space-y-1">
+                <div className="flex items-center justify-between">
+                  <span className={isDark ? 'text-[#9E9EA8]' : 'text-zinc-500'}>Pagó con</span>
+                  <span className="font-mono font-semibold">
+                    ${ticket.cashTendered!.toLocaleString('es-AR')}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className={isDark ? 'text-[#9E9EA8]' : 'text-zinc-500'}>Vuelto</span>
+                  <span className="font-mono font-bold text-[#2FB36A]">
+                    ${calculatedChange.toLocaleString('es-AR')}
+                  </span>
+                </div>
               </div>
-              <div className="min-w-0">
-                <p className="text-xs font-bold leading-tight truncate">{ticket.businessName}</p>
-                <p className="text-xs text-[#2FB36A] font-extrabold mt-0.5 truncate">
-                  {ticket.stampAdded || `+1 sello, ${effectiveStamps} / ${effectiveTarget}`}
-                </p>
-              </div>
-            </div>
-            {onViewPass && (
-              <button
-                type="button"
-                onClick={onViewPass}
-                className={`text-[11px] font-semibold px-3 py-1.5 rounded-xl transition-colors shrink-0 cursor-pointer ${
-                  isDark
-                    ? 'bg-[#1C1C22] text-white hover:bg-[#282830]'
-                    : 'bg-white text-zinc-800 shadow-sm'
-                }`}
-              >
-                Ver tarjeta
-              </button>
             )}
           </div>
+
+          {/* 5. Vista previa de la tarjeta de sellos del comercio en el comprobante + desplegable suave "Entrar al club" */}
+          {!hideClubSection && (
+            <div className="space-y-2.5">
+              <div
+                style={{ backgroundColor: passBgColor }}
+                className="rounded-2xl p-4 border border-white/15 text-white shadow-md space-y-3"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 min-w-0">
+                    {logoUrl ? (
+                      <img
+                        src={logoUrl}
+                        alt={ticket.businessName}
+                        className="w-7 h-7 rounded-lg object-cover bg-black/20 border border-white/10 shrink-0"
+                      />
+                    ) : null}
+                    <span className="text-xs font-semibold truncate">
+                      {cardTitle || `Tarjeta de sellos de ${ticket.businessName}`}
+                    </span>
+                  </div>
+                  {memberName ? (
+                    <div className="text-right shrink-0">
+                      <span className="block text-[9px] text-white/60 font-semibold">SOCIO</span>
+                      <span className="block text-[11px] font-medium truncate max-w-[95px]">
+                        {memberName}
+                      </span>
+                    </div>
+                  ) : null}
+                </div>
+
+                <div className="flex items-end justify-between gap-3">
+                  <div>
+                    <div className="text-[9px] font-semibold tracking-wider text-white/65">
+                      SELLOS
+                    </div>
+                    <div className="text-xl font-bold leading-none mt-0.5">
+                      {effectiveStamps} / {effectiveTarget}
+                    </div>
+                  </div>
+                  <div className="text-right min-w-0 flex-1">
+                    <div className="text-[9px] font-semibold tracking-wider text-white/65">
+                      PREMIO
+                    </div>
+                    <div className="text-xs font-medium text-white/95 truncate mt-0.5">
+                      {effectiveReward}
+                    </div>
+                  </div>
+                </div>
+
+                {!isRegisteredInHub ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (clubRegisterContent) {
+                        setClubJoinExpanded((prev) => !prev);
+                      } else if (onViewPass) {
+                        onViewPass();
+                      }
+                    }}
+                    className="w-full py-2.5 px-3.5 rounded-xl bg-[#D95B26] hover:bg-[#E56732] text-white text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-sm"
+                  >
+                    <span>Entrar al club</span>
+                    {clubRegisterContent && (
+                      <ChevronDown
+                        className={`w-4 h-4 transition-transform duration-300 ${
+                          clubJoinExpanded ? 'rotate-180' : ''
+                        }`}
+                      />
+                    )}
+                  </button>
+                ) : (
+                  onViewPass && (
+                    <button
+                      type="button"
+                      onClick={onViewPass}
+                      className="w-full py-2 px-3 rounded-xl bg-white/15 hover:bg-white/20 text-white text-xs font-semibold transition-colors cursor-pointer"
+                    >
+                      Ver mi tarjeta
+                    </button>
+                  )
+                )}
+              </div>
+
+              {/* Desplegable suave con el formulario de alta al club */}
+              {!isRegisteredInHub && clubRegisterContent && (
+                <div
+                  className={`grid transition-all duration-300 ease-out overflow-hidden ${
+                    clubJoinExpanded
+                      ? 'grid-rows-[1fr] opacity-100 mt-2'
+                      : 'grid-rows-[0fr] opacity-0'
+                  }`}
+                >
+                  <div className="min-h-0">{clubRegisterContent}</div>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* 6. Pie obligatorio */}
           <p
@@ -464,7 +666,7 @@ export const DieCutTicket: React.FC<DieCutTicketProps> = ({
           <button
             type="button"
             onClick={handleDownload}
-            className={`flex items-center justify-center gap-2 py-3 px-4 rounded-2xl text-xs font-bold border transition-colors cursor-pointer ${
+            className={`flex items-center justify-center gap-2 py-2.5 px-4 rounded-2xl text-xs font-bold border transition-colors cursor-pointer ${
               isDark
                 ? 'bg-[#141414] border-[#242424] hover:bg-[#1C1C1F] text-white'
                 : 'bg-white border-zinc-200 hover:bg-zinc-50 text-zinc-800'
@@ -476,7 +678,7 @@ export const DieCutTicket: React.FC<DieCutTicketProps> = ({
           <button
             type="button"
             onClick={handleShare}
-            className={`flex items-center justify-center gap-2 py-3 px-4 rounded-2xl text-xs font-bold border transition-colors cursor-pointer ${
+            className={`flex items-center justify-center gap-2 py-2.5 px-4 rounded-2xl text-xs font-bold border transition-colors cursor-pointer ${
               isDark
                 ? 'bg-[#141414] border-[#242424] hover:bg-[#1C1C1F] text-white'
                 : 'bg-white border-zinc-200 hover:bg-zinc-50 text-zinc-800'
@@ -509,7 +711,7 @@ export const DieCutTicket: React.FC<DieCutTicketProps> = ({
               <button
                 type="button"
                 onClick={onOpenToquecitos}
-                className="w-full py-3 px-4 rounded-2xl bg-[#D95B26] hover:bg-[#E56732] text-white text-xs font-semibold flex items-center justify-center gap-2 shadow-lg transition-all cursor-pointer"
+                className="w-full py-2.5 px-4 rounded-2xl bg-[#D95B26] hover:bg-[#E56732] text-white text-xs font-semibold flex items-center justify-center gap-2 shadow-lg transition-all cursor-pointer"
               >
                 <Sparkles className="w-4 h-4" />
                 <span>Ingresar a Toquecitos para verlo</span>

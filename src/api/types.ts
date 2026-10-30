@@ -137,6 +137,7 @@ export interface HubConfig {
   showToqueFooter: boolean;
   planPaid?: boolean;
   networkEnabled?: boolean;
+  hubConfigured?: boolean;
 }
 
 export interface Cartel {
@@ -184,6 +185,9 @@ export interface Sale {
   cartelName?: string;
   receiptId?: string;
   amount: number;
+  cashTendered?: number;
+  changeDue?: number;
+  discountArs?: number;
   currency: 'ARS';
   items: SaleItem[];
   method: PaymentMethod;
@@ -206,12 +210,19 @@ export interface Receipt {
   status: ReceiptStatus;
   expiresAt: string;
   businessName: string;
+  businessAddress?: string;
+  businessHours?: string;
   items: SaleItem[];
   total: number;
+  cashTendered?: number;
+  changeDue?: number;
+  discountArs?: number;
   currency: 'ARS';
   method: PaymentMethod;
   createdAt: string;
   claimedAt?: string;
+  claimedByDeviceId?: string;
+  claimedByAccountId?: string;
 }
 
 export type ClubRuleType = 'per_amount' | 'per_visit';
@@ -584,9 +595,13 @@ export interface ConsumerReceipt {
   tenantId: string;
   businessId?: string;
   merchantName: string;
+  businessAddress?: string;
+  businessHours?: string;
   cartelCode?: string;
   amountArs: number;
   total?: number;
+  cashTendered?: number;
+  changeDue?: number;
   currency?: string;
   discountSavedArs: number;
   category: string;

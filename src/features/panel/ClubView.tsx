@@ -19,12 +19,9 @@ import {
   Download,
   Search,
   QrCode,
-  Gift,
   Plus,
   Minus,
   X,
-  Mail,
-  Send,
   Barcode,
   CheckCircle2,
   ShieldAlert,
@@ -36,9 +33,9 @@ import {
   Image as ImageIcon,
   Save,
   Smartphone,
+  Lock,
 } from 'lucide-react';
 
-type StudioSubTab = 'content' | 'barcode' | 'style';
 type WalletPreviewPlatform = 'apple' | 'google';
 type PresetColorKey = 'dark' | 'blue' | 'green' | 'red' | 'purple' | 'orange';
 
@@ -50,6 +47,14 @@ const PRESET_HEX_MAP: Record<PresetColorKey, string> = {
   purple: '#4C1D95',
   orange: '#D95B26',
 };
+
+function formatShortCodeInput(raw: string): string {
+  const alnum = raw.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8);
+  if (alnum.length > 4) {
+    return `${alnum.slice(0, 4)}-${alnum.slice(4)}`;
+  }
+  return alnum;
+}
 
 export const ClubView: React.FC = () => {
   const { user, business } = useAuth();
@@ -72,7 +77,7 @@ export const ClubView: React.FC = () => {
     return lastInitial ? `${firstName} ${lastInitial}.` : firstName;
   };
 
-  const [activeTab, setActiveTab] = useState<'socios' | 'diseno' | 'avisos'>('socios');
+  const [activeTab, setActiveTab] = useState<'socios' | 'diseno'>('socios');
   const [config, setConfig] = useState<ClubConfig | null>(null);
   const [cards, setCards] = useState<ClubConfig[]>([]);
   const [members, setMembers] = useState<ClubMember[]>([]);
@@ -83,46 +88,34 @@ export const ClubView: React.FC = () => {
   const [search, setSearch] = useState('');
   const [selectedLocalId, setSelectedLocalId] = useState('all');
 
-  // Lector de Código de Barras / Escáner Pistola USB/Bluetooth (<1s con Enter)
+  // Lector de Código Corto (auto-formatea el guión central ABCD-1234)
   const [barcodeQuery, setBarcodeQuery] = useState('');
   const [scanningFast, setScanningFast] = useState(false);
   const [lastScannedMember, setLastScannedMember] = useState<ClubMember | null>(null);
 
   // =========================================================================
-  // ESTUDIO DE TARJETA WALLETWALLET (3 Pestañas: Contenido, Código, Estilo)
+  // CONFIGURACIÓN SIMPLE Y UNIFICADA DE LA TARJETA (8 CAMPOS)
   // =========================================================================
-  const [studioTab, setStudioTab] = useState<StudioSubTab>('content');
   const [previewPlatform, setPreviewPlatform] = useState<WalletPreviewPlatform>('apple');
   const [savingConfig, setSavingConfig] = useState(false);
 
-  // Pestaña 1: Contenido (Content)
+  // 1. Nombre de tarjeta
   const [logoText, setLogoText] = useState('');
+  // 2. Nombre del comercio (predeterminado con el nombre del comercio, editable)
   const [organizationName, setOrganizationName] = useState('');
-  const [headerFields, setHeaderFields] = useState<Array<{ label: string; value: string }>>([]);
-  const [primaryFields, setPrimaryFields] = useState<Array<{ label: string; value: string }>>([
-    { label: 'SELLOS', value: '1 / 10' },
-  ]);
-  const [secondaryFields, setSecondaryFields] = useState<Array<{ label: string; value: string }>>([
-    { label: 'PREMIO', value: '' },
-    { label: 'SOCIO', value: '' },
-  ]);
+  // 3. Meta de sellos
   const [targetStamps, setTargetStamps] = useState(10);
+  // 4. Premio
+  const [rewardText, setRewardText] = useState('');
+  // 5. Valor del premio (Opcional)
   const [rewardValueArs, setRewardValueArs] = useState<number>(0);
-  const [howToEarn, setHowToEarn] = useState('1 sello por visita o compra');
-
-  // Pestaña 2: Código (Barcode)
-  const [barcodeFormat, setBarcodeFormat] = useState<'QR' | 'CODE128' | 'PDF417' | 'AZTEC'>('QR');
-  const [barcodeValue, setBarcodeValue] = useState('');
-  const [overrideBarcodeText, setOverrideBarcodeText] = useState(false);
-  const [barcodeAltText, setBarcodeAltText] = useState('');
-  const [expirationPolicy, setExpirationPolicy] = useState('No vencen');
-
-  // Pestaña 3: Estilo (Style)
+  // 6. Logo (Opcional)
+  const [logoUrl, setLogoUrl] = useState('');
+  // 7. Color (Opcional)
   const [colorPreset, setColorPreset] = useState<PresetColorKey>('dark');
   const [customColor, setCustomColor] = useState('');
-  const [logoUrl, setLogoUrl] = useState('');
-  const [wideLogoUrl, setWideLogoUrl] = useState('');
-  const [iconUrl, setIconUrl] = useState('');
+  // 8. Vencimiento (Opcional)
+  const [expirationPolicy, setExpirationPolicy] = useState('No vencen');
 
   // Modal de resultado al finalizar el proceso: Muestra el QR y el Link para compartir
   const [completedCardResult, setCompletedCardResult] = useState<{
@@ -130,7 +123,6 @@ export const ClubView: React.FC = () => {
     hubLink: string;
     walletShareUrl?: string;
     serialNumber?: string;
-    barcodeValue: string;
   } | null>(null);
 
   // Modal de Nueva Tarjeta
@@ -141,12 +133,6 @@ export const ClubView: React.FC = () => {
   const [newCardPreset, setNewCardPreset] = useState<PresetColorKey>('dark');
   const [creatingCard, setCreatingCard] = useState(false);
 
-  // Envío de Avisos por Email
-  const [broadcastHeadline, setBroadcastHeadline] = useState('');
-  const [broadcastMessage, setBroadcastMessage] = useState('');
-  const [broadcastCtaLabel, setBroadcastCtaLabel] = useState('Ver mi tarjeta y beneficio');
-  const [sendingBroadcast, setSendingBroadcast] = useState(false);
-
   // Modal de Anulación / Ajuste Manual (con motivo obligatorio >= 10 caracteres)
   const [adjustTarget, setAdjustTarget] = useState<ClubMember | null>(null);
   const [adjustMode, setAdjustMode] = useState<'void' | 'adjust'>('void');
@@ -154,54 +140,31 @@ export const ClubView: React.FC = () => {
   const [adjustReason, setAdjustReason] = useState('');
   const [submittingAdjust, setSubmittingAdjust] = useState(false);
 
-  // Modal de Exportar CSV con motivo obligatorio (solo Dueño)
-  const [showExportModal, setShowExportModal] = useState(false);
-  const [exportReason, setExportReason] = useState('');
-  const [submittingExport, setSubmittingExport] = useState(false);
-
   // Modal de Borrar Socio con motivo obligatorio (solo Dueño)
   const [deleteTarget, setDeleteTarget] = useState<ClubMember | null>(null);
   const [deleteReason, setDeleteReason] = useState('');
   const [submittingDelete, setSubmittingDelete] = useState(false);
 
   const syncFormWithConfig = (cfg: ClubConfig) => {
-    const bizName = business?.name || '';
-    const defaultTitle = cfg.logoText || cfg.loyaltyTitle || (bizName ? `Tarjeta de sellos de ${bizName}` : '');
-    const defaultReward = cfg.loyaltyReward || cfg.rewardText || '';
+    const bizName = business?.name || 'La Burger';
+    const defaultTitle =
+      cfg.logoText || cfg.loyaltyTitle || `Tarjeta de sellos de ${bizName}`;
+    const defaultReward =
+      cfg.loyaltyReward ||
+      cfg.rewardText ||
+      cfg.secondaryFields?.find((f) => f.label.toUpperCase().includes('PREMIO'))?.value ||
+      'Beneficio al completar tus sellos';
     const stampsReq = cfg.targetStamps || cfg.stampsRequired || 10;
 
     setLogoText(defaultTitle);
     setOrganizationName(cfg.organizationName || bizName);
     setTargetStamps(stampsReq);
+    setRewardText(defaultReward);
     setRewardValueArs(cfg.rewardValueArs ?? 0);
-    setHowToEarn(cfg.howToEarn || '1 sello por visita o compra');
-
-    setHeaderFields(Array.isArray(cfg.headerFields) ? [...cfg.headerFields] : []);
-    setPrimaryFields(
-      Array.isArray(cfg.primaryFields) && cfg.primaryFields.length > 0
-        ? [...cfg.primaryFields]
-        : [{ label: 'SELLOS', value: `1 / ${stampsReq}` }]
-    );
-    setSecondaryFields(
-      Array.isArray(cfg.secondaryFields) && cfg.secondaryFields.length > 0
-        ? [...cfg.secondaryFields]
-        : [
-            { label: 'PREMIO', value: defaultReward },
-            { label: 'SOCIO', value: bizName },
-          ]
-    );
-
-    setBarcodeFormat(cfg.barcodeFormat || 'QR');
-    setBarcodeValue(cfg.barcodeValue || cfg.id || '');
-    setOverrideBarcodeText(Boolean(cfg.barcodeAltText));
-    setBarcodeAltText(cfg.barcodeAltText || '');
-    setExpirationPolicy(cfg.expirationPolicy || 'No vencen');
-
-    setColorPreset((cfg.colorPreset as PresetColorKey) || 'dark');
-    setCustomColor(cfg.customColor || cfg.cardThemeColor || cfg.brandColor || '');
     setLogoUrl(cfg.logoUrl || '');
-    setWideLogoUrl(cfg.wideLogoUrl || '');
-    setIconUrl(cfg.iconUrl || '');
+    setColorPreset((cfg.colorPreset as PresetColorKey) || 'dark');
+    setCustomColor(cfg.customColor || '');
+    setExpirationPolicy(cfg.expirationPolicy || 'No vencen');
   };
 
   const loadData = async () => {
@@ -241,7 +204,6 @@ export const ClubView: React.FC = () => {
 
   const planLimits = getPlanLimits(planState?.planId || planState?.status);
   const canCreateMoreCards = cards.length < planLimits.maxCards;
-  const isFreePlan = planState?.status === 'free' || planState?.planId === 'free';
 
   const activeCartelCode = locals[0]?.code || 'BURGER01';
   const publicHubUrl =
@@ -269,7 +231,6 @@ export const ClubView: React.FC = () => {
     reader.readAsDataURL(file);
   };
 
-  // Seleccionar una de las tarjetas creadas
   const handleSelectCard = async (cardId: string) => {
     try {
       const selected = await api.selectClubCard(cardId);
@@ -281,32 +242,31 @@ export const ClubView: React.FC = () => {
     }
   };
 
-  // Guardar y sincronizar la tarjeta en el Estudio WalletWallet + mostrar QR y Link al terminar
+  // Guardar la tarjeta unificada + mostrar QR y Link al terminar
   const handleSaveConfig = async (e: React.FormEvent) => {
     e.preventDefault();
-    const cleanTitle =
-      logoText.trim() || `Tarjeta de sellos de ${business?.name || 'Mi Comercio'}`;
-    const rewardFromFields =
-      secondaryFields.find((f) => f.label.toUpperCase().includes('PREMIO'))?.value?.trim() ||
-      secondaryFields[0]?.value?.trim() ||
-      'Beneficio al completar tus sellos';
+    const cleanOrg = organizationName.trim() || business?.name || 'Mi Comercio';
+    const cleanTitle = logoText.trim() || `Tarjeta de sellos de ${cleanOrg}`;
+    const cleanReward = rewardText.trim() || 'Beneficio al completar tus sellos';
+
+    // Etiquetas fijas y no editables: SELLOS, PREMIO, SOCIO
+    const fixedPrimaryFields = [{ label: 'SELLOS', value: `1 / ${targetStamps}` }];
+    const fixedSecondaryFields = [
+      { label: 'PREMIO', value: cleanReward },
+      { label: 'SOCIO', value: cleanOrg },
+    ];
 
     try {
       setSavingConfig(true);
-
-      const cleanPrimary = primaryFields.filter((f) => f.label.trim() || f.value.trim());
-      const cleanSecondary = secondaryFields.filter((f) => f.label.trim() || f.value.trim());
-      const cleanHeader = headerFields.filter((f) => f.label.trim() || f.value.trim());
-      const finalBarcodeValue = barcodeValue.trim() || config?.id || `card-${Date.now().toString(36)}`;
 
       const updated = await api.updateClubConfig({
         id: config?.id,
         name: cleanTitle,
         loyaltyTitle: cleanTitle,
         logoText: cleanTitle,
-        organizationName: organizationName.trim() || business?.name || '',
-        rewardText: rewardFromFields,
-        loyaltyReward: rewardFromFields,
+        organizationName: cleanOrg,
+        rewardText: cleanReward,
+        loyaltyReward: cleanReward,
         rewardValueArs: Math.max(0, Number(rewardValueArs) || 0),
         targetStamps,
         stampsRequired: targetStamps,
@@ -315,41 +275,35 @@ export const ClubView: React.FC = () => {
         colorPreset,
         customColor: customColor.trim() || undefined,
         barcodeFormat: 'QR',
-        barcodeValue: finalBarcodeValue,
-        barcodeAltText: '',
         logoUrl: logoUrl.trim() || undefined,
-        wideLogoUrl: wideLogoUrl.trim() || undefined,
-        iconUrl: iconUrl.trim() || undefined,
-        headerFields: cleanHeader,
-        primaryFields: cleanPrimary,
-        secondaryFields: cleanSecondary,
-        howToEarn: howToEarn.trim(),
+        headerFields: [],
+        primaryFields: fixedPrimaryFields,
+        secondaryFields: fixedSecondaryFields,
         expirationPolicy,
       });
 
       const passRes = await api
         .createWalletPass({
           cartelCode: activeCartelCode,
-          memberId: updated.id || finalBarcodeValue,
-          memberCode: finalBarcodeValue,
-          customerName: organizationName.trim() || business?.name || 'Socio',
+          memberId: updated.id || 'K7M2-9XQ4',
+          memberCode: 'K7M2-9XQ4',
+          customerName: cleanOrg,
           stamps: 1,
+          stampsRequired: targetStamps,
           logoText: cleanTitle,
-          organizationName: organizationName.trim() || business?.name,
-          barcodeFormat,
-          barcodeValue: finalBarcodeValue,
-          barcodeAltText: overrideBarcodeText ? barcodeAltText.trim() : undefined,
+          organizationName: cleanOrg,
+          rewardText: cleanReward,
+          barcodeFormat: 'QR',
+          barcodeValue: 'K7M2-9XQ4',
+          barcodeAltText: 'K7M2-9XQ4',
           colorPreset,
           color:
             customColor.trim() && /^#[0-9A-Fa-f]{6}$/.test(customColor.trim())
               ? customColor.trim()
               : undefined,
           logoURL: logoUrl.trim() || undefined,
-          wideLogoURL: wideLogoUrl.trim() || undefined,
-          iconURL: iconUrl.trim() || undefined,
-          headerFields: cleanHeader,
-          primaryFields: cleanPrimary,
-          secondaryFields: cleanSecondary,
+          primaryFields: fixedPrimaryFields,
+          secondaryFields: fixedSecondaryFields,
           serialNumber: config?.walletSerial,
           isUpdate: Boolean(config?.walletSerial),
         })
@@ -369,13 +323,11 @@ export const ClubView: React.FC = () => {
       const allCards = await api.listClubCards();
       setCards(allCards);
 
-      // Mostrar modal con el QR y Link al terminar el proceso
       setCompletedCardResult({
         cardTitle: cleanTitle,
         hubLink: publicHubUrl,
         walletShareUrl: passRes?.shareUrl || passRes?.appleWalletUrl,
         serialNumber: passRes?.serialNumber || passRes?.passId,
-        barcodeValue: finalBarcodeValue,
       });
 
       showToast('Tarjeta guardada y lista para compartir', 'success');
@@ -386,30 +338,28 @@ export const ClubView: React.FC = () => {
     }
   };
 
-  // Crear nueva tarjeta de sellos + sincronizar con WalletWallet + mostrar QR y Link
   const handleCreateCard = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newCardTitle.trim() || !newCardReward.trim()) return;
     try {
       setCreatingCard(true);
       const presetColorHex = PRESET_HEX_MAP[newCardPreset] || '#141418';
-      const generatedBarcode = `card-${Date.now().toString(36)}`;
+      const cleanOrg = business?.name || 'Mi Comercio';
       const primary = [{ label: 'SELLOS', value: `1 / ${newCardStamps}` }];
       const secondary = [
         { label: 'PREMIO', value: newCardReward.trim() },
-        { label: 'SOCIO', value: business?.name || 'Socio' },
+        { label: 'SOCIO', value: cleanOrg },
       ];
 
       const created = await api.createClubCard({
         loyaltyTitle: newCardTitle.trim(),
         logoText: newCardTitle.trim(),
-        organizationName: business?.name || '',
+        organizationName: cleanOrg,
         rewardText: newCardReward.trim(),
         stampsRequired: newCardStamps,
         brandColor: presetColorHex,
         colorPreset: newCardPreset,
         barcodeFormat: 'QR',
-        barcodeValue: generatedBarcode,
         primaryFields: primary,
         secondaryFields: secondary,
       });
@@ -417,14 +367,17 @@ export const ClubView: React.FC = () => {
       const passRes = await api
         .createWalletPass({
           cartelCode: activeCartelCode,
-          memberId: created.id || generatedBarcode,
-          memberCode: generatedBarcode,
-          customerName: business?.name || 'Socio',
+          memberId: created.id || 'K7M2-9XQ4',
+          memberCode: 'K7M2-9XQ4',
+          customerName: cleanOrg,
           stamps: 1,
+          stampsRequired: newCardStamps,
           logoText: newCardTitle.trim(),
-          organizationName: business?.name || undefined,
+          organizationName: cleanOrg,
+          rewardText: newCardReward.trim(),
           barcodeFormat: 'QR',
-          barcodeValue: generatedBarcode,
+          barcodeValue: 'K7M2-9XQ4',
+          barcodeAltText: 'K7M2-9XQ4',
           colorPreset: newCardPreset,
           primaryFields: primary,
           secondaryFields: secondary,
@@ -440,13 +393,11 @@ export const ClubView: React.FC = () => {
       setNewCardReward('');
       setActiveTab('diseno');
 
-      // Mostrar el QR y el Link al finalizar la creación
       setCompletedCardResult({
         cardTitle: created.loyaltyTitle || newCardTitle.trim(),
         hubLink: publicHubUrl,
         walletShareUrl: passRes?.shareUrl || passRes?.appleWalletUrl,
         serialNumber: passRes?.serialNumber || passRes?.passId,
-        barcodeValue: generatedBarcode,
       });
 
       showToast('Tarjeta creada. Compartí el QR o el link con tus clientes.', 'success');
@@ -571,38 +522,6 @@ export const ClubView: React.FC = () => {
     }
   };
 
-  const handleExportMembersCsvSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!isOwner) {
-      showToast('Solo el dueño puede exportar la lista de socios.', 'error');
-      return;
-    }
-    if (exportReason.trim().length < 10) {
-      showToast('Escribí el motivo para exportar (mínimo 10 caracteres).', 'error');
-      return;
-    }
-    try {
-      setSubmittingExport(true);
-      const csv = await api.exportClubMembersCsv(exportReason.trim());
-      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = 'socios-tarjetas-toque.csv';
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-      setShowExportModal(false);
-      setExportReason('');
-      showToast('Listado exportado en CSV y registrado en correcciones.', 'success');
-    } catch (err: any) {
-      showToast(err?.message || 'Error al exportar socios', 'error');
-    } finally {
-      setSubmittingExport(false);
-    }
-  };
-
   const handleDeleteMemberSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!deleteTarget) return;
@@ -625,56 +544,6 @@ export const ClubView: React.FC = () => {
       showToast(err?.message || 'No se pudo borrar el socio', 'error');
     } finally {
       setSubmittingDelete(false);
-    }
-  };
-
-  const handleSendBroadcast = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!isOwner) {
-      showToast('Solo el dueño puede enviar y configurar avisos.', 'error');
-      return;
-    }
-    if (isFreePlan) {
-      showToast('El envío masivo por email está disponible en el Plan Pago.', 'error');
-      return;
-    }
-
-    const consented = members.filter((m) => m.marketingConsent && !m.anonymous && !m.isMinor);
-    if (consented.length === 0) {
-      showToast('Todavía no hay socios suscriptos a avisos comerciales.', 'error');
-      return;
-    }
-
-    try {
-      setSendingBroadcast(true);
-      const res = await fetch('/api/club/broadcast', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          planStatus: planState?.status || 'trial',
-          businessName: business?.name || 'Mi Comercio',
-          localCode: activeCartelCode,
-          headline: broadcastHeadline.trim(),
-          messageBody: broadcastMessage.trim(),
-          ctaLabel: broadcastCtaLabel.trim() || 'Ver mi tarjeta y beneficio',
-          recipients: consented.map((m) => ({
-            email: m.email || m.contact,
-            name: m.name || 'Socio',
-            consent: m.marketingConsent,
-          })),
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.error || 'Error al enviar el aviso');
-      }
-      setBroadcastHeadline('');
-      setBroadcastMessage('');
-      showToast(`Aviso enviado a ${data.sentCount || consented.length} socio(s)`, 'success');
-    } catch (err: any) {
-      showToast(err?.message || 'No se pudo enviar el aviso.', 'error');
-    } finally {
-      setSendingBroadcast(false);
     }
   };
 
@@ -722,10 +591,6 @@ export const ClubView: React.FC = () => {
     );
   }
 
-  const consentedMembersCount = members.filter(
-    (m) => m.marketingConsent && !m.anonymous && !m.isMinor
-  ).length;
-
   const returningMembersCount = members.filter(
     (m) => (m.stamps || 0) > 1 || (m.rewardsRedeemed || 0) > 0
   ).length;
@@ -737,22 +602,23 @@ export const ClubView: React.FC = () => {
     if (selectedLocalId !== 'all' && m.localId !== selectedLocalId) return false;
     const q = search.trim().toLowerCase();
     if (!q) return true;
+    const qNoHyphen = q.replace(/-/g, '');
+    const memberShort = (m.shortCode || m.memberCode || '').toLowerCase();
+    const memberShortNoHyphen = memberShort.replace(/-/g, '');
     if (isCashier) {
       return (
         formatMemberNameForRole(m.name).toLowerCase().includes(q) ||
-        (m.shortCode || '').toLowerCase().includes(q) ||
-        (m.memberCode || '').toLowerCase().includes(q)
+        memberShort.includes(q) ||
+        (qNoHyphen.length > 0 && memberShortNoHyphen.includes(qNoHyphen))
       );
     }
     return (
       (m.name || '').toLowerCase().includes(q) ||
-      (m.shortCode || '').toLowerCase().includes(q) ||
-      (m.memberCode || '').toLowerCase().includes(q) ||
+      memberShort.includes(q) ||
+      (qNoHyphen.length > 0 && memberShortNoHyphen.includes(qNoHyphen)) ||
       (m.maskedEmail || '').toLowerCase().includes(q)
     );
   });
-
-  const previewBarcodeText = barcodeValue.trim() || config?.id || 'CARD-01';
 
   return (
     <div className="space-y-6 pb-16 text-sm">
@@ -765,7 +631,7 @@ export const ClubView: React.FC = () => {
               ? 'Vista de cajero: nombre con inicial, sellos y premios (sin correo ni cumpleaños).'
               : isManager
               ? 'Vista de encargado: lista de socios con mail parcialmente oculto, cumpleaños y anulaciones con motivo.'
-              : 'Vista de dueño: gestión completa de socios, exportación con motivo, avisos y diseño de tarjeta.'}
+              : 'Vista de dueño: gestión de socios y configuración unificada de tu tarjeta de sellos.'}
           </p>
         </div>
 
@@ -802,19 +668,6 @@ export const ClubView: React.FC = () => {
               >
                 Configurar Tarjeta ({cards.length})
               </button>
-              {isOwner && (
-                <button
-                  type="button"
-                  onClick={() => setActiveTab('avisos')}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer ${
-                    activeTab === 'avisos'
-                      ? 'bg-[#D95B26] text-white'
-                      : 'text-[#9E9EA8] hover:text-white'
-                  }`}
-                >
-                  Avisos
-                </button>
-              )}
             </div>
           )}
 
@@ -826,20 +679,6 @@ export const ClubView: React.FC = () => {
               <ShieldAlert className="w-3.5 h-3.5 text-[#BEC8FF]" />
               <span>Correcciones</span>
             </Link>
-          )}
-
-          {isOwner && (
-            <button
-              type="button"
-              onClick={() => {
-                setExportReason('');
-                setShowExportModal(true);
-              }}
-              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-[#141418] hover:bg-[#1C1C22] border border-[#282830] text-xs font-semibold text-[#F4F4F6] cursor-pointer"
-            >
-              <Download className="w-3.5 h-3.5 text-[#BEC8FF]" />
-              <span>Exportar CSV</span>
-            </button>
           )}
         </div>
       </div>
@@ -898,7 +737,6 @@ export const ClubView: React.FC = () => {
                   hubLink: publicHubUrl,
                   walletShareUrl: config?.shareUrl,
                   serialNumber: config?.walletSerial,
-                  barcodeValue: previewBarcodeText,
                 })
               }
               className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#2FB36A]/15 hover:bg-[#2FB36A]/25 border border-[#2FB36A]/40 text-xs font-bold text-[#2FB36A] cursor-pointer"
@@ -934,7 +772,7 @@ export const ClubView: React.FC = () => {
       )}
 
       {/* =================================================================== */}
-      {/* MODULO 1: LECTOR DE PISTOLA RÁPIDO (<1s) + TABLA DE SOCIOS          */}
+      {/* MODULO 1: LECTOR DE CÓDIGO CORTO + TABLA DE SOCIOS                  */}
       {/* =================================================================== */}
       {activeTab === 'socios' && (
         <div className="space-y-4">
@@ -945,7 +783,7 @@ export const ClubView: React.FC = () => {
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="flex items-center gap-2 text-xs font-bold text-[#D95B26]">
                 <Barcode className="w-4 h-4" />
-                <span>Ingresar código corto (ej. K7M2-9XQ4) o escanear con lector</span>
+                <span>Ingresar código corto (el guión se pone solo al escribir)</span>
               </div>
               <Link
                 to="/panel/escanear"
@@ -962,11 +800,12 @@ export const ClubView: React.FC = () => {
                 <input
                   ref={scannerInputRef}
                   type="text"
+                  maxLength={9}
                   autoFocus
                   value={barcodeQuery}
-                  onChange={(e) => setBarcodeQuery(e.target.value.toUpperCase())}
-                  placeholder="Escribí el código corto (K7M2-9XQ4) o escaneá el QR..."
-                  className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-[#0C0C0E] border border-[#282830] font-mono text-xs text-[#F4F4F6] placeholder-[#666672] focus:outline-none focus:border-[#D95B26]"
+                  onChange={(e) => setBarcodeQuery(formatShortCodeInput(e.target.value))}
+                  placeholder="Escribí los caracteres (ej. K7M2-9XQ4)..."
+                  className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-[#0C0C0E] border border-[#282830] font-mono text-xs font-bold tracking-wider text-[#F4F4F6] placeholder-[#666672] focus:outline-none focus:border-[#D95B26]"
                 />
               </div>
               <button
@@ -1092,38 +931,41 @@ export const ClubView: React.FC = () => {
                           )}
 
                           <td className="py-3 px-4">
-                            <div className="flex items-center gap-2 flex-wrap">
-                              <span className="font-mono font-bold text-xs text-[#F4F4F6]">
+                            <div className="flex items-center gap-2">
+                              <span
+                                className={`font-extrabold px-2 py-0.5 rounded-md ${
+                                  isReadyForReward
+                                    ? 'bg-[#2FB36A]/20 text-[#2FB36A]'
+                                    : 'bg-[#1C1C22] text-[#F4F4F6]'
+                                }`}
+                              >
                                 {m.stamps} / {target}
                               </span>
-                              {isReadyForReward && (
-                                <span className="px-2 py-0.5 rounded-full bg-[#2FB36A]/20 text-[#2FB36A] text-[10px] font-bold">
-                                  🎁 Premio listo: {config?.rewardText || 'Beneficio'}
-                                </span>
-                              )}
+                              <span className="text-[11px] text-[#9E9EA8] truncate max-w-[160px]">
+                                {m.rewardText || config?.rewardText || 'Premio del club'}
+                              </span>
                             </div>
                           </td>
 
                           <td className="py-3 px-4 text-right">
-                            <div className="inline-flex items-center justify-end gap-1.5">
+                            <div className="inline-flex items-center gap-1.5">
                               <button
                                 type="button"
                                 onClick={() => handleQuickPlusStamp(m)}
-                                className="px-2.5 py-1.5 rounded-xl bg-[#2FB36A] hover:bg-[#259858] text-[#05150c] font-bold text-xs inline-flex items-center gap-1 cursor-pointer"
-                                title="Sumar sello"
+                                className="px-2.5 py-1.5 rounded-xl bg-[#2FB36A]/15 hover:bg-[#2FB36A]/25 border border-[#2FB36A]/40 text-[#2FB36A] font-bold text-xs inline-flex items-center gap-1 cursor-pointer"
+                                title="Sumar 1 sello"
                               >
-                                <Plus className="w-3 h-3 stroke-[3]" />
-                                <span>Sumar sello</span>
+                                <Plus className="w-3.5 h-3.5" />
+                                <span>Sello</span>
                               </button>
 
                               {isReadyForReward && (
                                 <button
                                   type="button"
                                   onClick={() => handleRedeemReward(m)}
-                                  className="px-2.5 py-1.5 rounded-xl bg-[#D95B26] hover:bg-[#e56732] text-white font-bold text-xs inline-flex items-center gap-1 cursor-pointer"
+                                  className="px-2.5 py-1.5 rounded-xl bg-[#D95B26] hover:bg-[#e56732] text-white font-bold text-xs cursor-pointer"
                                 >
-                                  <Gift className="w-3 h-3" />
-                                  <span>Entregar premio</span>
+                                  Canjear
                                 </button>
                               )}
 
@@ -1136,10 +978,10 @@ export const ClubView: React.FC = () => {
                                     setAdjustDelta(-1);
                                     setAdjustReason('');
                                   }}
-                                  className="px-2.5 py-1.5 rounded-xl bg-[#1C1C22] hover:bg-[#26262e] border border-[#282830] text-xs font-bold text-[#9E9EA8] hover:text-white cursor-pointer"
-                                  title="Anular sello o ajustar con motivo"
+                                  className="p-1.5 rounded-xl bg-[#1C1C22] hover:bg-[#26262E] border border-[#282830] text-[#9E9EA8] hover:text-white cursor-pointer"
+                                  title="Anular o ajustar sellos (con motivo)"
                                 >
-                                  Anular
+                                  <Minus className="w-3.5 h-3.5" />
                                 </button>
                               )}
 
@@ -1170,566 +1012,224 @@ export const ClubView: React.FC = () => {
       )}
 
       {/* =================================================================== */}
-      {/* MODULO 2: ESTUDIO DE TARJETA WALLETWALLET (Content / Barcode / Style)*/}
+      {/* MODULO 2: VISTA UNIFICADA Y SIMPLE PARA CONFIGURAR TARJETA          */}
       {/* =================================================================== */}
       {activeTab === 'diseno' && !isCashier && (
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-          {/* Panel Izquierdo: Formulario de 3 pestañas (Content, Barcode, Style) */}
+          {/* Panel Izquierdo: Una sola vista simple con los 8 datos */}
           <form
             onSubmit={handleSaveConfig}
             className="lg:col-span-7 rounded-2xl bg-[#141418] border border-[#282830] overflow-hidden"
           >
-            {/* Cabecera de pestañas del diseñador */}
-            <div className="border-b border-[#282830] px-5 pt-4 flex items-center justify-between gap-3 bg-[#1C1C22]/50">
-              <div className="flex items-center gap-5">
-                <button
-                  type="button"
-                  onClick={() => setStudioTab('content')}
-                  className={`pb-3 text-xs font-bold border-b-2 transition-colors cursor-pointer ${
-                    studioTab === 'content'
-                      ? 'border-[#D95B26] text-[#F4F4F6]'
-                      : 'border-transparent text-[#9E9EA8] hover:text-white'
-                  }`}
-                >
-                  Contenido
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setStudioTab('barcode')}
-                  className={`pb-3 text-xs font-bold border-b-2 transition-colors cursor-pointer ${
-                    studioTab === 'barcode'
-                      ? 'border-[#D95B26] text-[#F4F4F6]'
-                      : 'border-transparent text-[#9E9EA8] hover:text-white'
-                  }`}
-                >
-                  Código QR / Barras
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setStudioTab('style')}
-                  className={`pb-3 text-xs font-bold border-b-2 transition-colors cursor-pointer ${
-                    studioTab === 'style'
-                      ? 'border-[#D95B26] text-[#F4F4F6]'
-                      : 'border-transparent text-[#9E9EA8] hover:text-white'
-                  }`}
-                >
-                  Estilo
-                </button>
+            <div className="border-b border-[#282830] px-5 py-3.5 flex items-center justify-between gap-3 bg-[#1C1C22]/50">
+              <div>
+                <h2 className="text-sm font-bold text-[#F4F4F6]">
+                  Datos de tu tarjeta de sellos
+                </h2>
+                <p className="text-[11px] text-[#9E9EA8]">
+                  Todo en un solo lugar. Los títulos de los campos (SELLOS, PREMIO y SOCIO) son fijos.
+                </p>
               </div>
-
-              <span className="mb-2 px-2.5 py-0.5 rounded-full bg-[#2FB36A]/15 text-[#2FB36A] text-[10px] font-bold">
-                Vista en tiempo real
+              <span className="px-2.5 py-0.5 rounded-full bg-[#2FB36A]/15 text-[#2FB36A] text-[10px] font-bold shrink-0">
+                Vista en vivo
               </span>
             </div>
 
-            <div className="p-5 space-y-5">
-              {/* PESTAÑA 1: CONTENIDO */}
-              {studioTab === 'content' && (
-                <div className="space-y-4">
-                  <div>
-                    <label className="block text-xs font-bold text-[#F4F4F6] mb-1">
-                      Título de la tarjeta
-                    </label>
-                    <input
-                      type="text"
-                      required
-                      value={logoText}
-                      onChange={(e) => setLogoText(e.target.value)}
-                      placeholder="Título visible arriba en la tarjeta"
-                      className="w-full px-3.5 py-2 rounded-xl bg-[#0C0C0E] border border-[#282830] text-xs text-[#F4F4F6]"
-                    />
-                    <p className="text-[11px] text-[#9E9EA8] mt-1">
-                      Texto que aparece en la esquina superior izquierda del pase.
-                    </p>
-                  </div>
+            <div className="p-5 space-y-4">
+              {/* 1. Nombre de tarjeta y 2. Nombre del comercio */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                <div>
+                  <label className="block text-xs font-bold text-[#F4F4F6] mb-1">
+                    Nombre de tarjeta *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={logoText}
+                    onChange={(e) => setLogoText(e.target.value)}
+                    placeholder={`Tarjeta de sellos de ${business?.name || 'Mi Comercio'}`}
+                    className="w-full px-3.5 py-2 rounded-xl bg-[#0C0C0E] border border-[#282830] text-xs text-[#F4F4F6] focus:outline-none focus:border-[#D95B26]"
+                  />
+                </div>
 
-                  <div>
-                    <label className="block text-xs font-bold text-[#F4F4F6] mb-1">
-                      Nombre del comercio <span className="text-[#9E9EA8] font-normal">(opcional)</span>
-                    </label>
-                    <input
-                      type="text"
-                      value={organizationName}
-                      onChange={(e) => setOrganizationName(e.target.value)}
-                      placeholder="Nombre comercial para avisos"
-                      className="w-full px-3.5 py-2 rounded-xl bg-[#0C0C0E] border border-[#282830] text-xs text-[#F4F4F6]"
-                    />
-                    <p className="text-[11px] text-[#9E9EA8] mt-1">
-                      Título que ven tus clientes cuando se actualizan sus sellos.
-                    </p>
-                  </div>
+                <div>
+                  <label className="block text-xs font-bold text-[#F4F4F6] mb-1">
+                    Nombre del comercio *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={organizationName}
+                    onChange={(e) => setOrganizationName(e.target.value)}
+                    placeholder={business?.name || 'Mi Comercio'}
+                    className="w-full px-3.5 py-2 rounded-xl bg-[#0C0C0E] border border-[#282830] text-xs text-[#F4F4F6] focus:outline-none focus:border-[#D95B26]"
+                  />
+                </div>
+              </div>
 
-                  {/* Header Fields */}
-                  <div className="space-y-2 pt-1 border-t border-[#282830]">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <span className="text-xs font-bold text-[#F4F4F6]">
-                          Campo superior derecho (SOCIO)
-                        </span>
-                        <span className="text-[11px] text-[#9E9EA8] ml-1.5">(arriba a la derecha)</span>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setHeaderFields((prev) => [...prev, { label: 'NIVEL', value: 'SOCIO' }])
-                        }
-                        className="p-1 rounded-lg bg-[#1C1C22] hover:bg-[#26262E] border border-[#282830] text-[#F4F4F6] cursor-pointer"
-                        title="Agregar campo de cabecera"
-                      >
-                        <Plus className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                    {headerFields.length === 0 ? (
-                      <p className="text-[11px] text-[#9E9EA8]">Sin campos de cabecera</p>
-                    ) : (
-                      headerFields.map((field, idx) => (
-                        <div key={idx} className="flex items-center gap-2">
-                          <input
-                            type="text"
-                            value={field.label}
-                            onChange={(e) =>
-                              setHeaderFields((prev) =>
-                                prev.map((item, i) =>
-                                  i === idx ? { ...item, label: e.target.value } : item
-                                )
-                              )
-                            }
-                            placeholder="Etiqueta"
-                            className="w-1/3 px-3 py-2 rounded-xl bg-[#0C0C0E] border border-[#282830] text-xs text-[#F4F4F6]"
-                          />
-                          <input
-                            type="text"
-                            value={field.value}
-                            onChange={(e) =>
-                              setHeaderFields((prev) =>
-                                prev.map((item, i) =>
-                                  i === idx ? { ...item, value: e.target.value } : item
-                                )
-                              )
-                            }
-                            placeholder="Valor"
-                            className="flex-1 px-3 py-2 rounded-xl bg-[#0C0C0E] border border-[#282830] text-xs text-[#F4F4F6]"
-                          />
-                          <button
-                            type="button"
-                            onClick={() =>
-                              setHeaderFields((prev) => prev.filter((_, i) => i !== idx))
-                            }
-                            className="p-2 rounded-xl bg-[#1C1C22] border border-[#282830] text-[#9E9EA8] hover:text-[#f87171] cursor-pointer"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      ))
-                    )}
-                  </div>
+              {/* 3. Meta de sellos y 4. Premio */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
+                <div>
+                  <label className="block text-xs font-bold text-[#F4F4F6] mb-1">
+                    Meta de sellos *
+                  </label>
+                  <input
+                    type="number"
+                    required
+                    min={2}
+                    max={25}
+                    value={targetStamps}
+                    onChange={(e) =>
+                      setTargetStamps(Math.max(2, Math.min(25, Number(e.target.value) || 10)))
+                    }
+                    className="w-full px-3.5 py-2 rounded-xl bg-[#0C0C0E] border border-[#282830] font-mono text-xs font-bold text-[#F4F4F6] focus:outline-none focus:border-[#D95B26]"
+                  />
+                </div>
 
-                  {/* Primary Fields */}
-                  <div className="space-y-2 pt-2 border-t border-[#282830]">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <span className="text-xs font-bold text-[#F4F4F6]">
-                          Campos principales (Primary Fields)
-                        </span>
-                        <span className="text-[11px] text-[#9E9EA8] ml-1.5">(contenido central)</span>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setPrimaryFields((prev) => [
-                            ...prev,
-                            { label: 'SELLOS', value: `1 / ${targetStamps}` },
-                          ])
-                        }
-                        className="p-1 rounded-lg bg-[#1C1C22] hover:bg-[#26262E] border border-[#282830] text-[#F4F4F6] cursor-pointer"
-                        title="Agregar campo principal"
-                      >
-                        <Plus className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                    {primaryFields.map((field, idx) => (
-                      <div key={idx} className="flex items-center gap-2">
-                        <input
-                          type="text"
-                          value={field.label}
-                          onChange={(e) =>
-                            setPrimaryFields((prev) =>
-                              prev.map((item, i) =>
-                                i === idx ? { ...item, label: e.target.value } : item
-                              )
-                            )
-                          }
-                          placeholder="SELLOS"
-                          className="w-1/3 px-3 py-2 rounded-xl bg-[#0C0C0E] border border-[#282830] text-xs text-[#F4F4F6]"
-                        />
-                        <input
-                          type="text"
-                          value={field.value}
-                          onChange={(e) =>
-                            setPrimaryFields((prev) =>
-                              prev.map((item, i) =>
-                                i === idx ? { ...item, value: e.target.value } : item
-                              )
-                            )
-                          }
-                          placeholder={`1 / ${targetStamps}`}
-                          className="flex-1 px-3 py-2 rounded-xl bg-[#0C0C0E] border border-[#282830] text-xs text-[#F4F4F6]"
-                        />
-                        <button
-                          type="button"
-                          onClick={() =>
-                            setPrimaryFields((prev) => prev.filter((_, i) => i !== idx))
-                          }
-                          className="p-2 rounded-xl bg-[#1C1C22] border border-[#282830] text-[#9E9EA8] hover:text-[#f87171] cursor-pointer"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
+                <div className="sm:col-span-2">
+                  <label className="block text-xs font-bold text-[#F4F4F6] mb-1">
+                    Premio *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={rewardText}
+                    onChange={(e) => setRewardText(e.target.value)}
+                    placeholder="Ej: 1 Burger con papas gratis en tu próxima visita"
+                    className="w-full px-3.5 py-2 rounded-xl bg-[#0C0C0E] border border-[#282830] text-xs text-[#F4F4F6] focus:outline-none focus:border-[#D95B26]"
+                  />
+                </div>
+              </div>
 
-                  {/* Secondary Fields */}
-                  <div className="space-y-2 pt-2 border-t border-[#282830]">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <span className="text-xs font-bold text-[#F4F4F6]">
-                          Campos secundarios (Secondary Fields)
-                        </span>
-                        <span className="text-[11px] text-[#9E9EA8] ml-1.5">(debajo del principal)</span>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setSecondaryFields((prev) => [
-                            ...prev,
-                            { label: 'CAMPO', value: '' },
-                          ])
-                        }
-                        className="p-1 rounded-lg bg-[#1C1C22] hover:bg-[#26262E] border border-[#282830] text-[#F4F4F6] cursor-pointer"
-                        title="Agregar campo secundario"
-                      >
-                        <Plus className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                    {secondaryFields.map((field, idx) => (
-                      <div key={idx} className="flex items-center gap-2">
-                        <input
-                          type="text"
-                          value={field.label}
-                          onChange={(e) =>
-                            setSecondaryFields((prev) =>
-                              prev.map((item, i) =>
-                                i === idx ? { ...item, label: e.target.value } : item
-                              )
-                            )
-                          }
-                          placeholder="PREMIO / SOCIO"
-                          className="w-1/3 px-3 py-2 rounded-xl bg-[#0C0C0E] border border-[#282830] text-xs text-[#F4F4F6]"
-                        />
-                        <input
-                          type="text"
-                          value={field.value}
-                          onChange={(e) =>
-                            setSecondaryFields((prev) =>
-                              prev.map((item, i) =>
-                                i === idx ? { ...item, value: e.target.value } : item
-                              )
-                            )
-                          }
-                          placeholder="Valor visible en la tarjeta"
-                          className="flex-1 px-3 py-2 rounded-xl bg-[#0C0C0E] border border-[#282830] text-xs text-[#F4F4F6]"
-                        />
-                        <button
-                          type="button"
-                          onClick={() =>
-                            setSecondaryFields((prev) => prev.filter((_, i) => i !== idx))
-                          }
-                          className="p-2 rounded-xl bg-[#1C1C22] border border-[#282830] text-[#9E9EA8] hover:text-[#f87171] cursor-pointer"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    ))}
+              {/* Resumen visual de etiquetas fijas (no editables por el comercio) */}
+              <div className="rounded-xl bg-[#0C0C0E] border border-[#282830] p-3 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-bold text-[#9E9EA8] inline-flex items-center gap-1.5">
+                    <Lock className="w-3 h-3 text-[#D95B26]" />
+                    <span>Campos fijos de la tarjeta (no editables)</span>
+                  </span>
+                  <span className="text-[10px] text-[#9E9EA8]">
+                    Código corto siempre visible debajo del QR
+                  </span>
+                </div>
+                <div className="grid grid-cols-3 gap-2 text-xs">
+                  <div className="p-2 rounded-lg bg-[#141418] border border-[#242428]">
+                    <span className="block text-[9px] font-bold text-[#9E9EA8]">SELLOS</span>
+                    <span className="font-mono font-bold text-[#F4F4F6]">1 / {targetStamps}</span>
                   </div>
-
-                  {/* Meta de sellos, valor del premio y regla */}
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2 border-t border-[#282830]">
-                    <div>
-                      <label className="block text-xs font-bold text-[#F4F4F6] mb-1">
-                        Meta de sellos para el premio
-                      </label>
-                      <input
-                        type="number"
-                        min={3}
-                        max={20}
-                        value={targetStamps}
-                        onChange={(e) => {
-                          const next = Math.max(3, Math.min(20, Number(e.target.value) || 10));
-                          setTargetStamps(next);
-                          setPrimaryFields((prev) =>
-                            prev.map((f, idx) =>
-                              idx === 0 && f.label.toUpperCase() === 'SELLOS'
-                                ? { ...f, value: `1 / ${next}` }
-                                : f
-                            )
-                          );
-                        }}
-                        className="w-full px-3.5 py-2 rounded-xl bg-[#0C0C0E] border border-[#282830] text-xs text-[#F4F4F6]"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-bold text-[#F4F4F6] mb-1">
-                        Valor estimado del premio ($ ARS)
-                      </label>
-                      <input
-                        type="number"
-                        min={0}
-                        step={100}
-                        value={rewardValueArs || ''}
-                        onChange={(e) => setRewardValueArs(Math.max(0, Number(e.target.value) || 0))}
-                        placeholder="Ej: 4500"
-                        className="w-full px-3.5 py-2 rounded-xl bg-[#0C0C0E] border border-[#282830] text-xs text-[#F4F4F6]"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-bold text-[#F4F4F6] mb-1">
-                        Cómo sumar sellos
-                      </label>
-                      <input
-                        type="text"
-                        value={howToEarn}
-                        onChange={(e) => setHowToEarn(e.target.value)}
-                        placeholder="1 sello por visita o compra"
-                        className="w-full px-3.5 py-2 rounded-xl bg-[#0C0C0E] border border-[#282830] text-xs text-[#F4F4F6]"
-                      />
-                    </div>
+                  <div className="p-2 rounded-lg bg-[#141418] border border-[#242428]">
+                    <span className="block text-[9px] font-bold text-[#9E9EA8]">PREMIO</span>
+                    <span className="font-semibold text-[#F4F4F6] truncate block">
+                      {rewardText || 'Tu premio'}
+                    </span>
+                  </div>
+                  <div className="p-2 rounded-lg bg-[#141418] border border-[#242428]">
+                    <span className="block text-[9px] font-bold text-[#9E9EA8]">SOCIO</span>
+                    <span className="font-semibold text-[#F4F4F6] truncate block">
+                      Nombre del cliente
+                    </span>
                   </div>
                 </div>
-              )}
+              </div>
 
-              {/* PESTAÑA 2: CÓDIGO (BARCODE) */}
-              {studioTab === 'barcode' && (
-                <div className="space-y-4">
-                  <div>
-                    <label className="block text-xs font-bold text-[#F4F4F6] mb-1">
-                      Formato de código (Barcode)
-                    </label>
-                    <select
-                      value={barcodeFormat}
-                      onChange={(e) =>
-                        setBarcodeFormat(
-                          e.target.value as 'QR' | 'CODE128' | 'PDF417' | 'AZTEC'
-                        )
-                      }
-                      className="w-48 px-3.5 py-2 rounded-xl bg-[#0C0C0E] border border-[#282830] text-xs text-[#F4F4F6]"
-                    >
-                      <option value="QR">QR</option>
-                      <option value="CODE128">CODE128 (Barras)</option>
-                      <option value="PDF417">PDF417</option>
-                      <option value="AZTEC">AZTEC</option>
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-bold text-[#F4F4F6] mb-1">
-                      Valor del código (Barcode Value)
-                    </label>
-                    <textarea
-                      rows={2}
-                      value={barcodeValue}
-                      onChange={(e) => setBarcodeValue(e.target.value)}
-                      placeholder="Identificador único de la tarjeta o URL"
-                      className="w-full p-3 rounded-xl bg-[#0C0C0E] border border-[#282830] font-mono text-xs text-[#F4F4F6]"
-                    />
-                    <p className="text-[11px] text-[#9E9EA8] mt-1">
-                      Para cada socio nuevo, Toque genera automáticamente su código único escaneable en caja.
-                    </p>
-                  </div>
-
-                  <div className="pt-2 border-t border-[#282830] space-y-2">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <span className="text-xs font-bold text-[#F4F4F6] block">
-                          Personalizar texto debajo del código
-                        </span>
-                        <span className="text-[11px] text-[#9E9EA8]">
-                          Por defecto Google muestra el valor debajo del código y Apple no muestra texto.
-                        </span>
-                      </div>
-                      <input
-                        type="checkbox"
-                        checked={overrideBarcodeText}
-                        onChange={(e) => setOverrideBarcodeText(e.target.checked)}
-                        className="w-4 h-4 rounded accent-[#D95B26] cursor-pointer"
-                      />
-                    </div>
-                    {overrideBarcodeText && (
-                      <input
-                        type="text"
-                        value={barcodeAltText}
-                        onChange={(e) => setBarcodeAltText(e.target.value)}
-                        placeholder="Texto visible debajo del QR"
-                        className="w-full px-3.5 py-2 rounded-xl bg-[#0C0C0E] border border-[#282830] text-xs text-[#F4F4F6]"
-                      />
-                    )}
-                  </div>
-
-                  <div className="pt-2 border-t border-[#282830]">
-                    <label className="block text-xs font-bold text-[#F4F4F6] mb-1">
-                      Vencimiento (Expiration)
-                    </label>
-                    <select
-                      value={expirationPolicy}
-                      onChange={(e) => setExpirationPolicy(e.target.value)}
-                      className="w-56 px-3.5 py-2 rounded-xl bg-[#0C0C0E] border border-[#282830] text-xs text-[#F4F4F6]"
-                    >
-                      <option value="No vencen">Sin vencimiento</option>
-                      <option value="30 días">30 días</option>
-                      <option value="90 días">90 días</option>
-                      <option value="365 días">1 año (365 días)</option>
-                    </select>
-                  </div>
+              {/* 5. Valor del premio (Opcional) y 8. Vencimiento (Opcional) */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 pt-1 border-t border-[#282830]">
+                <div>
+                  <label className="block text-xs font-bold text-[#F4F4F6] mb-1">
+                    Valor del premio ($ ARS){' '}
+                    <span className="text-[#9E9EA8] font-normal">(Opcional)</span>
+                  </label>
+                  <input
+                    type="number"
+                    min={0}
+                    step={100}
+                    value={rewardValueArs || ''}
+                    onChange={(e) => setRewardValueArs(Math.max(0, Number(e.target.value) || 0))}
+                    placeholder="Ej: 8500"
+                    className="w-full px-3.5 py-2 rounded-xl bg-[#0C0C0E] border border-[#282830] text-xs text-[#F4F4F6] focus:outline-none focus:border-[#D95B26]"
+                  />
                 </div>
-              )}
 
-              {/* PESTAÑA 3: ESTILO (STYLE) */}
-              {studioTab === 'style' && (
-                <div className="space-y-4">
-                  <div>
-                    <label className="block text-xs font-bold text-[#F4F4F6] mb-1">
-                      Color predefinido (Color Preset)
-                    </label>
-                    <select
-                      value={colorPreset}
-                      onChange={(e) => {
-                        const next = e.target.value as PresetColorKey;
-                        setColorPreset(next);
-                        setCustomColor('');
-                      }}
-                      className="w-48 px-3.5 py-2 rounded-xl bg-[#0C0C0E] border border-[#282830] text-xs text-[#F4F4F6]"
-                    >
-                      <option value="dark">Dark (Oscuro)</option>
-                      <option value="blue">Blue (Azul)</option>
-                      <option value="green">Green (Verde)</option>
-                      <option value="red">Red (Rojo)</option>
-                      <option value="purple">Purple (Violeta)</option>
-                      <option value="orange">Orange (Naranja)</option>
-                    </select>
-                  </div>
+                <div>
+                  <label className="block text-xs font-bold text-[#F4F4F6] mb-1">
+                    Vencimiento <span className="text-[#9E9EA8] font-normal">(Opcional)</span>
+                  </label>
+                  <select
+                    value={expirationPolicy}
+                    onChange={(e) => setExpirationPolicy(e.target.value)}
+                    className="w-full px-3.5 py-2 rounded-xl bg-[#0C0C0E] border border-[#282830] text-xs text-[#F4F4F6] focus:outline-none focus:border-[#D95B26]"
+                  >
+                    <option value="No vencen">Sin vencimiento</option>
+                    <option value="30 días">30 días</option>
+                    <option value="90 días">90 días</option>
+                    <option value="365 días">1 año (365 días)</option>
+                  </select>
+                </div>
+              </div>
 
-                  <div>
-                    <label className="block text-xs font-bold text-[#F4F4F6] mb-1">
-                      Color personalizado (Custom Color)
-                    </label>
-                    <div className="flex items-center gap-3">
-                      <input
-                        type="text"
-                        value={customColor}
-                        onChange={(e) => setCustomColor(e.target.value)}
-                        placeholder="#FF5733"
-                        className="flex-1 px-3.5 py-2 rounded-xl bg-[#0C0C0E] border border-[#282830] font-mono text-xs text-[#F4F4F6]"
-                      />
-                      <input
-                        type="color"
-                        value={effectiveCardBgColor}
-                        onChange={(e) => setCustomColor(e.target.value)}
-                        className="w-10 h-9 rounded-full bg-transparent border border-[#282830] cursor-pointer"
-                      />
-                    </div>
-                    <p className="text-[11px] text-[#9E9EA8] mt-1">
-                      Si ingresás un código hexadecimal, reemplaza al color predefinido.
-                    </p>
-                  </div>
+              {/* 6. Logo (Opcional) y 7. Color (Opcional) */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 pt-1 border-t border-[#282830]">
+                <div className="space-y-2">
+                  <label className="block text-xs font-bold text-[#F4F4F6]">
+                    Color <span className="text-[#9E9EA8] font-normal">(Opcional)</span>
+                  </label>
+                  <select
+                    value={colorPreset}
+                    onChange={(e) => {
+                      const next = e.target.value as PresetColorKey;
+                      setColorPreset(next);
+                      setCustomColor('');
+                    }}
+                    className="w-full px-3.5 py-2 rounded-xl bg-[#0C0C0E] border border-[#282830] text-xs text-[#F4F4F6]"
+                  >
+                    <option value="dark">Oscuro</option>
+                    <option value="blue">Azul</option>
+                    <option value="green">Verde</option>
+                    <option value="red">Rojo</option>
+                    <option value="purple">Violeta</option>
+                    <option value="orange">Naranja</option>
+                  </select>
 
-                  {/* Logo 160x160 */}
-                  <div className="pt-2 border-t border-[#282830] space-y-2">
-                    <label className="block text-xs font-bold text-[#F4F4F6]">
-                      Logo <span className="text-[#9E9EA8] font-normal">160×160</span>
-                    </label>
-                    <label className="border border-dashed border-[#282830] hover:border-[#BEC8FF] rounded-xl p-4 flex flex-col items-center justify-center gap-1.5 cursor-pointer bg-[#0C0C0E]">
-                      <ImageIcon className="w-4 h-4 text-[#9E9EA8]" />
-                      <span className="text-xs text-[#9E9EA8]">
-                        Subir imagen desde tu dispositivo
-                      </span>
-                      <input
-                        type="file"
-                        accept="image/*"
-                        onChange={(e) => handleImageFileUpload(e, setLogoUrl)}
-                        className="hidden"
-                      />
-                    </label>
+                  <div className="flex items-center gap-2">
                     <input
                       type="text"
-                      value={logoUrl}
-                      onChange={(e) => setLogoUrl(e.target.value)}
-                      placeholder="o pegá la URL de la imagen (https://...)"
-                      className="w-full px-3 py-1.5 rounded-xl bg-[#0C0C0E] border border-[#282830] text-xs text-[#F4F4F6]"
+                      value={customColor}
+                      onChange={(e) => setCustomColor(e.target.value)}
+                      placeholder="Color hex (ej. #D95B26)"
+                      className="flex-1 px-3 py-1.5 rounded-xl bg-[#0C0C0E] border border-[#282830] font-mono text-xs text-[#F4F4F6]"
                     />
-                  </div>
-
-                  {/* Wide logo 1280x400 */}
-                  <div className="pt-2 border-t border-[#282830] space-y-2">
-                    <div>
-                      <label className="block text-xs font-bold text-[#F4F4F6]">
-                        Logo ancho (Wide logo) <span className="text-[#9E9EA8] font-normal">1280×400</span>
-                      </label>
-                      <p className="text-[11px] text-[#9E9EA8]">
-                        Reemplaza el logo y el texto en Google Wallet sin recortarse.
-                      </p>
-                    </div>
-                    <label className="border border-dashed border-[#282830] hover:border-[#BEC8FF] rounded-xl p-4 flex flex-col items-center justify-center gap-1.5 cursor-pointer bg-[#0C0C0E]">
-                      <ImageIcon className="w-4 h-4 text-[#9E9EA8]" />
-                      <span className="text-xs text-[#9E9EA8]">
-                        Subir imagen ancha
-                      </span>
-                      <input
-                        type="file"
-                        accept="image/*"
-                        onChange={(e) => handleImageFileUpload(e, setWideLogoUrl)}
-                        className="hidden"
-                      />
-                    </label>
                     <input
-                      type="text"
-                      value={wideLogoUrl}
-                      onChange={(e) => setWideLogoUrl(e.target.value)}
-                      placeholder="o pegá la URL de la imagen ancha (https://...)"
-                      className="w-full px-3 py-1.5 rounded-xl bg-[#0C0C0E] border border-[#282830] text-xs text-[#F4F4F6]"
-                    />
-                  </div>
-
-                  {/* Icon 120x120 */}
-                  <div className="pt-2 border-t border-[#282830] space-y-2">
-                    <div>
-                      <label className="block text-xs font-bold text-[#F4F4F6]">
-                        Ícono (Icon) <span className="text-[#9E9EA8] font-normal">120×120</span>
-                      </label>
-                      <p className="text-[11px] text-[#9E9EA8]">
-                        Imagen de notificaciones en pantalla de bloqueo (Apple Wallet).
-                      </p>
-                    </div>
-                    <label className="border border-dashed border-[#282830] hover:border-[#BEC8FF] rounded-xl p-4 flex flex-col items-center justify-center gap-1.5 cursor-pointer bg-[#0C0C0E]">
-                      <ImageIcon className="w-4 h-4 text-[#9E9EA8]" />
-                      <span className="text-xs text-[#9E9EA8]">
-                        Subir ícono
-                      </span>
-                      <input
-                        type="file"
-                        accept="image/*"
-                        onChange={(e) => handleImageFileUpload(e, setIconUrl)}
-                        className="hidden"
-                      />
-                    </label>
-                    <input
-                      type="text"
-                      value={iconUrl}
-                      onChange={(e) => setIconUrl(e.target.value)}
-                      placeholder="o pegá la URL del ícono (https://...)"
-                      className="w-full px-3 py-1.5 rounded-xl bg-[#0C0C0E] border border-[#282830] text-xs text-[#F4F4F6]"
+                      type="color"
+                      value={effectiveCardBgColor}
+                      onChange={(e) => setCustomColor(e.target.value)}
+                      className="w-8 h-8 rounded-lg bg-transparent border border-[#282830] cursor-pointer shrink-0"
                     />
                   </div>
                 </div>
-              )}
+
+                <div className="space-y-2">
+                  <label className="block text-xs font-bold text-[#F4F4F6]">
+                    Logo <span className="text-[#9E9EA8] font-normal">(Opcional)</span>
+                  </label>
+                  <label className="border border-dashed border-[#282830] hover:border-[#BEC8FF] rounded-xl p-2.5 flex items-center justify-center gap-2 cursor-pointer bg-[#0C0C0E]">
+                    <ImageIcon className="w-4 h-4 text-[#9E9EA8]" />
+                    <span className="text-xs text-[#9E9EA8]">Subir imagen</span>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={(e) => handleImageFileUpload(e, setLogoUrl)}
+                      className="hidden"
+                    />
+                  </label>
+                  <input
+                    type="text"
+                    value={logoUrl}
+                    onChange={(e) => setLogoUrl(e.target.value)}
+                    placeholder="o pegá el link del logo (https://...)"
+                    className="w-full px-3 py-1.5 rounded-xl bg-[#0C0C0E] border border-[#282830] text-xs text-[#F4F4F6]"
+                  />
+                </div>
+              </div>
 
               {/* Botón de Guardar y mostrar QR / Link */}
               <div className="pt-3 border-t border-[#282830] flex flex-wrap items-center justify-between gap-3">
@@ -1784,24 +1284,17 @@ export const ClubView: React.FC = () => {
                 <span>5G 100%</span>
               </div>
 
-              {/* Tarjeta dentro del teléfono: Espejo idéntico de WalletWallet Pass */}
+              {/* Tarjeta dentro del teléfono con el código corto SIEMPRE visible debajo del QR */}
               <WalletPassCard
                 businessName={
-                  logoText || `Tarjeta de sellos de ${business?.name || 'Mi Comercio'}`
+                  logoText || `Tarjeta de sellos de ${organizationName || business?.name || 'Mi Comercio'}`
                 }
-                memberName={
-                  headerFields[0]?.value ||
-                  secondaryFields.find((f) => f.label.toUpperCase() === 'SOCIO')?.value ||
-                  'Socio'
-                }
+                memberName={organizationName || business?.name || 'Socio'}
                 stamps={1}
                 stampsRequired={targetStamps}
-                rewardText={
-                  secondaryFields.find((f) => f.label.toUpperCase().includes('PREMIO'))?.value ||
-                  secondaryFields[0]?.value ||
-                  'Beneficio al completar tus sellos'
-                }
-                barcodeToken={previewBarcodeText}
+                rewardText={rewardText || 'Beneficio al completar tus sellos'}
+                barcodeToken="K7M2-9XQ4"
+                shortCode="K7M2-9XQ4"
                 colorPreset={colorPreset}
                 customColor={
                   customColor.trim() && /^#[0-9A-Fa-f]{6}$/.test(customColor.trim())
@@ -1809,104 +1302,11 @@ export const ClubView: React.FC = () => {
                     : undefined
                 }
                 logoUrl={logoUrl || undefined}
-                wideLogoUrl={previewPlatform === 'google' ? wideLogoUrl || undefined : undefined}
               />
 
               <div className="w-24 h-1 rounded-full bg-[#282830] mx-auto" />
             </div>
           </div>
-        </div>
-      )}
-
-      {/* =================================================================== */}
-      {/* MODULO 3: AVISOS Y BENEFICIOS POR EMAIL (SOLO DUEÑO)                */}
-      {/* =================================================================== */}
-      {activeTab === 'avisos' && isOwner && (
-        <div className="rounded-2xl bg-[#141418] border border-[#282830] p-5 space-y-4">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div>
-              <div className="flex items-center gap-2 text-sm font-bold text-[#F4F4F6]">
-                <Mail className="w-4 h-4 text-[#D95B26]" />
-                <span>Enviar aviso o beneficio por correo a tus socios</span>
-              </div>
-              <p className="text-xs text-[#9E9EA8] mt-0.5">
-                Se envía únicamente a los{' '}
-                <strong className="text-[#F4F4F6]">{consentedMembersCount} socios</strong> que
-                aceptaron recibir novedades.
-              </p>
-            </div>
-            <div className="flex items-center gap-3">
-              <Link
-                to="/panel/club/avisos"
-                className="text-xs font-semibold text-[#D95B26] hover:underline"
-              >
-                Configurar avisos automáticos →
-              </Link>
-              <Link
-                to="/panel/club/auditoria"
-                className="text-xs font-semibold text-[#BEC8FF] hover:underline flex items-center gap-1"
-              >
-                <ShieldAlert className="w-3.5 h-3.5" />
-                <span>Ver correcciones →</span>
-              </Link>
-            </div>
-          </div>
-
-          <form onSubmit={handleSendBroadcast} className="space-y-3.5 max-w-2xl">
-            <div>
-              <label className="block text-xs font-semibold text-[#F4F4F6] mb-1">
-                Título del aviso (Asunto)
-              </label>
-              <input
-                type="text"
-                required
-                value={broadcastHeadline}
-                onChange={(e) => setBroadcastHeadline(e.target.value)}
-                placeholder="Ej: ¡Este jueves 2x1 para socios del Club!"
-                className="w-full px-3.5 py-2 rounded-xl bg-[#0C0C0E] border border-[#282830] text-xs text-[#F4F4F6]"
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-semibold text-[#F4F4F6] mb-1">
-                Mensaje para tus socios
-              </label>
-              <textarea
-                rows={4}
-                required
-                value={broadcastMessage}
-                onChange={(e) => setBroadcastMessage(e.target.value)}
-                placeholder="Escribí el beneficio o novedad..."
-                className="w-full p-3 rounded-xl bg-[#0C0C0E] border border-[#282830] text-xs text-[#F4F4F6]"
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-semibold text-[#F4F4F6] mb-1">
-                Texto del botón de acción
-              </label>
-              <input
-                type="text"
-                value={broadcastCtaLabel}
-                onChange={(e) => setBroadcastCtaLabel(e.target.value)}
-                placeholder="Ver mi tarjeta y beneficio"
-                className="w-full px-3.5 py-2 rounded-xl bg-[#0C0C0E] border border-[#282830] text-xs text-[#F4F4F6]"
-              />
-            </div>
-
-            <button
-              type="submit"
-              disabled={sendingBroadcast || isFreePlan}
-              className="px-5 py-2.5 rounded-xl bg-[#D95B26] hover:bg-[#e56732] text-white font-bold text-xs inline-flex items-center gap-2 disabled:opacity-50 cursor-pointer"
-            >
-              <Send className="w-3.5 h-3.5" />
-              <span>
-                {sendingBroadcast
-                  ? 'Enviando...'
-                  : `Enviar aviso a ${consentedMembersCount} socio(s)`}
-              </span>
-            </button>
-          </form>
         </div>
       )}
 
@@ -2059,7 +1459,7 @@ export const ClubView: React.FC = () => {
             <form onSubmit={handleCreateCard} className="space-y-3.5">
               <div>
                 <label className="block text-xs font-semibold text-[#F4F4F6] mb-1">
-                  Texto junto al logo (Nombre de la tarjeta)
+                  Nombre de tarjeta
                 </label>
                 <input
                   type="text"
@@ -2088,12 +1488,12 @@ export const ClubView: React.FC = () => {
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-semibold text-[#F4F4F6] mb-1">
-                    Sellos requeridos
+                    Meta de sellos
                   </label>
                   <input
                     type="number"
-                    min={3}
-                    max={20}
+                    min={2}
+                    max={25}
                     value={newCardStamps}
                     onChange={(e) => setNewCardStamps(Number(e.target.value) || 10)}
                     className="w-full px-3 py-2 rounded-xl bg-[#0C0C0E] border border-[#282830] text-xs text-[#F4F4F6]"
@@ -2222,63 +1622,6 @@ export const ClubView: React.FC = () => {
                   className="px-3.5 py-2 rounded-xl bg-[#D95B26] text-white text-xs font-bold cursor-pointer"
                 >
                   {submittingAdjust ? 'Guardando...' : 'Confirmar y registrar'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* Modal de Exportar CSV con Motivo Obligatorio (solo Dueño) */}
-      {showExportModal && isOwner && (
-        <div className="fixed inset-0 z-50 bg-black/75 flex items-center justify-center p-4">
-          <div className="max-w-md w-full rounded-2xl bg-[#141418] border border-[#282830] p-5 space-y-4">
-            <div className="flex items-center justify-between">
-              <h3 className="text-sm font-bold text-[#F4F4F6]">
-                Exportar socios en CSV
-              </h3>
-              <button
-                type="button"
-                onClick={() => setShowExportModal(false)}
-                className="p-1 text-[#9E9EA8] hover:text-white cursor-pointer"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            <form onSubmit={handleExportMembersCsvSubmit} className="space-y-3.5">
-              <div>
-                <label className="block text-xs font-semibold text-[#F4F4F6] mb-1">
-                  Motivo de la exportación (mínimo 10 caracteres)
-                </label>
-                <input
-                  type="text"
-                  required
-                  minLength={10}
-                  value={exportReason}
-                  onChange={(e) => setExportReason(e.target.value)}
-                  placeholder="Ej: Respaldo mensual de socios del club"
-                  className="w-full px-3 py-2 rounded-xl bg-[#0C0C0E] border border-[#282830] text-xs text-[#F4F4F6]"
-                />
-                <p className="text-[11px] text-[#9E9EA8] mt-1">
-                  Toda exportación pide un motivo y queda registrada en la lista de correcciones.
-                </p>
-              </div>
-
-              <div className="flex justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() => setShowExportModal(false)}
-                  className="px-3.5 py-2 rounded-xl bg-[#1C1C22] text-xs font-bold text-[#9E9EA8] cursor-pointer"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  disabled={submittingExport}
-                  className="px-3.5 py-2 rounded-xl bg-[#D95B26] text-white text-xs font-bold cursor-pointer"
-                >
-                  {submittingExport ? 'Exportando...' : 'Descargar CSV'}
                 </button>
               </div>
             </form>

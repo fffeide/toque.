@@ -586,6 +586,358 @@ export const PublicHubView: React.FC = () => {
       config.details?.phone?.trim()
   );
 
+  const renderClubAuthFlow = () => (
+    <>
+      {/* B1. CUENTA ÚNICA RECONOCIDA EN OTRO COMERCIO */}
+      {step === 'recognized_other_merchant' && recognizedAccount && (
+        <section className="rounded-3xl bg-[#141414] border border-[#242424] p-5 space-y-4">
+          <div className="space-y-1">
+            <h2 className="text-base font-bold text-[#F4F4F6] leading-snug">
+              Hola, {recognizedAccount.name || 'Socio'}. ¿Sumás la tarjeta de {business.name} a tu cuenta?
+            </h2>
+            <p className="text-xs text-[#9E9EA8]">
+              Usamos tu cuenta verificada ({recognizedAccount.email}) sin pedirte tus datos de nuevo.
+            </p>
+          </div>
+
+          {formError && (
+            <div
+              role="alert"
+              className="p-3 rounded-2xl bg-[#f87171]/10 border border-[#f87171]/30 text-xs text-[#f87171]"
+            >
+              {formError}
+            </div>
+          )}
+
+          <label className="flex items-center gap-2 text-xs text-[#9E9EA8] cursor-pointer">
+            <input
+              type="checkbox"
+              checked={marketingConsent}
+              onChange={(e) => setMarketingConsent(e.target.checked)}
+              className="rounded border-[#282830] bg-[#0C0C0E] text-[#D95B26]"
+            />
+            <span>Quiero recibir avisos y beneficios de {business.name}</span>
+          </label>
+
+          <button
+            type="button"
+            disabled={submitting}
+            onClick={handleAddCardForRecognizedAccount}
+            className="w-full py-3 px-5 rounded-2xl bg-[#D95B26] hover:bg-[#e36630] text-white font-bold text-xs transition-colors disabled:opacity-50 cursor-pointer shadow-lg shadow-[#D95B26]/20"
+          >
+            {submitting ? 'Sumando tarjeta...' : 'Sí, sumar'}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setRecognizedAccount(null);
+              setStep('email_login');
+            }}
+            className="w-full text-center text-[11px] text-[#9E9EA8] hover:text-white underline cursor-pointer"
+          >
+            Usar otro mail
+          </button>
+        </section>
+      )}
+
+      {/* B2. PANTALLA "INGRESÁ TU MAIL" -> CÓDIGO DE 6 DÍGITOS -> ENTRA DIRECTO SI YA TIENE CUENTA */}
+      {step === 'email_login' && (
+        <section className="rounded-3xl bg-[#141414] border border-[#242424] p-5 space-y-4">
+          <div className="flex items-start justify-between gap-2">
+            <div className="space-y-1">
+              <h2 className="text-base font-bold text-[#F4F4F6]">Ingresá tu mail</h2>
+              <p className="text-xs text-[#9E9EA8]">
+                Te enviamos un código de 6 dígitos. Si ya tenés cuenta en Toque, entrás directo sin registrarte de nuevo.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                setStep('form');
+                setFormError(null);
+              }}
+              className="text-[11px] font-bold text-[#BEC8FF] hover:text-white underline cursor-pointer shrink-0"
+            >
+              Crear cuenta
+            </button>
+          </div>
+
+          {formError && (
+            <div
+              role="alert"
+              className="p-3 rounded-2xl bg-[#f87171]/10 border border-[#f87171]/30 text-xs text-[#f87171]"
+            >
+              {formError}
+            </div>
+          )}
+
+          {!loginOtpSent ? (
+            <form onSubmit={handleSendLoginOtp} className="space-y-3">
+              <div className="relative">
+                <Mail className="w-4 h-4 text-[#9E9EA8] absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                <input
+                  type="email"
+                  required
+                  value={loginEmail}
+                  onChange={(e) => setLoginEmail(e.target.value)}
+                  placeholder="tu@mail.com"
+                  className="w-full pl-10 pr-4 py-3 rounded-2xl bg-[#0C0C0E] border border-[#282830] text-xs text-[#F4F4F6] placeholder-[#666672] focus:outline-none focus:border-[#D95B26]"
+                />
+              </div>
+              <button
+                type="submit"
+                disabled={verifyingLogin}
+                className="w-full py-3 px-5 rounded-2xl bg-[#D95B26] hover:bg-[#e36630] text-white font-bold text-xs transition-colors disabled:opacity-50 cursor-pointer"
+              >
+                {verifyingLogin ? 'Enviando código...' : 'Recibir código de 6 dígitos'}
+              </button>
+            </form>
+          ) : (
+            <form onSubmit={handleVerifyLoginOtp} className="space-y-3">
+              {loginOtpHint && (
+                <p className="text-xs font-mono text-[#BEC8FF] bg-[#1C1C22] border border-[#282830] px-3 py-1.5 rounded-xl">
+                  Código de prueba: <strong>{loginOtpHint}</strong>
+                </p>
+              )}
+              <input
+                type="text"
+                inputMode="numeric"
+                maxLength={6}
+                required
+                autoFocus
+                value={loginOtpCode}
+                onChange={(e) =>
+                  setLoginOtpCode(e.target.value.replace(/\D/g, '').slice(0, 6))
+                }
+                placeholder="Código de 6 dígitos"
+                className="w-full px-4 py-3 rounded-2xl bg-[#0C0C0E] border border-[#282830] text-center font-mono text-base tracking-widest text-[#F4F4F6] focus:outline-none focus:border-[#D95B26]"
+              />
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setLoginOtpSent(false);
+                    setLoginOtpCode('');
+                  }}
+                  className="px-4 py-2.5 rounded-2xl bg-[#1C1C22] border border-[#282830] text-xs font-bold text-[#9E9EA8] cursor-pointer"
+                >
+                  Cambiar mail
+                </button>
+                <button
+                  type="submit"
+                  disabled={verifyingLogin || loginOtpCode.length < 6}
+                  className="flex-1 py-2.5 px-4 rounded-2xl bg-[#2FB36A] hover:bg-[#259858] text-[#05150c] font-bold text-xs disabled:opacity-50 cursor-pointer"
+                >
+                  {verifyingLogin ? 'Verificando...' : 'Continuar'}
+                </button>
+              </div>
+            </form>
+          )}
+        </section>
+      )}
+
+      {/* B3. REGISTRO DEL CLIENTE (nombre, mail, fecha de nacimiento con selector del celular, >= 18) */}
+      {step === 'form' && (
+        <section className="rounded-3xl bg-[#141414] border border-[#242424] p-5 space-y-4">
+          <div className="flex items-start justify-between gap-2">
+            <div className="space-y-1">
+              <h2 className="text-base font-bold text-[#F4F4F6] leading-snug">
+                Creá tu tarjeta de {business.name}
+              </h2>
+              <p className="text-xs text-[#9E9EA8]">
+                Completá tus datos para guardar tus sellos en tu cuenta.
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => {
+                setStep('email_login');
+                setFormError(null);
+              }}
+              className="shrink-0 text-[11px] font-bold text-[#BEC8FF] hover:text-white underline cursor-pointer"
+            >
+              Ingresá tu mail →
+            </button>
+          </div>
+
+          {formError && (
+            <div
+              role="alert"
+              className="p-3 rounded-2xl bg-[#f87171]/10 border border-[#f87171]/30 text-xs text-[#f87171]"
+            >
+              {formError}
+            </div>
+          )}
+
+          <form onSubmit={handleStartRegistration} className="space-y-3">
+            <div>
+              <label
+                htmlFor="hub-name-input"
+                className="block text-xs font-semibold text-[#F4F4F6] mb-1"
+              >
+                Nombre
+              </label>
+              <div className="relative">
+                <UserIcon className="w-4 h-4 text-[#9E9EA8] absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                <input
+                  id="hub-name-input"
+                  type="text"
+                  required
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder="Tu nombre"
+                  className="w-full pl-10 pr-4 py-2.5 rounded-2xl bg-[#0C0C0E] border border-[#282830] text-xs text-[#F4F4F6] placeholder-[#666672] focus:outline-none focus:border-[#D95B26]"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label
+                htmlFor="hub-email-input"
+                className="block text-xs font-semibold text-[#F4F4F6] mb-1"
+              >
+                Mail
+              </label>
+              <div className="relative">
+                <Mail className="w-4 h-4 text-[#9E9EA8] absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                <input
+                  id="hub-email-input"
+                  type="email"
+                  required
+                  value={email}
+                  onChange={(e) => {
+                    setEmail(e.target.value);
+                    setEmailAlreadyVerifiedInLogin(false);
+                  }}
+                  placeholder="tu@mail.com"
+                  className="w-full pl-10 pr-4 py-2.5 rounded-2xl bg-[#0C0C0E] border border-[#282830] text-xs text-[#F4F4F6] placeholder-[#666672] focus:outline-none focus:border-[#D95B26]"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label
+                htmlFor="hub-birthdate-input"
+                className="block text-xs font-semibold text-[#F4F4F6] mb-1"
+              >
+                Fecha de nacimiento
+              </label>
+              <div className="relative">
+                <Calendar className="w-4 h-4 text-[#9E9EA8] absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                <input
+                  id="hub-birthdate-input"
+                  type="date"
+                  required
+                  max={new Date().toISOString().split('T')[0]}
+                  value={birthDate}
+                  onChange={(e) => setBirthDate(e.target.value)}
+                  className="w-full pl-10 pr-3 py-2.5 rounded-2xl bg-[#0C0C0E] border border-[#282830] text-xs text-[#F4F4F6] focus:outline-none focus:border-[#D95B26]"
+                />
+              </div>
+            </div>
+
+            <label className="flex items-center gap-2 text-xs text-[#9E9EA8] cursor-pointer pt-0.5">
+              <input
+                type="checkbox"
+                checked={marketingConsent}
+                onChange={(e) => setMarketingConsent(e.target.checked)}
+                className="rounded border-[#282830] bg-[#0C0C0E] text-[#D95B26]"
+              />
+              <span>Quiero recibir avisos y beneficios de {business.name}</span>
+            </label>
+
+            <div className="pt-1 space-y-1.5">
+              <p className="text-[11px] text-[#9E9EA8] leading-snug text-center">
+                Al continuar, aceptás los{' '}
+                <Link to="/terminos" className="text-[#F4F4F6] underline">
+                  Términos
+                </Link>{' '}
+                y la{' '}
+                <Link to="/privacidad" className="text-[#F4F4F6] underline">
+                  Política de privacidad
+                </Link>{' '}
+                de Toque.
+              </p>
+
+              <button
+                type="submit"
+                disabled={submitting}
+                className="w-full py-3 px-5 rounded-2xl bg-[#D95B26] hover:bg-[#e36630] text-white font-bold text-xs transition-colors disabled:opacity-50 cursor-pointer shadow-lg shadow-[#D95B26]/20"
+              >
+                {submitting
+                  ? 'Enviando código...'
+                  : emailAlreadyVerifiedInLogin
+                  ? 'Activar mi tarjeta'
+                  : 'Recibir código y activar tarjeta'}
+              </button>
+            </div>
+          </form>
+        </section>
+      )}
+
+      {/* B4. PASO DE VERIFICACIÓN DE CÓDIGO DE 6 DÍGITOS ENVIADO AL MAIL */}
+      {step === 'verify_email' && (
+        <section className="rounded-3xl bg-[#141414] border border-[#D95B26]/50 p-5 space-y-4">
+          <div className="space-y-1">
+            <span className="text-xs font-bold text-[#D95B26]">Verificación de mail</span>
+            <h2 className="text-sm font-bold text-[#F4F4F6]">
+              Ingresá el código de 6 dígitos que enviamos a {email}
+            </h2>
+            {emailOtpHint && (
+              <p className="text-xs font-mono text-[#BEC8FF] bg-[#1C1C22] border border-[#282830] px-3 py-1.5 rounded-xl mt-2">
+                Código de verificación: <strong>{emailOtpHint}</strong>
+              </p>
+            )}
+          </div>
+
+          {formError && (
+            <div className="p-3 rounded-2xl bg-[#f87171]/10 border border-[#f87171]/30 text-xs text-[#f87171]">
+              {formError}
+            </div>
+          )}
+
+          <form onSubmit={handleConfirmEmailAndRegister} className="space-y-3">
+            <input
+              type="text"
+              inputMode="numeric"
+              maxLength={6}
+              required
+              autoFocus
+              value={emailOtpCode}
+              onChange={(e) =>
+                setEmailOtpCode(e.target.value.replace(/\D/g, '').slice(0, 6))
+              }
+              placeholder="Código de 6 dígitos"
+              className="w-full px-4 py-3 rounded-2xl bg-[#0C0C0E] border border-[#282830] text-center font-mono text-base tracking-widest text-[#F4F4F6] focus:outline-none focus:border-[#D95B26]"
+            />
+
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setStep('form');
+                  setFormError(null);
+                }}
+                className="px-4 py-2.5 rounded-2xl bg-[#1C1C22] border border-[#282830] text-xs font-bold text-[#9E9EA8] cursor-pointer"
+              >
+                Volver
+              </button>
+              <button
+                type="submit"
+                disabled={submitting || emailOtpCode.length < 6}
+                className="flex-1 py-2.5 px-4 rounded-2xl bg-[#2FB36A] hover:bg-[#259858] text-[#05150c] font-bold text-xs disabled:opacity-50 cursor-pointer"
+              >
+                {submitting ? 'Verificando...' : 'Confirmar y activar tarjeta'}
+              </button>
+            </div>
+          </form>
+        </section>
+      )}
+    </>
+  );
+
   const renderBlock = (key: HubBlockKey) => {
     switch (key) {
       case 'receipt': {
@@ -595,13 +947,25 @@ export const PublicHubView: React.FC = () => {
             <DieCutTicket
               receiptId={displayedReceipt.id}
               businessName={business.name}
-              businessAddress={config.details?.address}
+              businessAddress={displayedReceipt.businessAddress || config.details?.address}
+              businessHours={displayedReceipt.businessHours || config.details?.hours}
               total={displayedReceipt.total}
+              discount={displayedReceipt.discountArs}
+              cashTendered={displayedReceipt.cashTendered}
+              changeDue={displayedReceipt.changeDue}
               createdAt={displayedReceipt.createdAt}
               items={displayedReceipt.items}
               method={displayedReceipt.method}
-              stamps={currentStamps || 1}
+              stamps={currentStamps}
               stampsRequired={targetStamps}
+              rewardText={rewardLabel}
+              cardTitle={clubCfg?.loyaltyTitle || clubCfg?.logoText || `Tarjeta de sellos de ${business.name}`}
+              colorPreset={clubCfg?.colorPreset || 'dark'}
+              customColor={clubCfg?.customColor || cardBgColor}
+              logoUrl={clubCfg?.logoUrl || business.logoUrl}
+              memberName={joinedMember?.name}
+              isRegisteredInHub={Boolean(joinedMember)}
+              clubRegisterContent={step !== 'active' ? renderClubAuthFlow() : undefined}
               isExpiredBlur={isReceiptExpired}
               onOpenToquecitos={handleOpenToquecitos}
               onViewPass={() => {
@@ -643,7 +1007,7 @@ export const PublicHubView: React.FC = () => {
                 </div>
 
                 <div className="text-right shrink-0">
-                  <span className="block text-[9px] uppercase tracking-widest text-white/75 font-semibold">
+                  <span className="block text-[9px] tracking-widest text-white/75 font-semibold">
                     SELLOS
                   </span>
                   <span className="text-xl font-extrabold tracking-tight text-white">
@@ -727,358 +1091,8 @@ export const PublicHubView: React.FC = () => {
               </div>
             </section>
 
-            {/* B1. CUENTA ÚNICA RECONOCIDA EN OTRO COMERCIO (Item 4) */}
-            {step === 'recognized_other_merchant' && recognizedAccount && (
-              <section className="rounded-3xl bg-[#141414] border border-[#242424] p-5 space-y-4">
-                <div className="space-y-1">
-                  <h2 className="text-base font-bold text-[#F4F4F6] leading-snug">
-                    Hola, {recognizedAccount.name || 'Socio'}. ¿Sumás la tarjeta de {business.name} a tu cuenta?
-                  </h2>
-                  <p className="text-xs text-[#9E9EA8]">
-                    Usamos tu cuenta verificada ({recognizedAccount.email}) sin pedirte tus datos de nuevo.
-                  </p>
-                </div>
-
-                {formError && (
-                  <div
-                    role="alert"
-                    className="p-3 rounded-2xl bg-[#f87171]/10 border border-[#f87171]/30 text-xs text-[#f87171]"
-                  >
-                    {formError}
-                  </div>
-                )}
-
-                <label className="flex items-center gap-2 text-xs text-[#9E9EA8] cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={marketingConsent}
-                    onChange={(e) => setMarketingConsent(e.target.checked)}
-                    className="rounded border-[#282830] bg-[#0C0C0E] text-[#D95B26]"
-                  />
-                  <span>Quiero recibir avisos y beneficios de {business.name}</span>
-                </label>
-
-                <button
-                  type="button"
-                  disabled={submitting}
-                  onClick={handleAddCardForRecognizedAccount}
-                  className="w-full py-3 px-5 rounded-2xl bg-[#D95B26] hover:bg-[#e36630] text-white font-bold text-xs transition-colors disabled:opacity-50 cursor-pointer shadow-lg shadow-[#D95B26]/20"
-                >
-                  {submitting ? 'Sumando tarjeta...' : 'Sí, sumar'}
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    setRecognizedAccount(null);
-                    setStep('email_login');
-                  }}
-                  className="w-full text-center text-[11px] text-[#9E9EA8] hover:text-white underline cursor-pointer"
-                >
-                  Usar otro mail
-                </button>
-              </section>
-            )}
-
-            {/* B2. PANTALLA "INGRESÁ TU MAIL" -> CÓDIGO DE 6 DÍGITOS -> ENTRA DIRECTO SI YA TIENE CUENTA (Item 4) */}
-            {step === 'email_login' && (
-              <section className="rounded-3xl bg-[#141414] border border-[#242424] p-5 space-y-4">
-                <div className="flex items-start justify-between gap-2">
-                  <div className="space-y-1">
-                    <h2 className="text-base font-bold text-[#F4F4F6]">Ingresá tu mail</h2>
-                    <p className="text-xs text-[#9E9EA8]">
-                      Te enviamos un código de 6 dígitos. Si ya tenés cuenta en Toque, entrás directo sin registrarte de nuevo.
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setStep('form');
-                      setFormError(null);
-                    }}
-                    className="text-[11px] font-bold text-[#BEC8FF] hover:text-white underline cursor-pointer shrink-0"
-                  >
-                    Crear cuenta
-                  </button>
-                </div>
-
-                {formError && (
-                  <div
-                    role="alert"
-                    className="p-3 rounded-2xl bg-[#f87171]/10 border border-[#f87171]/30 text-xs text-[#f87171]"
-                  >
-                    {formError}
-                  </div>
-                )}
-
-                {!loginOtpSent ? (
-                  <form onSubmit={handleSendLoginOtp} className="space-y-3">
-                    <div className="relative">
-                      <Mail className="w-4 h-4 text-[#9E9EA8] absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-                      <input
-                        type="email"
-                        required
-                        value={loginEmail}
-                        onChange={(e) => setLoginEmail(e.target.value)}
-                        placeholder="tu@mail.com"
-                        className="w-full pl-10 pr-4 py-3 rounded-2xl bg-[#0C0C0E] border border-[#282830] text-xs text-[#F4F4F6] placeholder-[#666672] focus:outline-none focus:border-[#D95B26]"
-                      />
-                    </div>
-                    <button
-                      type="submit"
-                      disabled={verifyingLogin}
-                      className="w-full py-3 px-5 rounded-2xl bg-[#D95B26] hover:bg-[#e36630] text-white font-bold text-xs transition-colors disabled:opacity-50 cursor-pointer"
-                    >
-                      {verifyingLogin ? 'Enviando código...' : 'Recibir código de 6 dígitos'}
-                    </button>
-                  </form>
-                ) : (
-                  <form onSubmit={handleVerifyLoginOtp} className="space-y-3">
-                    {loginOtpHint && (
-                      <p className="text-xs font-mono text-[#BEC8FF] bg-[#1C1C22] border border-[#282830] px-3 py-1.5 rounded-xl">
-                        Código de prueba: <strong>{loginOtpHint}</strong>
-                      </p>
-                    )}
-                    <input
-                      type="text"
-                      inputMode="numeric"
-                      maxLength={6}
-                      required
-                      autoFocus
-                      value={loginOtpCode}
-                      onChange={(e) =>
-                        setLoginOtpCode(e.target.value.replace(/\D/g, '').slice(0, 6))
-                      }
-                      placeholder="Código de 6 dígitos"
-                      className="w-full px-4 py-3 rounded-2xl bg-[#0C0C0E] border border-[#282830] text-center font-mono text-base tracking-widest text-[#F4F4F6] focus:outline-none focus:border-[#D95B26]"
-                    />
-                    <div className="flex gap-2">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setLoginOtpSent(false);
-                          setLoginOtpCode('');
-                        }}
-                        className="px-4 py-2.5 rounded-2xl bg-[#1C1C22] border border-[#282830] text-xs font-bold text-[#9E9EA8] cursor-pointer"
-                      >
-                        Cambiar mail
-                      </button>
-                      <button
-                        type="submit"
-                        disabled={verifyingLogin || loginOtpCode.length < 6}
-                        className="flex-1 py-2.5 px-4 rounded-2xl bg-[#2FB36A] hover:bg-[#259858] text-[#05150c] font-bold text-xs disabled:opacity-50 cursor-pointer"
-                      >
-                        {verifyingLogin ? 'Verificando...' : 'Continuar'}
-                      </button>
-                    </div>
-                  </form>
-                )}
-              </section>
-            )}
-
-            {/* B3. REGISTRO DEL CLIENTE (Item 3: nombre, mail, fecha de nacimiento con selector del celular, >= 18, sin anónimo) */}
-            {step === 'form' && (
-              <section className="rounded-3xl bg-[#141414] border border-[#242424] p-5 space-y-4">
-                <div className="flex items-start justify-between gap-2">
-                  <div className="space-y-1">
-                    <span className="inline-block text-xs font-bold text-[#D95B26]">
-                      1° visita · Sumá tu primer sello hoy
-                    </span>
-                    <h2 className="text-base font-bold text-[#F4F4F6] leading-snug">
-                      Creá tu tarjeta de {business.name}
-                    </h2>
-                    <p className="text-xs text-[#9E9EA8]">
-                      Completá tus datos para guardar tus sellos en tu cuenta.
-                    </p>
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setStep('email_login');
-                      setFormError(null);
-                    }}
-                    className="shrink-0 text-[11px] font-bold text-[#BEC8FF] hover:text-white underline cursor-pointer"
-                  >
-                    Ingresá tu mail →
-                  </button>
-                </div>
-
-                {formError && (
-                  <div
-                    role="alert"
-                    className="p-3 rounded-2xl bg-[#f87171]/10 border border-[#f87171]/30 text-xs text-[#f87171]"
-                  >
-                    {formError}
-                  </div>
-                )}
-
-                <form onSubmit={handleStartRegistration} className="space-y-3">
-                  <div>
-                    <label
-                      htmlFor="hub-name-input"
-                      className="block text-xs font-semibold text-[#F4F4F6] mb-1"
-                    >
-                      Nombre
-                    </label>
-                    <div className="relative">
-                      <UserIcon className="w-4 h-4 text-[#9E9EA8] absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-                      <input
-                        id="hub-name-input"
-                        type="text"
-                        required
-                        value={name}
-                        onChange={(e) => setName(e.target.value)}
-                        placeholder="Tu nombre"
-                        className="w-full pl-10 pr-4 py-2.5 rounded-2xl bg-[#0C0C0E] border border-[#282830] text-xs text-[#F4F4F6] placeholder-[#666672] focus:outline-none focus:border-[#D95B26]"
-                      />
-                    </div>
-                  </div>
-
-                  <div>
-                    <label
-                      htmlFor="hub-email-input"
-                      className="block text-xs font-semibold text-[#F4F4F6] mb-1"
-                    >
-                      Mail
-                    </label>
-                    <div className="relative">
-                      <Mail className="w-4 h-4 text-[#9E9EA8] absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-                      <input
-                        id="hub-email-input"
-                        type="email"
-                        required
-                        value={email}
-                        onChange={(e) => {
-                          setEmail(e.target.value);
-                          setEmailAlreadyVerifiedInLogin(false);
-                        }}
-                        placeholder="tu@mail.com"
-                        className="w-full pl-10 pr-4 py-2.5 rounded-2xl bg-[#0C0C0E] border border-[#282830] text-xs text-[#F4F4F6] placeholder-[#666672] focus:outline-none focus:border-[#D95B26]"
-                      />
-                    </div>
-                  </div>
-
-                  <div>
-                    <label
-                      htmlFor="hub-birthdate-input"
-                      className="block text-xs font-semibold text-[#F4F4F6] mb-1"
-                    >
-                      Fecha de nacimiento
-                    </label>
-                    <div className="relative">
-                      <Calendar className="w-4 h-4 text-[#9E9EA8] absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-                      <input
-                        id="hub-birthdate-input"
-                        type="date"
-                        required
-                        max={new Date().toISOString().split('T')[0]}
-                        value={birthDate}
-                        onChange={(e) => setBirthDate(e.target.value)}
-                        className="w-full pl-10 pr-3 py-2.5 rounded-2xl bg-[#0C0C0E] border border-[#282830] text-xs text-[#F4F4F6] focus:outline-none focus:border-[#D95B26]"
-                      />
-                    </div>
-                  </div>
-
-                  {/* Una sola casilla destildada por defecto */}
-                  <label className="flex items-center gap-2 text-xs text-[#9E9EA8] cursor-pointer pt-0.5">
-                    <input
-                      type="checkbox"
-                      checked={marketingConsent}
-                      onChange={(e) => setMarketingConsent(e.target.checked)}
-                      className="rounded border-[#282830] bg-[#0C0C0E] text-[#D95B26]"
-                    />
-                    <span>Quiero recibir avisos y beneficios de {business.name}</span>
-                  </label>
-
-                  {/* Justo arriba del botón de enviar, pegado a él, sin casilla de términos */}
-                  <div className="pt-1 space-y-1.5">
-                    <p className="text-[11px] text-[#9E9EA8] leading-snug text-center">
-                      Al continuar, aceptás los{' '}
-                      <Link to="/terminos" className="text-[#F4F4F6] underline">
-                        Términos
-                      </Link>{' '}
-                      y la{' '}
-                      <Link to="/privacidad" className="text-[#F4F4F6] underline">
-                        Política de privacidad
-                      </Link>{' '}
-                      de Toque.
-                    </p>
-
-                    <button
-                      type="submit"
-                      disabled={submitting}
-                      className="w-full py-3 px-5 rounded-2xl bg-[#D95B26] hover:bg-[#e36630] text-white font-bold text-xs transition-colors disabled:opacity-50 cursor-pointer shadow-lg shadow-[#D95B26]/20"
-                    >
-                      {submitting
-                        ? 'Enviando código...'
-                        : emailAlreadyVerifiedInLogin
-                        ? 'Activar mi tarjeta'
-                        : 'Recibir código y activar tarjeta'}
-                    </button>
-                  </div>
-                </form>
-              </section>
-            )}
-
-            {/* B4. PASO DE VERIFICACIÓN DE CÓDIGO DE 6 DÍGITOS ENVIADO AL MAIL */}
-            {step === 'verify_email' && (
-              <section className="rounded-3xl bg-[#141414] border border-[#D95B26]/50 p-5 space-y-4">
-                <div className="space-y-1">
-                  <span className="text-xs font-bold text-[#D95B26]">Verificación de mail</span>
-                  <h2 className="text-sm font-bold text-[#F4F4F6]">
-                    Ingresá el código de 6 dígitos que enviamos a {email}
-                  </h2>
-                  {emailOtpHint && (
-                    <p className="text-xs font-mono text-[#BEC8FF] bg-[#1C1C22] border border-[#282830] px-3 py-1.5 rounded-xl mt-2">
-                      Código de verificación: <strong>{emailOtpHint}</strong>
-                    </p>
-                  )}
-                </div>
-
-                {formError && (
-                  <div className="p-3 rounded-2xl bg-[#f87171]/10 border border-[#f87171]/30 text-xs text-[#f87171]">
-                    {formError}
-                  </div>
-                )}
-
-                <form onSubmit={handleConfirmEmailAndRegister} className="space-y-3">
-                  <input
-                    type="text"
-                    inputMode="numeric"
-                    maxLength={6}
-                    required
-                    autoFocus
-                    value={emailOtpCode}
-                    onChange={(e) =>
-                      setEmailOtpCode(e.target.value.replace(/\D/g, '').slice(0, 6))
-                    }
-                    placeholder="Código de 6 dígitos"
-                    className="w-full px-4 py-3 rounded-2xl bg-[#0C0C0E] border border-[#282830] text-center font-mono text-base tracking-widest text-[#F4F4F6] focus:outline-none focus:border-[#D95B26]"
-                  />
-
-                  <div className="flex gap-2">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setStep('form');
-                        setFormError(null);
-                      }}
-                      className="px-4 py-2.5 rounded-2xl bg-[#1C1C22] border border-[#282830] text-xs font-bold text-[#9E9EA8] cursor-pointer"
-                    >
-                      Volver
-                    </button>
-                    <button
-                      type="submit"
-                      disabled={submitting || emailOtpCode.length < 6}
-                      className="flex-1 py-2.5 px-4 rounded-2xl bg-[#2FB36A] hover:bg-[#259858] text-[#05150c] font-bold text-xs disabled:opacity-50 cursor-pointer"
-                    >
-                      {submitting ? 'Verificando...' : 'Confirmar y activar tarjeta'}
-                    </button>
-                  </div>
-                </form>
-              </section>
-            )}
+            {/* Si no hay comprobante en pantalla, mostramos el flujo de alta aquí directamente */}
+            {!displayedReceipt && step !== 'active' && renderClubAuthFlow()}
 
             {/* C. TARJETA ACTIVA DEL CLIENTE (Item 2: código corto grande + QR inmutable + botón "Agregar a mi billetera") */}
             {step === 'active' && joinedMember && (
@@ -1352,11 +1366,6 @@ export const PublicHubView: React.FC = () => {
               <BrandLogo variant="isotipo" size="sm" />
               <span>Toquecitos</span>
             </button>
-
-            <div className="inline-flex items-center gap-1.5 px-2 py-1 rounded-full bg-[#2FB36A]/15 border border-[#2FB36A]/30 text-[10px] font-bold text-[#2FB36A]">
-              <span className="w-1.5 h-1.5 rounded-full bg-[#2FB36A] animate-pulse" />
-              <span>En vivo</span>
-            </div>
           </div>
         </header>
 
@@ -1366,13 +1375,16 @@ export const PublicHubView: React.FC = () => {
             <DieCutTicket
               receiptId={displayedReceipt.id}
               businessName={business.name}
-              businessAddress={config.details?.address}
+              businessAddress={displayedReceipt.businessAddress || config.details?.address}
+              businessHours={displayedReceipt.businessHours || config.details?.hours}
               total={displayedReceipt.total}
+              discount={displayedReceipt.discountArs}
+              cashTendered={displayedReceipt.cashTendered}
+              changeDue={displayedReceipt.changeDue}
               createdAt={displayedReceipt.createdAt}
               items={displayedReceipt.items}
               method={displayedReceipt.method}
-              stamps={currentStamps || 1}
-              stampsRequired={targetStamps}
+              hideClubSection={true}
               isExpiredBlur={isReceiptExpired}
               onOpenToquecitos={handleOpenToquecitos}
             />

@@ -255,6 +255,14 @@ export const ClubScannerView: React.FC = () => {
       : `Le faltan ${lookupResult.remainingStamps} sellos`
     : '';
 
+  const formatShortCodeInput = (raw: string): string => {
+    const alnum = raw.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8);
+    if (alnum.length > 4) {
+      return `${alnum.slice(0, 4)}-${alnum.slice(4)}`;
+    }
+    return alnum;
+  };
+
   return (
     <div className="max-w-2xl mx-auto space-y-5">
       {/* Encabezado */}
@@ -292,7 +300,7 @@ export const ClubScannerView: React.FC = () => {
             htmlFor="short-code-input"
             className="block text-xs font-semibold text-[#9E9EA8]"
           >
-            Código de la persona (formato K7M2-9XQ4)
+            Código de la persona (el guión se pone solo al escribir)
           </label>
 
           <div className="flex flex-col sm:flex-row gap-3">
@@ -301,8 +309,9 @@ export const ClubScannerView: React.FC = () => {
               <input
                 id="short-code-input"
                 type="text"
+                maxLength={9}
                 value={codeQuery}
-                onChange={(e) => setCodeQuery(e.target.value.toUpperCase())}
+                onChange={(e) => setCodeQuery(formatShortCodeInput(e.target.value))}
                 placeholder="K7M2-9XQ4"
                 autoComplete="off"
                 spellCheck={false}

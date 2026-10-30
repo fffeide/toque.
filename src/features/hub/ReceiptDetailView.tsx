@@ -11,8 +11,12 @@ export const ReceiptDetailView: React.FC = () => {
 
   const [receipt, setReceipt] = useState<Receipt | null>(null);
   const [businessAddress, setBusinessAddress] = useState<string | undefined>(undefined);
-  const [stampsCount, setStampsCount] = useState<number>(4);
+  const [businessHours, setBusinessHours] = useState<string | undefined>(undefined);
+  const [stampsCount, setStampsCount] = useState<number>(0);
   const [stampsTarget, setStampsTarget] = useState<number>(5);
+  const [rewardText, setRewardText] = useState<string | undefined>(undefined);
+  const [cardTitle, setCardTitle] = useState<string | undefined>(undefined);
+  const [isRegistered, setIsRegistered] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [isLockedOrExpired, setIsLockedOrExpired] = useState(false);
 
@@ -38,9 +42,13 @@ export const ReceiptDetailView: React.FC = () => {
 
         const hub = await api.getPublicHub(data.cartelCode || 'BURGER01').catch(() => null);
         if (active && hub) {
-          setBusinessAddress(hub.config?.details?.address);
-          setStampsCount(hub.club?.member?.stamps ?? 4);
+          setBusinessAddress(hub.config?.details?.address?.trim() || undefined);
+          setBusinessHours(hub.config?.details?.hours?.trim() || undefined);
+          setStampsCount(hub.club?.member?.stamps ?? 0);
           setStampsTarget(hub.club?.config?.targetStamps ?? 5);
+          setRewardText(hub.club?.config?.loyaltyReward || hub.club?.config?.rewardText);
+          setCardTitle(hub.club?.config?.loyaltyTitle || hub.club?.config?.logoText);
+          setIsRegistered(Boolean(hub.club?.member));
         }
 
         if (data.status === 'ready') {
@@ -93,7 +101,7 @@ export const ReceiptDetailView: React.FC = () => {
           </div>
           <h1 className="text-lg font-bold text-[#F4F4F6]">Comprobante no disponible</h1>
           <p className="text-xs text-[#9E9EA8] leading-relaxed">
-            No encontramos este comprobante o ya fue cerrado.
+            No encontramos este comprobante o pertenece a otra compra.
           </p>
           <div className="pt-2">
             <Link
@@ -124,13 +132,21 @@ export const ReceiptDetailView: React.FC = () => {
         <DieCutTicket
           receiptId={receipt.id}
           businessName={receipt.businessName}
-          businessAddress={businessAddress}
+          businessAddress={receipt.businessAddress || businessAddress}
+          businessHours={receipt.businessHours || businessHours}
           total={receipt.total}
+          discount={receipt.discountArs}
+          cashTendered={receipt.cashTendered}
+          changeDue={receipt.changeDue}
           createdAt={receipt.createdAt}
           items={receipt.items}
           method={receipt.method}
           stamps={stampsCount}
           stampsRequired={stampsTarget}
+          rewardText={rewardText}
+          cardTitle={cardTitle}
+          isRegisteredInHub={isRegistered}
+          onViewPass={() => navigate(`/u/${receipt.cartelCode}`)}
           isDark={true}
         />
       </div>
