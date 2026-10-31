@@ -9,30 +9,38 @@ import {
 import { BrandLogo } from '../../components/ui/Avatar';
 import { WalletPassCard } from '../../components/wallet/WalletPassCard';
 import { DieCutTicket } from '../../components/ticket/DieCutTicket';
+import { Barcode128 } from '../../components/Barcode128';
+import { BirthDatePicker } from '../../components/BirthDatePicker';
 import {
+  fetchConsumerMe,
+  getConsumerSessionEmail,
+  clearConsumerSession,
+  isIOSDevice,
+  isAndroidDevice,
+} from '../../lib/consumerSession';
+import {
+  Activity,
   ArrowLeft,
   ArrowUpRight,
   Check,
   CheckCircle2,
   Clock,
   CreditCard,
+  ExternalLink,
   Gift,
   Mail,
-  Moon,
   QrCode,
   Receipt as ReceiptIcon,
   ShieldCheck,
   Sparkles,
   Store,
-  Sun,
   Ticket,
   User,
   Wallet,
   X,
-  Calendar,
 } from 'lucide-react';
 
-type ActiveSection = 'cards' | 'tickets' | 'benefits' | 'profile';
+type ActiveSection = 'cards' | 'tickets' | 'activity' | 'benefits' | 'profile';
 
 const WALLET_PRESET_COLORS: Record<string, string> = {
   dark: '#1C1C1E',
@@ -58,11 +66,11 @@ function getStrictCooldownState(lastStampedAt?: string): {
   label: string;
 } {
   if (!lastStampedAt) {
-    return { inCooldown: false, label: 'Disponible para sumar en mostrador' };
+    return { inCooldown: false, label: 'Disponible para sumar hoy en mostrador' };
   }
   const elapsedMs = Date.now() - new Date(lastStampedAt).getTime();
   if (Number.isNaN(elapsedMs) || elapsedMs >= 86400000) {
-    return { inCooldown: false, label: 'Disponible para sumar en mostrador' };
+    return { inCooldown: false, label: 'Disponible para sumar hoy en mostrador' };
   }
   const remainingMs = 86400000 - elapsedMs;
   const hours = Math.floor(remainingMs / 3600000);
@@ -102,6 +110,19 @@ function isAtLeast18(birthDateStr: string): {
   };
 }
 
+interface VisitTicketItem {
+  id: string;
+  businessName: string;
+  logoUrl?: string;
+  createdAt: string;
+  stampsDelta: number;
+  stampsCurrent: number;
+  stampsRequired: number;
+  rewardText: string;
+  barcodeToken: string;
+  receipt?: ConsumerReceipt;
+}
+
 export const ToquecitosView: React.FC = () => {
   const [searchParams] = useSearchParams();
   const originHubCode = useMemo(() => {
@@ -109,11 +130,9 @@ export const ToquecitosView: React.FC = () => {
     return fromParam && fromParam.length > 0 ? fromParam : null;
   }, [searchParams]);
 
-  const [isDark, setIsDark] = useState<boolean>(true);
-  const toggleTheme = () => setIsDark((prev) => !prev);
-
   const [activeSection, setActiveSection] = useState<ActiveSection>('cards');
   const [selectedCard, setSelectedCard] = useState<ClubMember | null>(null);
+  const [focusedCardId, setFocusedCardId] = useState<string | null>(null);
   const [openedFullReceipt, setOpenedFullReceipt] = useState<ConsumerReceipt | null>(null);
   const [isAccountModalOpen, setIsAccountModalOpen] = useState(false);
 
@@ -137,20 +156,68 @@ export const ToquecitosView: React.FC = () => {
   const [walletUnconfigured, setWalletUnconfigured] = useState(false);
   const [walletStatusMessage, setWalletStatusMessage] = useState<string | null>(null);
   const [walletError, setWalletError] = useState<string | null>(null);
+  const [desktopFallbackUrl, setDesktopFallbackUrl] = useState<string | null>(null);
 
   const sectionContentRef = useRef<HTMLDivElement>(null);
 
   const refreshData = async (targetEmail?: string) => {
     try {
-      const recAcc = await api.recognizeAccount(targetEmail || emailInput || undefined);
+      const sessionEmail = targetEmail || getConsumerSessionEmail() || emailInput || undefined;
+      const [recAcc, meRes] = await Promise.all([
+        api.recognizeAccount(sessionEmail).catch(() => null),
+        fetchConsumerMe().catch(() => ({ authenticated: false, user: null, cards: [], receipts: [] })),
+      ]);
 
-      if (recAcc.recognized) {
-        setAccount(recAcc);
-        if (recAcc.email && !emailInput) {
-          setEmailInput(recAcc.email);
+      let effectiveAcc = recAcc;
+      if (
+        (!effectiveAcc || !effectiveAcc.recognized) &&
+        meRes.authenticated &&
+        meRes.user?.email
+      ) {
+        effectiveAcc = await api.recognizeAccount(meRes.user.email).catch(() => null);
+        if (!effectiveAcc || !effectiveAcc.recognized) {
+          effectiveAcc = {
+            recognized: true,
+            accountExists: true,
+            accountId: meRes.user.id,
+            name: meRes.user.fullName,
+            email: meRes.user.email,
+            cards: (meRes.cards || []).map((c) => ({
+              id: c.id,
+              businessId: c.tenantId,
+              businessName: c.businessName,
+              shortCode: c.barcodeToken,
+              memberCode: c.barcodeToken,
+              barcodeToken: c.barcodeToken,
+              name: meRes.user!.fullName,
+              email: meRes.user!.email,
+              contact: meRes.user!.email,
+              anonymous: false,
+              points: c.stamps,
+              stamps: c.stamps,
+              stampsRequired: c.stampsRequired,
+              targetStamps: c.stampsRequired,
+              rewardText: c.rewardText,
+              rewardValueArs: c.rewardValueArs,
+              colorPreset: (c.colorPreset as any) || 'dark',
+              customColor: c.brandColor,
+              logoUrl: c.logoUrl,
+              lastVisitAt: c.lastStampedAt || new Date().toISOString(),
+              lastStampedAt: c.lastStampedAt,
+              joinedAt: new Date().toISOString(),
+              consent: true,
+            })),
+          };
         }
-        if (recAcc.email) {
-          const vault = await api.recoverConsumerVault(recAcc.email).catch(() => null);
+      }
+
+      if (effectiveAcc && effectiveAcc.recognized) {
+        setAccount(effectiveAcc);
+        if (effectiveAcc.email && !emailInput) {
+          setEmailInput(effectiveAcc.email);
+        }
+        if (effectiveAcc.email) {
+          const vault = await api.recoverConsumerVault(effectiveAcc.email).catch(() => null);
           setReceipts(vault?.receipts || []);
         } else {
           setReceipts([]);
@@ -173,13 +240,21 @@ export const ToquecitosView: React.FC = () => {
   }, [account]);
 
   useEffect(() => {
+    if (cards.length > 0 && !focusedCardId) {
+      setFocusedCardId(cards[0].id);
+    }
     if (selectedCard) {
       const updated = cards.find((c) => c.id === selectedCard.id);
       if (updated) {
         setSelectedCard(updated);
       }
     }
-  }, [cards, selectedCard]);
+  }, [cards, selectedCard, focusedCardId]);
+
+  const activeSummaryCard: ClubMember | null = useMemo(() => {
+    if (cards.length === 0) return null;
+    return cards.find((c) => c.id === focusedCardId) || cards[0];
+  }, [cards, focusedCardId]);
 
   const { totalSavedArs, totalRedeemedCount } = useMemo(() => {
     let saved = 0;
@@ -198,6 +273,115 @@ export const ToquecitosView: React.FC = () => {
     return { totalSavedArs: saved, totalRedeemedCount: redeemed };
   }, [cards, receipts]);
 
+  // Lista unificada de tickets de visita (sellos registrados y comprobantes digitales)
+  const visitTickets: VisitTicketItem[] = useMemo(() => {
+    const items: VisitTicketItem[] = [];
+
+    for (const card of cards) {
+      const rawCode = card.barcodeToken || card.shortCode || card.memberCode || '48291037';
+      const code8 = /^\d{8}$/.test(rawCode) ? rawCode : '48291037';
+      const target = card.targetStamps || card.stampsRequired || 5;
+      const reward = card.rewardText || 'Beneficio exclusivo en tu próxima visita';
+      const history = card.stampHistory || [];
+
+      if (history.length > 0) {
+        for (const h of history) {
+          if (h.voided) continue;
+          const linkedReceipt = h.receiptId
+            ? receipts.find((r) => r.id === h.receiptId)
+            : undefined;
+          items.push({
+            id: `vt-${h.id}`,
+            businessName: card.businessName || 'Comercio adherido',
+            logoUrl: card.logoUrl,
+            createdAt: h.createdAt,
+            stampsDelta: h.count || 1,
+            stampsCurrent: card.stamps || 1,
+            stampsRequired: target,
+            rewardText: reward,
+            barcodeToken: code8,
+            receipt: linkedReceipt,
+          });
+        }
+      } else {
+        items.push({
+          id: `vt-card-${card.id}`,
+          businessName: card.businessName || 'Comercio adherido',
+          logoUrl: card.logoUrl,
+          createdAt: card.lastStampedAt || card.joinedAt,
+          stampsDelta: 1,
+          stampsCurrent: card.stamps || 1,
+          stampsRequired: target,
+          rewardText: reward,
+          barcodeToken: code8,
+        });
+      }
+    }
+
+    for (const r of receipts) {
+      const alreadyIncluded = items.some((it) => it.receipt?.id === r.id);
+      if (!alreadyIncluded) {
+        const matchingCard =
+          cards.find((c) => c.businessId === (r.businessId || r.tenantId)) || cards[0];
+        const rawCode =
+          matchingCard?.barcodeToken || matchingCard?.shortCode || matchingCard?.memberCode || '48291037';
+        const code8 = /^\d{8}$/.test(rawCode) ? rawCode : '48291037';
+        items.push({
+          id: `vt-rcp-${r.id}`,
+          businessName: r.merchantName || matchingCard?.businessName || 'Comercio',
+          logoUrl: matchingCard?.logoUrl,
+          createdAt: r.createdAt,
+          stampsDelta: 1,
+          stampsCurrent: matchingCard?.stamps || 1,
+          stampsRequired: matchingCard?.targetStamps || matchingCard?.stampsRequired || 5,
+          rewardText: matchingCard?.rewardText || 'Beneficio en tu próxima visita',
+          barcodeToken: code8,
+          receipt: r,
+        });
+      }
+    }
+
+    return items.sort(
+      (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+    );
+  }, [cards, receipts]);
+
+  // Movimientos cronológicos para la pestaña "Actividad" ("Últimos movimientos")
+  const activityLogs = useMemo(() => {
+    const entries: Array<{
+      id: string;
+      businessName: string;
+      logoUrl?: string;
+      title: string;
+      subtitle: string;
+      badge: string;
+      isReward: boolean;
+      createdAt: string;
+    }> = [];
+
+    for (const card of cards) {
+      const bizName = card.businessName || 'Comercio adherido';
+      for (const h of card.stampHistory || []) {
+        if (h.voided) continue;
+        const isRedeem = h.count < 0;
+        entries.push({
+          id: `act-${h.id}`,
+          businessName: bizName,
+          logoUrl: card.logoUrl,
+          title: isRedeem ? `Premio canjeado en ${bizName}` : `Sello sumado en ${bizName}`,
+          subtitle: h.actorName || (isRedeem ? 'Canje en mostrador' : 'Visita registrada'),
+          badge: isRedeem ? 'Premio' : `+${h.count} ${h.count === 1 ? 'sello' : 'sellos'}`,
+          isReward: isRedeem,
+          createdAt: h.createdAt,
+        });
+      }
+    }
+
+    return entries.sort(
+      (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+    );
+  }, [cards]);
+
   const handleSelectSection = (sec: ActiveSection) => {
     setActiveSection(sec);
     setOpenedFullReceipt(null);
@@ -210,7 +394,7 @@ export const ToquecitosView: React.FC = () => {
     e.preventDefault();
     const cleanEmail = emailInput.trim().toLowerCase();
     if (!cleanEmail || !cleanEmail.includes('@')) {
-      setAuthError('Ingresá un mail válido.');
+      setAuthError('Ingresá un correo válido.');
       return;
     }
     setAuthLoading(true);
@@ -284,7 +468,7 @@ export const ToquecitosView: React.FC = () => {
     setAuthLoading(true);
     try {
       const reg = await api.registerMember({
-        localCode: originHubCode || 'BURGER01',
+        localCode: originHubCode || 'MONROE01',
         name: cleanName,
         email: cleanEmail,
         birthDate: birthDateInput,
@@ -322,17 +506,20 @@ export const ToquecitosView: React.FC = () => {
     if (walletUnconfigured) return;
     setWalletError(null);
     setWalletStatusMessage(null);
+    setDesktopFallbackUrl(null);
     setWalletLoadingId(card.id);
     try {
-      const immutableShortCode = card.shortCode || card.memberCode || 'K7M2-9XQ4';
+      const rawCode = card.barcodeToken || card.shortCode || card.memberCode || '48291037';
+      const immutableShortCode = /^\d{8}$/.test(rawCode) ? rawCode : '48291037';
       const passRes = await api.createWalletPass({
-        cartelCode: card.localCode || 'BURGER01',
+        cartelCode: card.localCode || 'MONROE01',
         memberId: card.id,
         memberCode: immutableShortCode,
         barcodeValue: immutableShortCode,
+        barcodeFormat: 'CODE128',
         customerName: card.name,
         stamps: card.stamps,
-        stampsRequired: card.targetStamps || card.stampsRequired || 10,
+        stampsRequired: card.targetStamps || card.stampsRequired || 5,
         rewardText: card.rewardText,
         colorPreset: card.colorPreset || 'dark',
         color: card.customColor,
@@ -345,14 +532,27 @@ export const ToquecitosView: React.FC = () => {
         return;
       }
 
-      const targetUrl =
-        passRes.shareUrl || passRes.appleWalletUrl || passRes.googleWalletUrl;
-      if (!passRes.success || !targetUrl) {
+      if (!passRes.success) {
         setWalletError('No pudimos crear tu tarjeta. Probá de nuevo.');
         return;
       }
 
-      window.location.href = targetUrl;
+      const pkpassUrl = `/api/wallet/pass/${encodeURIComponent(immutableShortCode)}.pkpass`;
+      const googleUrl = passRes.googleWalletUrl;
+
+      if (isIOSDevice()) {
+        window.location.href = pkpassUrl;
+        return;
+      }
+
+      if (isAndroidDevice() && googleUrl) {
+        window.location.href = googleUrl;
+        return;
+      }
+
+      const fallback = googleUrl || pkpassUrl;
+      setDesktopFallbackUrl(fallback);
+      setWalletStatusMessage('Tu pase está listo en pantalla. También podés descargarlo debajo.');
     } catch {
       setWalletError('No pudimos crear tu tarjeta. Probá de nuevo.');
     } finally {
@@ -360,95 +560,95 @@ export const ToquecitosView: React.FC = () => {
     }
   };
 
-  const bgMain = isDark ? 'bg-[#09090B] text-[#F5F5F2]' : 'bg-[#F4F1EA] text-[#141413]';
-  const surfaceCard = isDark
-    ? 'bg-[#141416] border-[#242428] text-[#F5F5F2]'
-    : 'bg-white border-[#E4DEC9] text-[#141413] shadow-sm';
-  const mutedText = isDark ? 'text-[#9E9B95]' : 'text-[#6E6A63]';
+  const formattedSavedArs = useMemo(() => {
+    if (totalSavedArs === 0) return '$0,00';
+    return `$${totalSavedArs.toLocaleString('es-AR', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    })}`;
+  }, [totalSavedArs]);
+
+  const userFirstName = useMemo(() => {
+    if (!account?.recognized || !account.name) return '';
+    return account.name.trim().split(/\s+/)[0];
+  }, [account]);
+
+  const userInitial = useMemo(() => {
+    if (userFirstName) return userFirstName.charAt(0).toUpperCase();
+    if (account?.email) return account.email.charAt(0).toUpperCase();
+    return 'T';
+  }, [userFirstName, account]);
 
   return (
-    <div className={`min-h-screen ${bgMain} font-sans pb-24 transition-colors duration-300`}>
-      {/* Barra superior compacta para móvil */}
-      <header
-        className={`sticky top-0 z-30 backdrop-blur-xl border-b transition-colors ${
-          isDark ? 'bg-[#09090B]/85 border-[#242428]' : 'bg-[#F4F1EA]/85 border-[#E4DEC9]'
-        }`}
-      >
-        <div className="max-w-md mx-auto px-3.5 h-13 flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2">
-            {originHubCode ? (
+    <div className="min-h-screen bg-[#0A0A0A] text-[#F5F5F2] font-sans pb-24">
+      {/* Cabecera: Saludo limpio a la izquierda ("Hola, [Nombre]"), píldora central "Todas mis tarjetas", avatar a la derecha */}
+      <header className="sticky top-0 z-30 backdrop-blur-xl bg-[#0A0A0A]/90 border-b border-[#242424]">
+        <div className="max-w-md mx-auto px-4 py-3 flex items-center justify-between gap-2">
+          {/* Izquierda: Saludo limpio o volver al local */}
+          <div className="min-w-0 flex items-center gap-2">
+            {originHubCode && (
               <Link
                 to={`/u/${originHubCode}`}
-                className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-semibold border transition-colors ${
-                  isDark
-                    ? 'bg-[#141416] border-[#26262A] text-[#F5F5F2] hover:border-[#D95B26]'
-                    : 'bg-white border-[#DDD6C7] text-[#141413] hover:border-[#D95B26]'
-                }`}
+                className="w-8 h-8 rounded-full bg-[#141414] border border-[#242424] flex items-center justify-center text-[#F5F5F2] hover:border-[#D95B26] shrink-0"
+                title="Volver al local"
               >
-                <ArrowLeft size={13} />
-                <span>Volver al local</span>
-              </Link>
-            ) : (
-              <Link to="/" className="flex items-center gap-1.5">
-                <BrandLogo variant="isotipo" size="sm" />
-                <span className="font-bold text-xs tracking-tight">Toquecitos</span>
+                <ArrowLeft size={14} />
               </Link>
             )}
-          </div>
-
-          <div className="flex items-center gap-1.5">
-            <button
-              type="button"
-              onClick={toggleTheme}
-              className={`w-8 h-8 rounded-full border flex items-center justify-center transition-colors cursor-pointer ${
-                isDark
-                  ? 'bg-[#141416] border-[#26262A] text-amber-400 hover:border-[#D95B26]'
-                  : 'bg-white border-[#DDD6C7] text-[#141413] hover:border-[#D95B26]'
-              }`}
-              aria-label="Cambiar tema claro u oscuro"
-            >
-              {isDark ? <Sun size={14} /> : <Moon size={14} />}
-            </button>
-
-            <button
-              type="button"
-              onClick={() => {
-                setAuthError(null);
-                setAuthSuccess(null);
-                setAuthStep('enter_email');
-                setIsAccountModalOpen(true);
-              }}
-              className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-[11px] font-semibold transition-colors cursor-pointer ${
-                account?.recognized
-                  ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
-                  : isDark
-                  ? 'bg-[#141416] border-[#26262A] text-[#F5F5F2] hover:border-[#D95B26]'
-                  : 'bg-white border-[#DDD6C7] text-[#141413] hover:border-[#D95B26]'
-              }`}
-            >
-              <User size={12} />
-              <span className="truncate max-w-[115px]">
+            <div className="min-w-0">
+              <p className="text-xs font-bold text-white truncate">
                 {account?.recognized
-                  ? account.name || account.maskedEmail || 'Mi cuenta'
-                  : 'Ingresá tu mail'}
-              </span>
-            </button>
+                  ? `Hola, ${userFirstName || 'Socio'}`
+                  : 'Hola, invitado'}
+              </p>
+              <p className="text-[10px] text-[#9E9B95] truncate">
+                {account?.recognized ? 'Guardado en tu cuenta' : 'Toquecitos'}
+              </p>
+            </div>
           </div>
+
+          {/* Centro: Píldora "Todas mis tarjetas" */}
+          <button
+            type="button"
+            onClick={() => handleSelectSection('cards')}
+            className="px-3 py-1 rounded-full bg-[#141414] border border-[#242424] text-[11px] font-semibold text-[#F5F5F2] hover:border-[#D95B26]/60 transition-colors cursor-pointer shrink-0"
+          >
+            Todas mis tarjetas
+          </button>
+
+          {/* Derecha: Avatar del cliente */}
+          <button
+            type="button"
+            onClick={() => {
+              setAuthError(null);
+              setAuthSuccess(null);
+              setAuthStep('enter_email');
+              setIsAccountModalOpen(true);
+            }}
+            className="w-9 h-9 rounded-full bg-[#141414] border border-[#242424] hover:border-[#D95B26] flex items-center justify-center text-xs font-bold text-white transition-colors cursor-pointer shrink-0"
+            title={account?.recognized ? account.email : 'Ingresá tu correo'}
+          >
+            {account?.recognized ? (
+              <span className="text-[#D95B26] font-extrabold">{userInitial}</span>
+            ) : (
+              <User size={15} className="text-[#9E9B95]" />
+            )}
+          </button>
         </div>
       </header>
 
-      <main className="max-w-md mx-auto px-3.5 pt-3.5 space-y-4">
-        {/* 1. Cabecera compacta: Dinero ahorrado con Toque */}
-        <section className={`rounded-2xl border p-3.5 ${surfaceCard}`}>
+      <main className="max-w-md mx-auto px-4 pt-4 space-y-4">
+        {/* 1. Bloque de ahorro real */}
+        <section className="rounded-2xl bg-[#141414] border border-[#242424] p-4">
           <div className="flex items-center justify-between gap-2">
             <div>
-              <span className={`text-[11px] font-medium ${mutedText}`}>Ahorrado con Toque</span>
-              <div className="text-2xl font-black tracking-tight mt-0.5 font-mono">
-                ${totalSavedArs.toLocaleString('es-AR')}
+              <span className="text-xs font-medium text-[#9E9B95]">Ahorrado con Toque</span>
+              <div className="text-2xl font-black tracking-tight mt-0.5 font-mono text-white">
+                {formattedSavedArs}
               </div>
             </div>
-            <div className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 text-[11px] font-semibold">
-              <Gift size={12} />
+            <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 text-xs font-semibold">
+              <Gift size={13} />
               <span>
                 {totalRedeemedCount}{' '}
                 {totalRedeemedCount === 1 ? 'premio canjeado' : 'premios canjeados'}
@@ -457,16 +657,17 @@ export const ToquecitosView: React.FC = () => {
           </div>
         </section>
 
-        {/* 2. Tarjetero personal compacto */}
-        <section aria-label="Tarjetero personal">
-          <div className="relative rounded-3xl p-3.5 pt-4 pb-4 bg-gradient-to-b from-[#231F1D] via-[#181514] to-[#110F0E] border border-[#38312E] shadow-[0_14px_32px_rgba(0,0,0,0.5)] overflow-hidden">
-            <div className="pointer-events-none absolute inset-1.5 rounded-[20px] border border-dashed border-[#6E5D53]/40" />
+        {/* 2. Tarjetero 3D interactivo de cuero oscuro con costuras y broche central */}
+        <section aria-label="Tarjetero de cuero">
+          <div className="relative rounded-[28px] p-4 pt-5 pb-5 bg-gradient-to-b from-[#1F1B18] via-[#151210] to-[#0E0C0B] border border-[#332C27] shadow-[0_20px_45px_rgba(0,0,0,0.75)] overflow-hidden">
+            {/* Costuras perimetrales sutiles de cuero */}
+            <div className="pointer-events-none absolute inset-2 rounded-[22px] border border-dashed border-[#5E4F45]/45" />
 
-            <div className="relative z-10 flex items-center justify-between px-1.5 mb-2.5">
-              <div className="flex items-center gap-1.5">
+            <div className="relative z-10 flex items-center justify-between px-2 mb-3">
+              <div className="flex items-center gap-2">
                 <Wallet size={14} className="text-[#D95B26]" />
-                <span className="text-xs font-semibold text-[#E6E1DA]">
-                  Tarjetero personal
+                <span className="text-xs font-semibold text-[#E8E2D9]">
+                  Mis tarjetas
                 </span>
               </div>
               <span className="text-[11px] font-medium text-[#A39B93]">
@@ -475,17 +676,17 @@ export const ToquecitosView: React.FC = () => {
             </div>
 
             {cards.length === 0 ? (
-              <div className="relative z-10 rounded-2xl bg-[#141210]/90 border border-[#2E2825] p-4 text-center space-y-2 my-1">
-                <QrCode className="w-6 h-6 text-[#D95B26] mx-auto opacity-85" />
+              <div className="relative z-10 rounded-2xl bg-[#141414]/95 border border-[#242424] p-5 text-center space-y-2.5 my-1">
+                <QrCode className="w-7 h-7 text-[#D95B26] mx-auto opacity-90" />
                 <p className="text-xs font-bold text-white">
                   {account?.recognized
-                    ? 'Todavía no sumaste tarjetas en ningún comercio'
-                    : 'Ingresá con tu cuenta para ver tus tarjetas'}
+                    ? 'Todavía no tenés tarjetas activas en tu tarjetero'
+                    : 'Ingresá tu correo para abrir tus tarjetas'}
                 </p>
                 <p className="text-[11px] text-[#9E9B95] leading-relaxed">
                   {account?.recognized
-                    ? 'Cuando te anotes en el club de un local desde su QR de mostrador, tu tarjeta aparecerá acá.'
-                    : 'Si ya te registraste en el QR de un comercio, ingresá tu mail para ver tus tarjetas y comprobantes unificados.'}
+                    ? 'Cuando escanees el QR de un local adherido, tu tarjeta aparecerá acá automáticamente.'
+                    : 'Si ya te registraste en un comercio, ingresá tu correo para ver tus sellos y tickets.'}
                 </p>
                 {!account?.recognized && (
                   <button
@@ -494,47 +695,55 @@ export const ToquecitosView: React.FC = () => {
                       setAuthStep('enter_email');
                       setIsAccountModalOpen(true);
                     }}
-                    className="mt-1 inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-[#D95B26] hover:bg-[#ea6730] text-white text-xs font-semibold transition-colors cursor-pointer"
+                    className="mt-1 inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-[#D95B26] hover:bg-[#ea6730] text-white text-xs font-bold transition-colors cursor-pointer"
                   >
-                    <Mail size={12} />
-                    <span>Ingresá tu mail</span>
+                    <Mail size={13} />
+                    <span>Ingresá tu correo</span>
                   </button>
                 )}
               </div>
             ) : (
-              <div className="relative z-10 pt-0.5 pb-1.5 space-y-2">
+              <div className="relative z-10 pt-1 pb-3 space-y-2">
                 {cards.map((card, idx) => {
                   const bgHex = resolveCardBackground(card);
-                  const target = card.targetStamps || card.stampsRequired || 10;
+                  const target = card.targetStamps || card.stampsRequired || 5;
                   const currentStamps = card.stamps ?? 0;
-                  const progressPct = Math.min(100, Math.round((currentStamps / target) * 100));
-                  const shortCode = card.shortCode || card.memberCode || 'K7M2-9XQ4';
+                  const rawCode =
+                    card.barcodeToken || card.shortCode || card.memberCode || '48291037';
+                  const shortCode = /^\d{8}$/.test(rawCode) ? rawCode : '48291037';
+                  const isFocused = activeSummaryCard?.id === card.id;
 
                   return (
                     <button
                       key={card.id}
                       type="button"
                       onClick={() => {
+                        setFocusedCardId(card.id);
                         setWalletError(null);
                         setWalletStatusMessage(null);
+                        setDesktopFallbackUrl(null);
                         setSelectedCard(card);
                       }}
                       style={{
                         backgroundColor: bgHex,
-                        transform: `translateY(${idx * -1}px)`,
+                        marginTop: idx === 0 ? 0 : '-10px',
                       }}
-                      className="w-full text-left rounded-2xl p-3 border border-white/15 shadow-[0_6px_16px_rgba(0,0,0,0.35)] active:scale-[0.99] transition-all cursor-pointer relative overflow-hidden"
+                      className={`w-full text-left rounded-2xl p-3.5 border transition-all duration-200 cursor-pointer relative overflow-hidden shadow-[0_-6px_18px_rgba(0,0,0,0.45)] ${
+                        isFocused
+                          ? 'border-white/30 ring-1 ring-[#D95B26]/60'
+                          : 'border-white/15 hover:border-white/30'
+                      }`}
                     >
                       <div className="flex items-center justify-between gap-2.5">
-                        <div className="flex items-center gap-2 min-w-0">
+                        <div className="flex items-center gap-2.5 min-w-0">
                           {card.logoUrl ? (
                             <img
                               src={card.logoUrl}
                               alt={card.businessName || 'Logo'}
-                              className="w-7 h-7 rounded-lg object-cover border border-white/20 shrink-0"
+                              className="w-8 h-8 rounded-xl object-cover border border-white/20 shrink-0"
                             />
                           ) : (
-                            <div className="w-7 h-7 rounded-lg bg-white/15 border border-white/20 flex items-center justify-center text-white font-bold text-xs shrink-0">
+                            <div className="w-8 h-8 rounded-xl bg-white/15 border border-white/20 flex items-center justify-center text-white font-bold text-xs shrink-0">
                               {(card.businessName || 'T').charAt(0).toUpperCase()}
                             </div>
                           )}
@@ -542,27 +751,27 @@ export const ToquecitosView: React.FC = () => {
                             <p className="text-xs font-bold text-white truncate">
                               {card.businessName || 'Comercio adherido'}
                             </p>
-                            <p className="text-[10px] font-mono text-white/80 truncate">
-                              Código: {shortCode}
+                            <p className="text-[11px] text-white/75 truncate">
+                              {card.rewardText || 'Beneficio al completar tus sellos'}
                             </p>
                           </div>
                         </div>
 
                         <div className="text-right shrink-0">
-                          <span className="block text-[9px] font-bold tracking-wider text-white/65">
-                            SELLOS
+                          <span className="block text-[10px] font-medium text-white/70">
+                            Sellos
                           </span>
                           <span className="font-mono text-sm font-black text-white">
-                            {currentStamps} / {target}
+                            {currentStamps} de {target}
                           </span>
                         </div>
                       </div>
 
-                      <div className="mt-2.5 h-1.5 w-full rounded-full bg-black/30 overflow-hidden">
-                        <div
-                          className="h-full rounded-full bg-white/90 transition-all duration-500"
-                          style={{ width: `${progressPct}%` }}
-                        />
+                      <div className="mt-2.5 flex items-center justify-between text-[10px] text-white/75">
+                        <span className="font-mono">Código: {shortCode}</span>
+                        <span className="font-semibold text-white/90">
+                          Tocar para abrir pase →
+                        </span>
                       </div>
                     </button>
                   );
@@ -570,29 +779,31 @@ export const ToquecitosView: React.FC = () => {
               </div>
             )}
 
-            <div className="relative z-10 mt-1.5 pt-2 border-t border-[#38312E]/80 flex items-center justify-between px-1.5">
-              <span className="text-[10px] text-[#9E948C]">
-                Tocá una tarjeta para ver tu código corto y QR
+            {/* Bolsillo frontal de cuero con broche metálico central */}
+            <div className="relative z-20 mt-1 pt-3 border-t border-[#3E342E] flex items-center justify-between px-2">
+              <span className="text-[11px] text-[#A39B93]">
+                Tocá una tarjeta para desplegar tu código de barras
               </span>
+              {/* Broche central del tarjetero */}
               <div
                 aria-hidden="true"
-                className="w-4 h-4 rounded-full bg-gradient-to-br from-[#524944] to-[#26211E] border border-[#736760] flex items-center justify-center"
+                className="w-5 h-5 rounded-full bg-gradient-to-br from-[#6E6057] to-[#29231F] border border-[#8C7B70] shadow-inner flex items-center justify-center shrink-0"
               >
-                <div className="w-1.5 h-1.5 rounded-full bg-[#181514]" />
+                <div className="w-2 h-2 rounded-full bg-[#151210]" />
               </div>
             </div>
           </div>
         </section>
 
-        {/* 3. Tres tarjetas selectoras horizontales compactas */}
-        <section aria-label="Accesos rápidos" className="grid grid-cols-3 gap-2">
+        {/* 3. Tres botones de sección debajo del tarjetero (grid grid-cols-3 gap-2.5) */}
+        <section aria-label="Secciones de tu billetera" className="grid grid-cols-3 gap-2.5">
           <button
             type="button"
             onClick={() => handleSelectSection('cards')}
-            className={`p-2.5 rounded-2xl border text-left transition-all cursor-pointer ${
+            className={`p-3 rounded-2xl border text-left transition-all cursor-pointer ${
               activeSection === 'cards'
                 ? 'bg-[#D95B26] border-[#D95B26] text-white shadow-sm'
-                : `${surfaceCard} hover:border-[#D95B26]/50`
+                : 'bg-[#141414] border-[#242424] text-[#F5F5F2] hover:border-[#D95B26]/50'
             }`}
           >
             <div className="flex items-center justify-between mb-1.5">
@@ -600,25 +811,25 @@ export const ToquecitosView: React.FC = () => {
                 size={15}
                 className={activeSection === 'cards' ? 'text-white' : 'text-[#D95B26]'}
               />
-              <span className="font-mono text-[11px] font-bold">{cards.length}</span>
+              <span className="font-mono text-xs font-bold">{cards.length}</span>
             </div>
-            <p className="text-[11px] font-bold leading-tight">Mis tarjetas</p>
+            <p className="text-xs font-bold leading-tight">Mis tarjetas</p>
             <p
               className={`text-[10px] mt-0.5 truncate ${
-                activeSection === 'cards' ? 'text-white/80' : mutedText
+                activeSection === 'cards' ? 'text-white/80' : 'text-[#9E9B95]'
               }`}
             >
-              Sellos activos
+              Sellos acumulados
             </p>
           </button>
 
           <button
             type="button"
             onClick={() => handleSelectSection('tickets')}
-            className={`p-2.5 rounded-2xl border text-left transition-all cursor-pointer ${
+            className={`p-3 rounded-2xl border text-left transition-all cursor-pointer ${
               activeSection === 'tickets'
                 ? 'bg-[#D95B26] border-[#D95B26] text-white shadow-sm'
-                : `${surfaceCard} hover:border-[#D95B26]/50`
+                : 'bg-[#141414] border-[#242424] text-[#F5F5F2] hover:border-[#D95B26]/50'
             }`}
           >
             <div className="flex items-center justify-between mb-1.5">
@@ -626,12 +837,12 @@ export const ToquecitosView: React.FC = () => {
                 size={15}
                 className={activeSection === 'tickets' ? 'text-white' : 'text-[#D95B26]'}
               />
-              <span className="font-mono text-[11px] font-bold">{receipts.length}</span>
+              <span className="font-mono text-xs font-bold">{visitTickets.length}</span>
             </div>
-            <p className="text-[11px] font-bold leading-tight">Tickets</p>
+            <p className="text-xs font-bold leading-tight">Tickets</p>
             <p
               className={`text-[10px] mt-0.5 truncate ${
-                activeSection === 'tickets' ? 'text-white/80' : mutedText
+                activeSection === 'tickets' ? 'text-white/80' : 'text-[#9E9B95]'
               }`}
             >
               Comprobantes
@@ -640,102 +851,113 @@ export const ToquecitosView: React.FC = () => {
 
           <button
             type="button"
-            onClick={() => handleSelectSection('benefits')}
-            className={`p-2.5 rounded-2xl border text-left transition-all cursor-pointer ${
-              activeSection === 'benefits'
+            onClick={() => handleSelectSection('activity')}
+            className={`p-3 rounded-2xl border text-left transition-all cursor-pointer ${
+              activeSection === 'activity'
                 ? 'bg-[#D95B26] border-[#D95B26] text-white shadow-sm'
-                : `${surfaceCard} hover:border-[#D95B26]/50`
+                : 'bg-[#141414] border-[#242424] text-[#F5F5F2] hover:border-[#D95B26]/50'
             }`}
           >
             <div className="flex items-center justify-between mb-1.5">
-              <Sparkles
+              <Activity
                 size={15}
-                className={activeSection === 'benefits' ? 'text-white' : 'text-[#D95B26]'}
+                className={activeSection === 'activity' ? 'text-white' : 'text-[#D95B26]'}
               />
-              <span
-                className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${
-                  activeSection === 'benefits'
-                    ? 'bg-white/20 text-white'
-                    : 'bg-[#D95B26]/15 text-[#D95B26]'
-                }`}
-              >
-                Pronto
-              </span>
+              <span className="font-mono text-xs font-bold">{activityLogs.length}</span>
             </div>
-            <p className="text-[11px] font-bold leading-tight">Beneficios</p>
+            <p className="text-xs font-bold leading-tight">Actividad</p>
             <p
               className={`text-[10px] mt-0.5 truncate ${
-                activeSection === 'benefits' ? 'text-white/80' : mutedText
+                activeSection === 'activity' ? 'text-white/80' : 'text-[#9E9B95]'
               }`}
             >
-              Próximamente
+              Últimos movimientos
             </p>
           </button>
         </section>
 
-        {/* 4. Contenido dinámico según la sección elegida */}
+        {/* 4. Contenido dinámico según la pestaña activa */}
         <div ref={sectionContentRef} className="pt-0.5">
+          {/* PESTAÑA 1: MIS TARJETAS (Resumen de progreso con barra segmentada) */}
           {activeSection === 'cards' && (
-            <div className="space-y-2.5">
+            <div className="space-y-3">
               <div className="flex items-center justify-between px-1">
-                <h2 className="text-xs font-bold">Detalle de tus tarjetas</h2>
-                <span className={`text-[11px] ${mutedText}`}>
-                  Tocá para abrir tu QR
+                <h2 className="text-xs font-bold text-white">Sellos acumulados</h2>
+                <span className="text-[11px] text-[#9E9B95]">
+                  Tocá una tarjeta para abrir tu código de barras
                 </span>
               </div>
 
               {cards.length === 0 ? (
-                <div className={`rounded-2xl border p-4 text-center ${surfaceCard}`}>
-                  <p className="text-xs font-medium">
+                <div className="rounded-2xl bg-[#141414] border border-[#242424] p-5 text-center">
+                  <p className="text-xs font-medium text-[#9E9B95]">
                     {account?.recognized
-                      ? 'Aún no sumaste sellos en ningún comercio.'
-                      : 'Ingresá tu mail arriba para sincronizar tus tarjetas.'}
+                      ? 'Todavía no sumaste sellos en ningún comercio.'
+                      : 'Ingresá tu correo para ver tus tarjetas guardadas.'}
                   </p>
                 </div>
               ) : (
                 cards.map((card) => {
-                  const target = card.targetStamps || card.stampsRequired || 10;
+                  const target = card.targetStamps || card.stampsRequired || 5;
                   const currentStamps = card.stamps ?? 0;
                   const cooldown = getStrictCooldownState(card.lastStampedAt);
                   const readyToRedeem = currentStamps >= target;
-                  const shortCode = card.shortCode || card.memberCode || 'K7M2-9XQ4';
+                  const rawCode =
+                    card.barcodeToken || card.shortCode || card.memberCode || '48291037';
+                  const shortCode = /^\d{8}$/.test(rawCode) ? rawCode : '48291037';
 
                   return (
                     <div
                       key={card.id}
                       onClick={() => {
+                        setFocusedCardId(card.id);
                         setWalletError(null);
                         setWalletStatusMessage(null);
+                        setDesktopFallbackUrl(null);
                         setSelectedCard(card);
                       }}
-                      className={`rounded-2xl border p-3.5 transition-colors cursor-pointer hover:border-[#D95B26]/50 ${surfaceCard}`}
+                      className="rounded-2xl bg-[#141414] border border-[#242424] p-4 transition-colors cursor-pointer hover:border-[#D95B26]/60"
                     >
                       <div className="flex items-center justify-between gap-2">
-                        <div className="min-w-0">
-                          <div className="flex items-center gap-2">
-                            <h3 className="text-xs font-bold truncate">
-                              {card.businessName || 'Comercio adherido'}
-                            </h3>
-                            <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded-md bg-[#D95B26]/15 text-[#D95B26] shrink-0">
-                              {shortCode}
-                            </span>
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          {card.logoUrl ? (
+                            <img
+                              src={card.logoUrl}
+                              alt={card.businessName || 'Logo'}
+                              className="w-8 h-8 rounded-xl object-cover border border-[#242424] shrink-0"
+                            />
+                          ) : (
+                            <div className="w-8 h-8 rounded-xl bg-[#D95B26]/15 border border-[#D95B26]/30 flex items-center justify-center text-[#D95B26] font-bold text-xs shrink-0">
+                              {(card.businessName || 'T').charAt(0).toUpperCase()}
+                            </div>
+                          )}
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-2">
+                              <h3 className="text-xs font-bold text-white truncate">
+                                {card.businessName || 'Comercio adherido'}
+                              </h3>
+                              <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded-md bg-[#D95B26]/15 text-[#D95B26] shrink-0">
+                                {shortCode}
+                              </span>
+                            </div>
+                            <p className="text-[11px] text-[#9E9B95] mt-0.5 truncate">
+                              Premio: {card.rewardText || 'Beneficio al completar tus sellos'}
+                            </p>
                           </div>
-                          <p className={`text-[11px] ${mutedText} mt-0.5 truncate`}>
-                            Premio: {card.rewardText || 'Beneficio al completar tus sellos'}
-                          </p>
                         </div>
                         <span
-                          className={`px-2 py-0.5 rounded-full text-[11px] font-bold font-mono shrink-0 ${
+                          className={`px-2.5 py-1 rounded-full text-[11px] font-bold font-mono shrink-0 ${
                             readyToRedeem
                               ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
                               : 'bg-[#D95B26]/15 text-[#D95B26]'
                           }`}
                         >
-                          {currentStamps} / {target}
+                          {readyToRedeem ? 'Premio disponible' : `Sellos: ${currentStamps} de ${target}`}
                         </span>
                       </div>
 
-                      <div className="grid grid-cols-5 gap-1.5 mt-3">
+                      {/* Barra segmentada de progreso */}
+                      <div className="grid grid-cols-5 gap-1.5 mt-3.5">
                         {Array.from({ length: Math.min(target, 10) }).map((_, i) => {
                           const filled = i < currentStamps;
                           return (
@@ -744,9 +966,7 @@ export const ToquecitosView: React.FC = () => {
                               className={`h-7 rounded-lg flex items-center justify-center text-[11px] font-bold border transition-all ${
                                 filled
                                   ? 'bg-[#D95B26] border-[#D95B26] text-white shadow-sm'
-                                  : isDark
-                                  ? 'bg-[#09090B] border-[#26262A] text-[#6E6A63]'
-                                  : 'bg-[#F4F1EA] border-[#DDD6C7] text-[#8C867B]'
+                                  : 'bg-[#0A0A0A] border-[#242424] text-[#6E6A63]'
                               }`}
                             >
                               {filled ? <Check size={12} /> : i + 1}
@@ -755,14 +975,14 @@ export const ToquecitosView: React.FC = () => {
                         })}
                       </div>
 
-                      <div className="mt-2.5 pt-2 border-t border-current/10 flex items-center justify-between text-[10px]">
-                        <span className="inline-flex items-center gap-1 text-[#9E9B95]">
-                          <Clock size={11} />
+                      <div className="mt-3 pt-2.5 border-t border-[#242424] flex items-center justify-between text-[11px]">
+                        <span className="inline-flex items-center gap-1.5 text-[#9E9B95]">
+                          <Clock size={12} />
                           <span>{cooldown.label}</span>
                         </span>
                         <span className="font-semibold text-[#D95B26] inline-flex items-center gap-0.5">
-                          <span>Ver QR</span>
-                          <ArrowUpRight size={11} />
+                          <span>Guardar en mi billetera</span>
+                          <ArrowUpRight size={12} />
                         </span>
                       </div>
                     </div>
@@ -772,15 +992,15 @@ export const ToquecitosView: React.FC = () => {
             </div>
           )}
 
-          {/* SECCIÓN TICKETS */}
+          {/* PESTAÑA 2: TICKETS (Diseño de comprobante físico troquelado con muescas laterales y borde dentado) */}
           {activeSection === 'tickets' && (
-            <div className="space-y-3">
+            <div className="space-y-4">
               {openedFullReceipt ? (
-                <div className="space-y-2.5">
+                <div className="space-y-3">
                   <button
                     type="button"
                     onClick={() => setOpenedFullReceipt(null)}
-                    className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-semibold cursor-pointer ${surfaceCard}`}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#141414] border border-[#242424] text-xs font-semibold text-white cursor-pointer"
                   >
                     <ArrowLeft size={13} />
                     <span>Volver a mis tickets</span>
@@ -795,6 +1015,12 @@ export const ToquecitosView: React.FC = () => {
                           (openedFullReceipt.cartelCode &&
                             c.localCode === openedFullReceipt.cartelCode)
                       ) || cards[0];
+                    const rawCode =
+                      matchingCard?.barcodeToken ||
+                      matchingCard?.shortCode ||
+                      matchingCard?.memberCode ||
+                      '48291037';
+                    const code8 = /^\d{8}$/.test(rawCode) ? rawCode : '48291037';
 
                     return (
                       <DieCutTicket
@@ -809,11 +1035,12 @@ export const ToquecitosView: React.FC = () => {
                         cashTendered={openedFullReceipt.cashTendered}
                         changeDue={openedFullReceipt.changeDue}
                         discount={openedFullReceipt.discountSavedArs}
-                        isDark={isDark}
-                        stamps={matchingCard?.stamps ?? 0}
+                        isDark={true}
+                        stamps={matchingCard?.stamps ?? 1}
                         stampsRequired={
-                          matchingCard?.targetStamps ?? matchingCard?.stampsRequired ?? 10
+                          matchingCard?.targetStamps ?? matchingCard?.stampsRequired ?? 5
                         }
+                        barcodeToken={code8}
                         cardTitle={
                           matchingCard?.businessName
                             ? `Tarjeta de ${matchingCard.businessName}`
@@ -823,7 +1050,7 @@ export const ToquecitosView: React.FC = () => {
                           matchingCard?.rewardText || 'Beneficio al completar tus sellos'
                         }
                         customColor={
-                          matchingCard ? resolveCardBackground(matchingCard) : '#141418'
+                          matchingCard ? resolveCardBackground(matchingCard) : '#141414'
                         }
                         logoUrl={matchingCard?.logoUrl}
                         isRegisteredInHub={Boolean(matchingCard)}
@@ -842,63 +1069,129 @@ export const ToquecitosView: React.FC = () => {
                 <>
                   <div className="flex items-center justify-between px-1">
                     <div>
-                      <h2 className="text-xs font-bold">Tus tickets</h2>
-                      <p className={`text-[11px] ${mutedText}`}>
-                        Tocá un ticket para abrir y descargar el comprobante completo
+                      <h2 className="text-xs font-bold text-white">Comprobantes de visita</h2>
+                      <p className="text-[11px] text-[#9E9B95]">
+                        Tus visitas registradas y tickets digitales guardados
                       </p>
                     </div>
                   </div>
 
-                  {receipts.length === 0 ? (
-                    <div className={`rounded-2xl border p-5 text-center space-y-1.5 ${surfaceCard}`}>
-                      <Ticket className="w-7 h-7 text-[#D95B26] mx-auto opacity-80" />
-                      <p className="text-xs font-bold">Aún no tenés tickets guardados</p>
-                      <p className={`text-[11px] ${mutedText}`}>
-                        Cuando escanees el QR del mostrador tras una compra, tu comprobante queda guardado en tu cuenta.
+                  {visitTickets.length === 0 ? (
+                    <div className="rounded-2xl bg-[#141414] border border-[#242424] p-6 text-center space-y-2">
+                      <Ticket className="w-7 h-7 text-[#D95B26] mx-auto opacity-85" />
+                      <p className="text-xs font-bold text-white">
+                        Todavía no tenés comprobantes de visita
+                      </p>
+                      <p className="text-[11px] text-[#9E9B95]">
+                        Cada vez que sumás un sello o escaneás el QR de un local, tu comprobante troquelado aparece acá.
                       </p>
                     </div>
                   ) : (
-                    <div className="space-y-2">
-                      {receipts.map((r) => {
-                        const amountVal = r.total ?? r.amountArs ?? 0;
-                        const dateFormatted = (() => {
-                          const d = new Date(r.createdAt);
-                          if (Number.isNaN(d.getTime())) return r.createdAt;
-                          return d.toLocaleString('es-AR', {
-                            day: '2-digit',
-                            month: 'short',
-                            hour: '2-digit',
-                            minute: '2-digit',
-                          });
-                        })();
+                    <div className="space-y-4">
+                      {visitTickets.map((vt) => {
+                        const dateObj = new Date(vt.createdAt);
+                        const formattedDate = Number.isNaN(dateObj.getTime())
+                          ? vt.createdAt
+                          : dateObj.toLocaleDateString('es-AR', {
+                              day: '2-digit',
+                              month: '2-digit',
+                              year: 'numeric',
+                            });
+                        const formattedTime = Number.isNaN(dateObj.getTime())
+                          ? ''
+                          : dateObj.toLocaleTimeString('es-AR', {
+                              hour: '2-digit',
+                              minute: '2-digit',
+                            });
 
                         return (
-                          <button
-                            key={r.id}
-                            type="button"
-                            onClick={() => setOpenedFullReceipt(r)}
-                            className={`w-full text-left rounded-2xl border p-3.5 flex items-center justify-between gap-2.5 transition-colors hover:border-[#D95B26] cursor-pointer ${surfaceCard}`}
+                          <article
+                            key={vt.id}
+                            className="relative bg-[#141414] border border-[#242424] rounded-t-3xl pt-5 px-5 pb-6 text-[#F5F5F2] shadow-xl overflow-visible"
                           >
-                            <div className="flex items-center gap-2.5 min-w-0">
-                              <div className="w-9 h-9 rounded-xl bg-[#D95B26]/15 text-[#D95B26] flex items-center justify-center shrink-0">
-                                <ReceiptIcon size={16} />
-                              </div>
-                              <div className="min-w-0">
-                                <p className="text-xs font-bold truncate">{r.merchantName}</p>
-                                <p className={`text-[11px] ${mutedText} mt-0.5`}>{dateFormatted}</p>
-                              </div>
+                            {/* Muescas circulares laterales de ticket físico troquelado */}
+                            <div
+                              aria-hidden="true"
+                              className="w-5 h-5 rounded-full bg-[#0A0A0A] border-r border-[#242424] absolute -left-2.5 top-[48%] -translate-y-1/2"
+                            />
+                            <div
+                              aria-hidden="true"
+                              className="w-5 h-5 rounded-full bg-[#0A0A0A] border-l border-[#242424] absolute -right-2.5 top-[48%] -translate-y-1/2"
+                            />
+
+                            {/* Cabecera con logo del comercio arriba, "¡Gracias por tu visita!" y "Comprobante de visita" */}
+                            <div className="text-center space-y-1.5 pb-4 border-b border-dashed border-[#242424]">
+                              {vt.logoUrl ? (
+                                <img
+                                  src={vt.logoUrl}
+                                  alt={vt.businessName}
+                                  className="w-11 h-11 rounded-2xl object-cover mx-auto border border-[#242424]"
+                                />
+                              ) : (
+                                <div className="w-11 h-11 rounded-2xl bg-[#D95B26]/15 border border-[#D95B26]/30 flex items-center justify-center mx-auto font-bold text-sm text-[#D95B26]">
+                                  {vt.businessName.charAt(0).toUpperCase()}
+                                </div>
+                              )}
+                              <h3 className="text-sm font-bold text-white">{vt.businessName}</h3>
+                              <p className="text-xs font-semibold text-[#D95B26]">
+                                ¡Gracias por tu visita!
+                              </p>
+                              <p className="text-[11px] text-[#9E9B95]">
+                                Comprobante de visita · {formattedDate}
+                                {formattedTime ? ` · ${formattedTime}` : ''}
+                              </p>
                             </div>
 
-                            <div className="text-right shrink-0">
-                              <span className="block text-sm font-extrabold font-mono tabular-nums">
-                                ${amountVal.toLocaleString('es-AR')}
-                              </span>
-                              <span className="text-[10px] font-semibold text-[#D95B26] inline-flex items-center gap-0.5">
-                                <span>Ver ticket</span>
-                                <ArrowUpRight size={11} />
-                              </span>
+                            {/* Detalle del sello sumado y monto si tiene recibo de caja */}
+                            <div className="py-3.5 border-b border-dashed border-[#242424] space-y-2 text-xs">
+                              <div className="flex items-center justify-between">
+                                <span className="text-[#9E9B95]">Sello sumado</span>
+                                <span className="font-bold text-emerald-400">
+                                  +{vt.stampsDelta} {vt.stampsDelta === 1 ? 'sello' : 'sellos'} (Sellos: {vt.stampsCurrent} de {vt.stampsRequired})
+                                </span>
+                              </div>
+                              <div className="flex items-center justify-between">
+                                <span className="text-[#9E9B95]">Premio</span>
+                                <span className="font-medium text-white truncate max-w-[190px]">
+                                  {vt.rewardText}
+                                </span>
+                              </div>
+                              {vt.receipt && (
+                                <div className="flex items-center justify-between pt-1">
+                                  <span className="text-[#9E9B95]">Total abonado</span>
+                                  <button
+                                    type="button"
+                                    onClick={() => setOpenedFullReceipt(vt.receipt!)}
+                                    className="font-mono font-bold text-[#D95B26] hover:underline inline-flex items-center gap-1 cursor-pointer"
+                                  >
+                                    <span>
+                                      ${(vt.receipt.total ?? vt.receipt.amountArs ?? 0).toLocaleString('es-AR')}
+                                    </span>
+                                    <ArrowUpRight size={12} />
+                                  </button>
+                                </div>
+                              )}
                             </div>
-                          </button>
+
+                            {/* Código de barras CODE128 con los 8 números grandes debajo */}
+                            <div className="pt-4">
+                              <Barcode128 value={vt.barcodeToken} height={46} />
+                            </div>
+
+                            {/* Borde inferior dentado tipo ticket físico */}
+                            <div
+                              aria-hidden="true"
+                              className="w-full h-3 overflow-hidden absolute left-0 -bottom-2.5"
+                            >
+                              <svg
+                                viewBox="0 0 400 12"
+                                preserveAspectRatio="none"
+                                className="w-full h-full fill-[#141414]"
+                              >
+                                <path d="M0,0 L10,12 L20,0 L30,12 L40,0 L50,12 L60,0 L70,12 L80,0 L90,12 L100,0 L110,12 L120,0 L130,12 L140,0 L150,12 L160,0 L170,12 L180,0 L190,12 L200,0 L210,12 L220,0 L230,12 L240,0 L250,12 L260,0 L270,12 L280,0 L290,12 L300,0 L310,12 L320,0 L330,12 L340,0 L350,12 L360,0 L370,12 L380,0 L390,12 L400,0 Z" />
+                              </svg>
+                            </div>
+                          </article>
                         );
                       })}
                     </div>
@@ -908,33 +1201,106 @@ export const ToquecitosView: React.FC = () => {
             </div>
           )}
 
-          {/* SECCIÓN BENEFICIOS: PRÓXIMAMENTE (Requerimiento 1) */}
+          {/* PESTAÑA 3: ACTIVIDAD ("Últimos movimientos" cronológicos) */}
+          {activeSection === 'activity' && (
+            <div className="space-y-3">
+              <div className="flex items-center justify-between px-1">
+                <h2 className="text-xs font-bold text-white">Últimos movimientos</h2>
+                <span className="text-[11px] text-[#9E9B95]">
+                  Sellos sumados y premios canjeados
+                </span>
+              </div>
+
+              {activityLogs.length === 0 ? (
+                <div className="rounded-2xl bg-[#141414] border border-[#242424] p-5 text-center space-y-1.5">
+                  <Activity className="w-6 h-6 text-[#D95B26] mx-auto opacity-85" />
+                  <p className="text-xs font-bold text-white">Sin movimientos registrados</p>
+                  <p className="text-[11px] text-[#9E9B95]">
+                    Tus sellos sumados y premios canjeados aparecerán acá en orden cronológico.
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {activityLogs.map((log) => {
+                    const d = new Date(log.createdAt);
+                    const dateLabel = Number.isNaN(d.getTime())
+                      ? log.createdAt
+                      : d.toLocaleString('es-AR', {
+                          day: '2-digit',
+                          month: 'short',
+                          hour: '2-digit',
+                          minute: '2-digit',
+                        });
+
+                    return (
+                      <div
+                        key={log.id}
+                        className="rounded-2xl bg-[#141414] border border-[#242424] p-3.5 flex items-center justify-between gap-3"
+                      >
+                        <div className="flex items-center gap-3 min-w-0">
+                          {log.logoUrl ? (
+                            <img
+                              src={log.logoUrl}
+                              alt={log.businessName}
+                              className="w-9 h-9 rounded-xl object-cover border border-[#242424] shrink-0"
+                            />
+                          ) : (
+                            <div className="w-9 h-9 rounded-xl bg-[#D95B26]/15 border border-[#D95B26]/30 text-[#D95B26] font-bold text-xs flex items-center justify-center shrink-0">
+                              {log.businessName.charAt(0).toUpperCase()}
+                            </div>
+                          )}
+                          <div className="min-w-0">
+                            <p className="text-xs font-bold text-white truncate">{log.title}</p>
+                            <p className="text-[11px] text-[#9E9B95] truncate">
+                              {log.subtitle} · {dateLabel}
+                            </p>
+                          </div>
+                        </div>
+                        <span
+                          className={`px-2.5 py-1 rounded-full text-[11px] font-bold shrink-0 ${
+                            log.isReward
+                              ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
+                              : 'bg-[#D95B26]/15 text-[#D95B26]'
+                          }`}
+                        >
+                          {log.badge}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* SECCIÓN BENEFICIOS: PRÓXIMAMENTE */}
           {activeSection === 'benefits' && (
             <div className="space-y-3">
-              <div className={`rounded-2xl border p-5 text-center space-y-2.5 ${surfaceCard}`}>
+              <div className="rounded-2xl bg-[#141414] border border-[#242424] p-5 text-center space-y-2.5">
                 <div className="w-10 h-10 rounded-2xl bg-[#D95B26]/15 border border-[#D95B26]/30 text-[#D95B26] flex items-center justify-center mx-auto">
                   <Sparkles size={18} />
                 </div>
                 <span className="inline-block px-2.5 py-0.5 rounded-full bg-[#D95B26]/15 text-[#D95B26] text-[10px] font-bold">
                   Próximamente
                 </span>
-                <h2 className="text-sm font-bold">
+                <h2 className="text-sm font-bold text-white">
                   Beneficios y regalos con tus tarjetas
                 </h2>
-                <p className={`text-xs ${mutedText} leading-relaxed max-w-xs mx-auto`}>
+                <p className="text-xs text-[#9E9B95] leading-relaxed max-w-xs mx-auto">
                   Muy pronto vas a encontrar acá todos los locales adheridos que ofrecen beneficios exclusivos, descuentos y cosas gratis con tus tarjetas Toque.
                 </p>
               </div>
             </div>
           )}
 
+          {/* SECCIÓN PERFIL / CUENTA */}
           {activeSection === 'profile' && (
-            <div className={`rounded-2xl border p-4 space-y-3.5 ${surfaceCard}`}>
+            <div className="rounded-2xl bg-[#141414] border border-[#242424] p-4 space-y-3.5">
               <div className="flex items-center justify-between">
                 <div>
-                  <h2 className="text-sm font-bold">Tu cuenta unificada</h2>
-                  <p className={`text-[11px] ${mutedText}`}>
-                    Tus tarjetas y comprobantes sincronizados entre el QR del local y Toquecitos.
+                  <h2 className="text-sm font-bold text-white">Guardado en tu cuenta</h2>
+                  <p className="text-[11px] text-[#9E9B95]">
+                    Tus tarjetas y tickets permanecen disponibles en todos los comercios adheridos.
                   </p>
                 </div>
                 <ShieldCheck className="w-5 h-5 text-[#D95B26] shrink-0" />
@@ -944,24 +1310,37 @@ export const ToquecitosView: React.FC = () => {
                 <div className="space-y-2.5">
                   <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/25 flex items-center justify-between">
                     <div className="min-w-0">
-                      <p className="text-[11px] font-bold text-emerald-400">Cuenta activa</p>
-                      <p className="text-xs font-semibold truncate mt-0.5">
+                      <p className="text-[11px] font-bold text-emerald-400">Sesión activa</p>
+                      <p className="text-xs font-semibold text-white truncate mt-0.5">
                         {account.name ? `${account.name} · ` : ''}
                         {account.email || account.maskedEmail}
                       </p>
                     </div>
                     <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setAuthStep('enter_email');
-                      setIsAccountModalOpen(true);
-                    }}
-                    className="w-full py-2 rounded-xl border border-[#D95B26]/40 text-[#D95B26] text-xs font-semibold hover:bg-[#D95B26]/10 transition-colors cursor-pointer"
-                  >
-                    Cambiar mail
-                  </button>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAuthStep('enter_email');
+                        setIsAccountModalOpen(true);
+                      }}
+                      className="flex-1 py-2 rounded-xl border border-[#242424] text-xs font-semibold text-[#F5F5F2] hover:border-[#D95B26] transition-colors cursor-pointer"
+                    >
+                      Cambiar correo
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        clearConsumerSession();
+                        setAccount(null);
+                        setReceipts([]);
+                      }}
+                      className="px-3.5 py-2 rounded-xl border border-red-500/30 text-xs font-semibold text-red-400 hover:bg-red-500/10 transition-colors cursor-pointer"
+                    >
+                      Cerrar sesión
+                    </button>
+                  </div>
                 </div>
               ) : (
                 <button
@@ -972,7 +1351,7 @@ export const ToquecitosView: React.FC = () => {
                   }}
                   className="w-full py-2.5 rounded-xl bg-[#D95B26] hover:bg-[#ea6730] text-white text-xs font-bold transition-colors cursor-pointer"
                 >
-                  Ingresá tu mail
+                  Ingresá tu correo
                 </button>
               )}
             </div>
@@ -980,10 +1359,10 @@ export const ToquecitosView: React.FC = () => {
         </div>
       </main>
 
-      {/* Barra de navegación inferior flotante compacta */}
+      {/* Barra de navegación inferior flotante */}
       <nav
         aria-label="Navegación de Toquecitos"
-        className="fixed bottom-3 left-1/2 -translate-x-1/2 z-30 w-[calc(100%-1.5rem)] max-w-sm rounded-full bg-[#141416]/95 border border-[#28282E] backdrop-blur-xl p-1 shadow-[0_12px_32px_rgba(0,0,0,0.6)] grid grid-cols-4 gap-1"
+        className="fixed bottom-3 left-1/2 -translate-x-1/2 z-30 w-[calc(100%-1.5rem)] max-w-sm rounded-full bg-[#141414]/95 border border-[#242424] backdrop-blur-xl p-1 shadow-[0_12px_32px_rgba(0,0,0,0.75)] grid grid-cols-4 gap-1"
       >
         <button
           type="button"
@@ -993,7 +1372,7 @@ export const ToquecitosView: React.FC = () => {
           }`}
         >
           <CreditCard size={14} />
-          <span>Tarjetas</span>
+          <span>Mis tarjetas</span>
         </button>
 
         <button
@@ -1011,6 +1390,19 @@ export const ToquecitosView: React.FC = () => {
 
         <button
           type="button"
+          onClick={() => handleSelectSection('activity')}
+          className={`py-1.5 rounded-full flex flex-col items-center justify-center gap-0.5 text-[10px] font-semibold transition-colors cursor-pointer ${
+            activeSection === 'activity'
+              ? 'bg-[#D95B26] text-white'
+              : 'text-[#9E9B95] hover:text-white'
+          }`}
+        >
+          <Activity size={14} />
+          <span>Actividad</span>
+        </button>
+
+        <button
+          type="button"
           onClick={() => handleSelectSection('benefits')}
           className={`py-1.5 rounded-full flex flex-col items-center justify-center gap-0.5 text-[10px] font-semibold transition-colors cursor-pointer ${
             activeSection === 'benefits'
@@ -1021,35 +1413,28 @@ export const ToquecitosView: React.FC = () => {
           <Gift size={14} />
           <span>Beneficios</span>
         </button>
-
-        <button
-          type="button"
-          onClick={() => handleSelectSection('profile')}
-          className={`py-1.5 rounded-full flex flex-col items-center justify-center gap-0.5 text-[10px] font-semibold transition-colors cursor-pointer ${
-            activeSection === 'profile'
-              ? 'bg-[#D95B26] text-white'
-              : 'text-[#9E9B95] hover:text-white'
-          }`}
-        >
-          <User size={14} />
-          <span>Cuenta</span>
-        </button>
       </nav>
 
-      {/* Modal de Tarjeta del Cliente compacto (sin botón "Dar de baja esta tarjeta") */}
+      {/* Modal de Pase Completo al tocar una tarjeta en el tarjetero */}
       {selectedCard && (
         <div
-          className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-3 overflow-y-auto"
+          className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-center justify-center p-3 overflow-y-auto"
           onClick={() => setSelectedCard(null)}
         >
           <div
             onClick={(e) => e.stopPropagation()}
-            className="w-full max-w-xs rounded-3xl bg-[#141416] border border-[#26262A] p-3.5 space-y-3 shadow-2xl my-auto"
+            className="w-full max-w-xs rounded-3xl bg-[#141414] border border-[#242424] p-4 space-y-3.5 shadow-2xl my-auto"
           >
             <div className="flex items-center justify-between px-1">
-              <span className="text-xs font-bold text-[#F5F5F2] truncate">
-                Tarjeta de {selectedCard.businessName || 'Comercio'}
-              </span>
+              <div>
+                <span className="text-xs font-bold text-white truncate block">
+                  {selectedCard.businessName || 'Comercio adherido'}
+                </span>
+                <span className="text-[11px] text-[#9E9B95] inline-flex items-center gap-1 mt-0.5">
+                  <Clock size={11} className="text-[#D95B26]" />
+                  <span>{getStrictCooldownState(selectedCard.lastStampedAt).label}</span>
+                </span>
+              </div>
               <button
                 type="button"
                 onClick={() => setSelectedCard(null)}
@@ -1060,39 +1445,67 @@ export const ToquecitosView: React.FC = () => {
               </button>
             </div>
 
-            <WalletPassCard
-              businessName={selectedCard.businessName || 'Comercio'}
-              memberName={selectedCard.name || 'Socio'}
-              stamps={selectedCard.stamps}
-              stampsRequired={selectedCard.targetStamps || selectedCard.stampsRequired || 10}
-              rewardText={selectedCard.rewardText || 'Beneficio al completar tus sellos'}
-              barcodeToken={selectedCard.shortCode || selectedCard.memberCode || 'K7M2-9XQ4'}
-              shortCode={selectedCard.shortCode || selectedCard.memberCode || 'K7M2-9XQ4'}
-              colorPreset={selectedCard.colorPreset || 'dark'}
-              customColor={selectedCard.customColor}
-              logoUrl={selectedCard.logoUrl}
-              compact
-            />
+            {(() => {
+              const rawCode =
+                selectedCard.barcodeToken ||
+                selectedCard.shortCode ||
+                selectedCard.memberCode ||
+                '48291037';
+              const code8 = /^\d{8}$/.test(rawCode) ? rawCode : '48291037';
+              return (
+                <WalletPassCard
+                  businessName={selectedCard.businessName || 'Comercio'}
+                  memberName={selectedCard.name || 'Socio'}
+                  stamps={selectedCard.stamps}
+                  stampsRequired={
+                    selectedCard.targetStamps || selectedCard.stampsRequired || 5
+                  }
+                  rewardText={
+                    selectedCard.rewardText || 'Beneficio al completar tus sellos'
+                  }
+                  barcodeToken={code8}
+                  shortCode={code8}
+                  colorPreset={selectedCard.colorPreset || 'dark'}
+                  customColor={selectedCard.customColor}
+                  logoUrl={selectedCard.logoUrl}
+                  compact
+                />
+              );
+            })()}
 
             <div className="space-y-2">
               <button
                 type="button"
                 disabled={walletLoadingId === selectedCard.id || walletUnconfigured}
                 onClick={() => handleAddToWallet(selectedCard)}
-                className="w-full py-2.5 px-3.5 rounded-xl bg-[#D95B26] hover:bg-[#e06530] disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                className="w-full py-3 px-4 rounded-xl bg-[#D95B26] hover:bg-[#e06530] disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
               >
                 <Wallet size={14} />
                 <span>
                   {walletUnconfigured
                     ? 'Pronto vas a poder guardarla en tu billetera'
                     : walletLoadingId === selectedCard.id
-                    ? 'Creando tu tarjeta...'
-                    : 'Agregar a mi billetera'}
+                    ? 'Preparando tu tarjeta...'
+                    : 'Guardar en mi billetera'}
                 </span>
               </button>
 
               {walletStatusMessage && (
                 <p className="text-[11px] text-center text-[#9E9B95]">{walletStatusMessage}</p>
+              )}
+
+              {desktopFallbackUrl && (
+                <div className="text-center">
+                  <a
+                    href={desktopFallbackUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-1 text-[11px] font-semibold text-[#D95B26] hover:underline"
+                  >
+                    <span>Descargar archivo de billetera</span>
+                    <ExternalLink size={12} />
+                  </a>
+                </div>
               )}
 
               {walletError && (
@@ -1115,21 +1528,21 @@ export const ToquecitosView: React.FC = () => {
         </div>
       )}
 
-      {/* Modal de Cuenta Única y Reconocimiento compacto */}
+      {/* Modal de Cuenta Única y Reconocimiento */}
       {isAccountModalOpen && (
         <div
-          className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-3"
+          className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-center justify-center p-3"
           onClick={() => setIsAccountModalOpen(false)}
         >
           <div
             onClick={(e) => e.stopPropagation()}
-            className="w-full max-w-xs rounded-3xl bg-[#141416] border border-[#26262A] p-4 text-[#F5F5F2] space-y-3.5 shadow-2xl"
+            className="w-full max-w-xs rounded-3xl bg-[#141414] border border-[#242424] p-4 text-[#F5F5F2] space-y-3.5 shadow-2xl"
           >
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <ShieldCheck className="w-4 h-4 text-[#D95B26]" />
                 <h3 className="text-sm font-bold">
-                  {authStep === 'register_new' ? 'Creá tu cuenta' : 'Ingresá tu mail'}
+                  {authStep === 'register_new' ? 'Creá tu cuenta' : 'Ingresá tu correo'}
                 </h3>
               </div>
               <button
@@ -1156,19 +1569,19 @@ export const ToquecitosView: React.FC = () => {
             {authStep === 'enter_email' && (
               <form onSubmit={handleSendLoginOtp} className="space-y-3">
                 <p className="text-[11px] text-[#9E9B95] leading-relaxed">
-                  Si ya te registraste en un comercio o en Toquecitos, entrás directo con tu mail y ves todo unificado.
+                  Si ya te registraste en un comercio o en Toquecitos, entrás directo con tu correo sin volver a completar tus datos.
                 </p>
                 <div>
                   <label className="block text-[11px] font-medium text-[#9E9B95] mb-1">
-                    Mail
+                    Ingresá tu correo
                   </label>
                   <input
                     type="email"
                     required
                     value={emailInput}
                     onChange={(e) => setEmailInput(e.target.value)}
-                    placeholder="tu@mail.com"
-                    className="w-full px-3 py-2 rounded-xl bg-[#09090B] border border-[#26262A] text-xs text-white focus:outline-none focus:border-[#D95B26]"
+                    placeholder="tu@correo.com"
+                    className="w-full px-3 py-2.5 rounded-xl bg-[#0A0A0A] border border-[#242424] text-xs text-white focus:outline-none focus:border-[#D95B26]"
                   />
                 </div>
                 <button
@@ -1201,7 +1614,7 @@ export const ToquecitosView: React.FC = () => {
                     value={otpCode}
                     onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
                     placeholder="123456"
-                    className="w-full px-3 py-2 rounded-xl bg-[#09090B] border border-[#26262A] text-center font-mono text-base tracking-widest text-white focus:outline-none focus:border-[#D95B26]"
+                    className="w-full px-3 py-2.5 rounded-xl bg-[#0A0A0A] border border-[#242424] text-center font-mono text-base tracking-widest text-white focus:outline-none focus:border-[#D95B26]"
                   />
                 </div>
                 <button
@@ -1219,15 +1632,15 @@ export const ToquecitosView: React.FC = () => {
                   }}
                   className="w-full py-1.5 text-[11px] text-[#9E9B95] hover:text-white cursor-pointer"
                 >
-                  Cambiar mail
+                  Cambiar correo
                 </button>
               </form>
             )}
 
             {authStep === 'register_new' && (
-              <form onSubmit={handleCompleteNewRegistration} className="space-y-2.5">
+              <form onSubmit={handleCompleteNewRegistration} className="space-y-3">
                 <p className="text-[11px] text-[#9E9B95]">
-                  Este mail todavía no tiene cuenta en Toque. Completá tus datos una sola vez.
+                  Es la primera vez que usás este correo en Toque. Completá tus datos una única vez.
                 </p>
                 <div>
                   <label className="block text-[11px] font-medium text-[#9E9B95] mb-1">
@@ -1239,7 +1652,7 @@ export const ToquecitosView: React.FC = () => {
                     value={nameInput}
                     onChange={(e) => setNameInput(e.target.value)}
                     placeholder="Tu nombre"
-                    className="w-full px-3 py-2 rounded-xl bg-[#09090B] border border-[#26262A] text-xs text-white focus:outline-none focus:border-[#D95B26]"
+                    className="w-full px-3 py-2.5 rounded-xl bg-[#0A0A0A] border border-[#242424] text-xs text-white focus:outline-none focus:border-[#D95B26]"
                   />
                 </div>
 
@@ -1247,17 +1660,10 @@ export const ToquecitosView: React.FC = () => {
                   <label className="block text-[11px] font-medium text-[#9E9B95] mb-1">
                     Fecha de nacimiento
                   </label>
-                  <div className="relative">
-                    <Calendar className="w-3.5 h-3.5 text-[#9E9B95] absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
-                    <input
-                      type="date"
-                      required
-                      max={new Date().toISOString().split('T')[0]}
-                      value={birthDateInput}
-                      onChange={(e) => setBirthDateInput(e.target.value)}
-                      className="w-full pl-9 pr-3 py-2 rounded-xl bg-[#09090B] border border-[#26262A] text-xs text-white focus:outline-none focus:border-[#D95B26]"
-                    />
-                  </div>
+                  <BirthDatePicker
+                    value={birthDateInput}
+                    onChange={setBirthDateInput}
+                  />
                 </div>
 
                 <label className="flex items-center gap-2 text-[11px] text-[#9E9B95] cursor-pointer pt-0.5">
@@ -1265,7 +1671,7 @@ export const ToquecitosView: React.FC = () => {
                     type="checkbox"
                     checked={marketingConsentInput}
                     onChange={(e) => setMarketingConsentInput(e.target.checked)}
-                    className="rounded border-[#26262A] bg-[#09090B] text-[#D95B26]"
+                    className="rounded border-[#242424] bg-[#0A0A0A] text-[#D95B26]"
                   />
                   <span>Quiero recibir beneficios de comercios adheridos</span>
                 </label>

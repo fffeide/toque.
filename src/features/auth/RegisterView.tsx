@@ -264,7 +264,7 @@ export const RegisterView: React.FC = () => {
                     required
                     value={businessName}
                     onChange={(e) => setBusinessName(e.target.value)}
-                    placeholder="Ej: La Burger"
+                    placeholder="Ej: Musical Monroe"
                     className="w-full pl-10 pr-3.5 py-3 rounded-xl bg-[#0A0A0A] border border-[#242424] text-sm text-[#F4F4F6] placeholder-[#9E9EA8]/50 focus:outline-none focus:border-[#D95B26]"
                   />
                 </div>

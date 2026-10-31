@@ -16,6 +16,8 @@ import {
   Loader2,
   Delete,
   Calendar,
+  Barcode,
+  Plus,
 } from 'lucide-react';
 
 export const ClubScannerView: React.FC = () => {
@@ -24,6 +26,7 @@ export const ClubScannerView: React.FC = () => {
   const [locals, setLocals] = useState<ClubLocal[]>([]);
   const [selectedLocalId, setSelectedLocalId] = useState<string>('');
   const [codeQuery, setCodeQuery] = useState('');
+  const [quickNumericCode, setQuickNumericCode] = useState('');
 
   // 4 Estados de la pantalla: vacío ('idle'), cargando ('loading'), error ('error'), encontrado/éxito ('found')
   const [viewState, setViewState] = useState<'idle' | 'loading' | 'error' | 'found'>('idle');
@@ -108,16 +111,86 @@ export const ClubScannerView: React.FC = () => {
     performLookup(codeQuery, false);
   };
 
+  const handleDirectStampByCode = async (rawCode: string) => {
+    const clean = rawCode.trim().replace(/[^A-Za-z0-9]/g, '');
+    if (!clean) {
+      showToast('Ingresá los 8 números debajo del código de barras.', 'error');
+      return;
+    }
+
+    try {
+      setProcessing(true);
+      setErrorMessage('');
+      setSuccessBanner(null);
+
+      // Primero consultamos el socio y validamos la regla de 24 horas
+      const memberLookup = await api.lookupMemberByCode(clean);
+      setLookupResult(memberLookup);
+      setViewState('found');
+
+      if (!memberLookup.canStampNow) {
+        showToast(memberLookup.cooldownMessage || 'Podrá sumar de nuevo mañana.', 'info');
+        return;
+      }
+
+      if (memberLookup.programMode === 'per_amount' && ticketAmountNumber <= 0) {
+        showToast('Ingresá el monto del ticket antes de sumar.', 'info');
+        return;
+      }
+
+      const res = await api.addStampByCashier({
+        memberCode: memberLookup.shortCode || clean,
+        amount: memberLookup.programMode === 'per_amount' ? ticketAmountNumber : undefined,
+        localId: selectedLocalId || locals[0]?.id,
+      });
+
+      if (res.cooldown) {
+        showToast(res.message || 'Podrá sumar de nuevo mañana.', 'info');
+        return;
+      }
+
+      const refreshed = await api.lookupMemberByCode(memberLookup.shortCode || clean);
+      setLookupResult(refreshed);
+      setQuickNumericCode('');
+      setCodeQuery(refreshed.shortCode || clean);
+      setTicketAmountStr('0');
+
+      setSuccessBanner({
+        title:
+          res.stampsAdded === 1
+            ? '¡Sumaste 1 sello!'
+            : `¡Sumaste ${res.stampsAdded} sellos!`,
+        newCountText: `${refreshed.stamps} / ${refreshed.targetStamps}`,
+        subtitle: refreshed.rewardReady
+          ? `Completó la tarjeta · Premio disponible: ${refreshed.rewardText}`
+          : refreshed.remainingStamps === 1
+          ? 'Le falta 1 sello para el premio'
+          : `Le faltan ${refreshed.remainingStamps} sellos para el premio`,
+      });
+    } catch (err: any) {
+      setErrorMessage(err?.message || 'No encontramos ese código. Revisalo y probá de nuevo.');
+      setViewState('error');
+      showToast(err?.message || 'No pudimos sumar el sello.', 'error');
+    } finally {
+      setProcessing(false);
+    }
+  };
+
+  const handleQuickNumericSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    handleDirectStampByCode(quickNumericCode);
+  };
+
   const startCameraScan = async () => {
     setCameraError(null);
     setCameraOpen(true);
     try {
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-        setCameraError('Tu navegador no permite abrir la cámara directamente. Escribí el código corto.');
+        setCameraError('Tu navegador no permite abrir la cámara directamente. Escribí los 8 números debajo del código de barras.');
         return;
       }
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: 'environment' },
+        video: { facingMode: { ideal: 'environment' } },
       });
       streamRef.current = stream;
       if (videoRef.current) {
@@ -126,8 +199,8 @@ export const ClubScannerView: React.FC = () => {
       }
 
       if ('BarcodeDetector' in window) {
-        // @ts-expect-error BarcodeDetector API en navegadores compatibles
-        const detector = new window.BarcodeDetector({ formats: ['qr_code'] });
+        // @ts-expect-error BarcodeDetector en navegadores compatibles
+        const detector = new window.BarcodeDetector({ formats: ['code_128', 'qr_code'] });
         const interval = setInterval(async () => {
           if (!videoRef.current || !streamRef.current) {
             clearInterval(interval);
@@ -139,8 +212,9 @@ export const ClubScannerView: React.FC = () => {
               const rawVal = String(barcodes[0].rawValue).trim();
               clearInterval(interval);
               stopCamera();
-              setCodeQuery(rawVal.toUpperCase());
-              performLookup(rawVal, false);
+              setCodeQuery(rawVal);
+              setQuickNumericCode(rawVal.replace(/\D/g, '').slice(0, 8));
+              handleDirectStampByCode(rawVal);
             }
           } catch {
             // continuar escaneando
@@ -149,7 +223,7 @@ export const ClubScannerView: React.FC = () => {
       }
     } catch {
       setCameraError(
-        'No pudimos acceder a la cámara. Revisá los permisos o escribí el código corto manualmente.'
+        'No pudimos acceder a la cámara. Revisá los permisos o escribí los 8 números manualmente.'
       );
     }
   };
@@ -210,7 +284,7 @@ export const ClubScannerView: React.FC = () => {
             : `¡Sumaste ${res.stampsAdded} sellos!`,
         newCountText: `${refreshed.stamps} / ${refreshed.targetStamps}`,
         subtitle: refreshed.rewardReady
-          ? `Completó la tarjeta · Premio listo: ${refreshed.rewardText}`
+          ? `Completó la tarjeta · Premio disponible: ${refreshed.rewardText}`
           : refreshed.remainingStamps === 1
           ? 'Le falta 1 sello para el premio'
           : `Le faltan ${refreshed.remainingStamps} sellos para el premio`,
@@ -255,14 +329,6 @@ export const ClubScannerView: React.FC = () => {
       : `Le faltan ${lookupResult.remainingStamps} sellos`
     : '';
 
-  const formatShortCodeInput = (raw: string): string => {
-    const alnum = raw.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8);
-    if (alnum.length > 4) {
-      return `${alnum.slice(0, 4)}-${alnum.slice(4)}`;
-    }
-    return alnum;
-  };
-
   return (
     <div className="max-w-2xl mx-auto space-y-5">
       {/* Encabezado */}
@@ -270,7 +336,7 @@ export const ClubScannerView: React.FC = () => {
         <div>
           <h1 className="text-xl sm:text-2xl font-bold text-[#F4F4F6]">Sumar sello</h1>
           <p className="text-xs sm:text-sm text-[#9E9EA8] mt-0.5">
-            Escribí el código corto de la persona o escaneá su QR con la cámara.
+            Escaneá el código de barras de la tarjeta con la cámara o ingresá los 8 números debajo del código.
           </p>
         </div>
 
@@ -293,84 +359,28 @@ export const ClubScannerView: React.FC = () => {
         )}
       </div>
 
-      {/* Campo grande de código corto + Botón cámara */}
+      {/* Recuadro de cámara + Campo numérico rápido siempre visible debajo */}
       <div className="rounded-2xl bg-[#141414] border border-[#242424] p-4 sm:p-6 space-y-4">
-        <form onSubmit={handleSearchSubmit} className="space-y-3">
-          <label
-            htmlFor="short-code-input"
-            className="block text-xs font-semibold text-[#9E9EA8]"
-          >
-            Código de la persona (el guión se pone solo al escribir)
-          </label>
-
-          <div className="flex flex-col sm:flex-row gap-3">
-            <div className="relative flex-1">
-              <Search className="w-5 h-5 text-[#9E9EA8] absolute left-4 top-1/2 -translate-y-1/2 pointer-events-none" />
-              <input
-                id="short-code-input"
-                type="text"
-                maxLength={9}
-                value={codeQuery}
-                onChange={(e) => setCodeQuery(formatShortCodeInput(e.target.value))}
-                placeholder="K7M2-9XQ4"
-                autoComplete="off"
-                spellCheck={false}
-                className="w-full pl-12 pr-10 py-4 rounded-xl bg-[#0A0A0A] border border-[#242424] text-lg sm:text-xl font-mono font-bold tracking-wider text-[#F4F4F6] placeholder-[#52525B] focus:outline-none focus:border-[#D95B26] uppercase"
-              />
-              {codeQuery && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setCodeQuery('');
-                    setViewState('idle');
-                    setLookupResult(null);
-                    setErrorMessage('');
-                    setSuccessBanner(null);
-                  }}
-                  aria-label="Limpiar código"
-                  className="absolute right-3.5 top-1/2 -translate-y-1/2 p-1 rounded-lg text-[#9E9EA8] hover:text-[#F4F4F6] cursor-pointer"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              )}
-            </div>
-
-            <button
-              type="submit"
-              disabled={viewState === 'loading' || !codeQuery.trim()}
-              className="px-6 py-4 rounded-xl bg-[#D95B26] hover:bg-[#e06530] disabled:opacity-50 text-white font-bold text-sm transition-colors cursor-pointer shrink-0 flex items-center justify-center gap-2"
-            >
-              {viewState === 'loading' ? (
-                <>
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                  <span>Buscando...</span>
-                </>
-              ) : (
-                <span>Buscar código</span>
-              )}
-            </button>
-          </div>
-        </form>
-
-        <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+        <div className="flex flex-wrap items-center justify-between gap-2">
           <button
             type="button"
             onClick={cameraOpen ? stopCamera : startCameraScan}
             className="w-full sm:w-auto px-4 py-2.5 rounded-xl bg-[#0A0A0A] hover:bg-[#1C1C22] border border-[#242424] text-xs font-semibold text-[#F4F4F6] flex items-center justify-center gap-2 transition-colors cursor-pointer"
           >
             <Camera className="w-4 h-4 text-[#D95B26]" />
-            <span>{cameraOpen ? 'Cerrar cámara' : 'Escanear QR con la cámara'}</span>
+            <span>{cameraOpen ? 'Cerrar cámara' : 'Abrir cámara para escanear código de barras o QR'}</span>
           </button>
 
           <button
             type="button"
             onClick={() => {
-              setCodeQuery('K7M2-9XQ4');
-              performLookup('K7M2-9XQ4', false);
+              setQuickNumericCode('48291037');
+              setCodeQuery('48291037');
+              performLookup('48291037', false);
             }}
             className="text-xs text-[#9E9EA8] hover:text-[#F4F4F6] underline cursor-pointer"
           >
-            Probar con ejemplo: K7M2-9XQ4
+            Probar con ejemplo: 48291037
           </button>
         </div>
 
@@ -379,8 +389,8 @@ export const ClubScannerView: React.FC = () => {
           <div className="p-4 rounded-2xl bg-[#0A0A0A] border border-[#242424] space-y-3">
             <div className="flex items-center justify-between">
               <span className="text-xs font-semibold text-[#F4F4F6] flex items-center gap-2">
-                <QrCode className="w-4 h-4 text-[#D95B26]" />
-                Apuntá al código QR de la tarjeta del cliente
+                <Barcode className="w-4 h-4 text-[#D95B26]" />
+                Apuntá al código de barras o QR de la tarjeta del cliente
               </span>
               <button
                 type="button"
@@ -407,6 +417,96 @@ export const ClubScannerView: React.FC = () => {
             )}
           </div>
         )}
+
+        {/* Campo numérico rápido siempre visible debajo del recuadro de la cámara */}
+        <form onSubmit={handleQuickNumericSubmit} className="space-y-2.5 pt-2 border-t border-[#242424]">
+          <label
+            htmlFor="quick-numeric-code"
+            className="block text-xs font-semibold text-[#9E9EA8]"
+          >
+            Carga rápida por código numérico (8 dígitos)
+          </label>
+          <div className="flex flex-col sm:flex-row gap-3">
+            <div className="relative flex-1">
+              <Barcode className="w-5 h-5 text-[#D95B26] absolute left-4 top-1/2 -translate-y-1/2 pointer-events-none" />
+              <input
+                id="quick-numeric-code"
+                type="text"
+                inputMode="numeric"
+                maxLength={8}
+                value={quickNumericCode}
+                onChange={(e) => {
+                  const val = e.target.value.replace(/\D/g, '').slice(0, 8);
+                  setQuickNumericCode(val);
+                  setCodeQuery(val);
+                }}
+                placeholder="Ingresá los 8 números debajo del código de barras"
+                autoComplete="off"
+                className="w-full pl-12 pr-10 py-3.5 rounded-xl bg-[#0A0A0A] border border-[#242424] text-base sm:text-lg font-mono font-bold tracking-wider text-[#F4F4F6] placeholder-[#52525B] focus:outline-none focus:border-[#D95B26]"
+              />
+              {quickNumericCode && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setQuickNumericCode('');
+                    setCodeQuery('');
+                    setViewState('idle');
+                    setLookupResult(null);
+                    setErrorMessage('');
+                    setSuccessBanner(null);
+                  }}
+                  aria-label="Limpiar código"
+                  className="absolute right-3.5 top-1/2 -translate-y-1/2 p-1 rounded-lg text-[#9E9EA8] hover:text-[#F4F4F6] cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              )}
+            </div>
+
+            <button
+              type="submit"
+              disabled={processing || !quickNumericCode.trim()}
+              className="px-6 py-3.5 rounded-xl bg-[#D95B26] hover:bg-[#e06530] disabled:opacity-50 text-white font-bold text-sm transition-colors cursor-pointer shrink-0 flex items-center justify-center gap-2"
+            >
+              {processing ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <span>Sumando...</span>
+                </>
+              ) : (
+                <>
+                  <Plus className="w-4 h-4" />
+                  <span>Sumar sello</span>
+                </>
+              )}
+            </button>
+          </div>
+        </form>
+
+        {/* Búsqueda alternativa para ver tarjeta antes de sumar */}
+        <form onSubmit={handleSearchSubmit} className="pt-2 border-t border-[#242424] flex flex-col sm:flex-row gap-2.5 items-center">
+          <div className="relative flex-1 w-full">
+            <Search className="w-4 h-4 text-[#9E9EA8] absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+            <input
+              id="short-code-input"
+              type="text"
+              maxLength={12}
+              value={codeQuery}
+              onChange={(e) => setCodeQuery(e.target.value.replace(/[^A-Za-z0-9-]/g, '').slice(0, 12))}
+              placeholder="Buscar tarjeta sin sumar todavía (ej. 48291037)"
+              autoComplete="off"
+              spellCheck={false}
+              className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-[#0A0A0A] border border-[#242424] text-xs font-mono font-bold text-[#F4F4F6] placeholder-[#52525B] focus:outline-none focus:border-[#D95B26]"
+            />
+          </div>
+          <button
+            type="submit"
+            disabled={viewState === 'loading' || !codeQuery.trim()}
+            className="w-full sm:w-auto px-4 py-2.5 rounded-xl bg-[#1C1C22] hover:bg-[#26262E] border border-[#242424] disabled:opacity-50 text-[#F4F4F6] font-semibold text-xs transition-colors cursor-pointer shrink-0"
+          >
+            Consultar estado
+          </button>
+        </form>
       </div>
 
       {/* ESTADO 1: VACÍO */}
@@ -419,7 +519,7 @@ export const ClubScannerView: React.FC = () => {
             Ingresá o escaneá un código para empezar
           </h2>
           <p className="text-xs text-[#9E9EA8] max-w-md mx-auto">
-            Pedile a la persona el código corto que figura en su tarjeta (por ejemplo, K7M2-9XQ4) o escaneá su QR desde el celular o la tablet.
+            Pedile a la persona los 8 números que figuran debajo del código de barras en su tarjeta (por ejemplo, 48291037) o escaneá el código con la cámara.
           </p>
         </div>
       )}
@@ -452,7 +552,7 @@ export const ClubScannerView: React.FC = () => {
         </div>
       )}
 
-      {/* ESTADO 4: ÉXITO (Banner grande después de sumar o entregar premio, animación corta transform + opacity) */}
+      {/* ESTADO 4: ÉXITO */}
       {successBanner && (
         <div
           role="status"
@@ -476,7 +576,6 @@ export const ClubScannerView: React.FC = () => {
       {/* FICHA DE LA PERSONA ENCONTRADA (Sin mail ni cumpleaños para proteger privacidad en caja) */}
       {viewState === 'found' && lookupResult && (
         <div className="rounded-3xl bg-[#141414] border border-[#242424] p-5 sm:p-6 space-y-5">
-          {/* Datos principales: Nombre + inicial del apellido, sellos 4 / 5, cuánto le falta, fecha último sello */}
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-[#242424]">
             <div className="space-y-1">
               <span className="inline-block text-xs font-mono font-bold px-2.5 py-1 rounded-lg bg-[#0A0A0A] border border-[#242424] text-[#D95B26]">
@@ -499,7 +598,7 @@ export const ClubScannerView: React.FC = () => {
             </div>
 
             <div className="sm:text-right bg-[#0A0A0A] border border-[#242424] rounded-2xl px-4 py-3">
-              <span className="block text-xs font-semibold text-[#9E9EA8]">Sellos</span>
+              <span className="block text-xs font-semibold text-[#9E9EA8]">Sellos acumulados</span>
               <span className="text-3xl sm:text-4xl font-extrabold text-[#F4F4F6] font-mono tabular-nums">
                 {lookupResult.stamps} / {lookupResult.targetStamps}
               </span>
@@ -543,7 +642,7 @@ export const ClubScannerView: React.FC = () => {
                 </div>
                 <div>
                   <p className="text-sm sm:text-base font-extrabold text-[#F4F4F6]">
-                    Premio listo: {lookupResult.rewardText}
+                    Premio disponible: {lookupResult.rewardText}
                   </p>
                   <p className="text-xs text-[#9E9EA8] mt-0.5">
                     Al entregar el premio, la tarjeta vuelve a 0 para empezar una nueva.

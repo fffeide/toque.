@@ -172,7 +172,7 @@ export const UpcomingProductPageView: React.FC<{
 
       <main className="flex-1 max-w-4xl w-full mx-auto px-4 sm:px-6 py-12 space-y-10">
         <div className="space-y-4">
-          <span className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-[#bec8ff]/15 border border-[#bec8ff]/30 text-[#bec8ff] text-xs font-extrabold uppercase tracking-wider">
+          <span className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-[#bec8ff]/15 border border-[#bec8ff]/30 text-[#bec8ff] text-xs font-extrabold tracking-wider">
             <Icon className="w-4 h-4" />
             {config.badge}
           </span>
@@ -228,7 +228,7 @@ export const UpcomingProductPageView: React.FC<{
           {product !== 'toquecitos' && (
             <div className="p-5 rounded-2xl bg-[#18181b] border border-[#28282a] flex items-center justify-between gap-4">
               <div className="space-y-1">
-                <div className="text-xs font-bold uppercase text-[#bec8ff]">
+                <div className="text-xs font-bold text-[#bec8ff]">
                   Integrado con tu Cartel QR actual
                 </div>
                 <div className="text-base sm:text-lg font-extrabold text-[#f1f1ee]">
@@ -265,7 +265,7 @@ export const ForClientsPageView: React.FC = () => {
 
       <main className="flex-1 max-w-4xl w-full mx-auto px-4 sm:px-6 py-12 space-y-10">
         <div className="space-y-4">
-          <span className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-[#bec8ff]/15 border border-[#bec8ff]/30 text-[#bec8ff] text-xs font-extrabold uppercase">
+          <span className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-[#bec8ff]/15 border border-[#bec8ff]/30 text-[#bec8ff] text-xs font-extrabold">
             <Smartphone className="w-4 h-4" />
             Para clientes
           </span>
@@ -279,21 +279,21 @@ export const ForClientsPageView: React.FC = () => {
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
           <div className="bg-[#111113] border border-[#242426] rounded-2xl p-6 space-y-2">
-            <div className="text-xs font-extrabold uppercase text-[#bec8ff]">Paso 1</div>
+            <div className="text-xs font-extrabold text-[#bec8ff]">Paso 1</div>
             <h2 className="text-xl font-extrabold text-[#f1f1ee]">Escaneás el Cartel</h2>
             <p className="text-sm text-[#a1a1aa]">
               Con la cámara del celular en el mostrador del café, heladería o local de tu barrio.
             </p>
           </div>
           <div className="bg-[#111113] border border-[#242426] rounded-2xl p-6 space-y-2">
-            <div className="text-xs font-extrabold uppercase text-[#bec8ff]">Paso 2</div>
+            <div className="text-xs font-extrabold text-[#bec8ff]">Paso 2</div>
             <h2 className="text-xl font-extrabold text-[#f1f1ee]">1 sola cuenta Toque</h2>
             <p className="text-sm text-[#a1a1aa]">
               Cuando vas a otro comercio con Toque, te reconoce y sumás la nueva tarjeta con un solo botón.
             </p>
           </div>
           <div className="bg-[#111113] border border-[#242426] rounded-2xl p-6 space-y-2">
-            <div className="text-xs font-extrabold uppercase text-[#bec8ff]">Paso 3</div>
+            <div className="text-xs font-extrabold text-[#bec8ff]">Paso 3</div>
             <h2 className="text-xl font-extrabold text-[#f1f1ee]">Tus datos cuidados</h2>
             <p className="text-sm text-[#a1a1aa]">
               No pedimos teléfono ni apellido. Y si sos menor de 18 o preferís no dar datos, podés usar una tarjeta sin datos.
@@ -362,7 +362,7 @@ export const FaqPageView: React.FC = () => {
 
       <main className="flex-1 max-w-3xl w-full mx-auto px-4 sm:px-6 py-12 space-y-8">
         <div className="space-y-3">
-          <span className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-[#bec8ff]/15 border border-[#bec8ff]/30 text-[#bec8ff] text-xs font-extrabold uppercase">
+          <span className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-[#bec8ff]/15 border border-[#bec8ff]/30 text-[#bec8ff] text-xs font-extrabold">
             <HelpCircle className="w-4 h-4" />
             Ayuda y preguntas frecuentes
           </span>

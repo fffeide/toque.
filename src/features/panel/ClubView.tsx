@@ -146,13 +146,13 @@ export const ClubView: React.FC = () => {
   const [submittingDelete, setSubmittingDelete] = useState(false);
 
   const syncFormWithConfig = (cfg: ClubConfig) => {
-    const bizName = business?.name || 'La Burger';
+    const bizName = business?.name || 'Musical Monroe';
     const defaultTitle =
       cfg.logoText || cfg.loyaltyTitle || `Tarjeta de sellos de ${bizName}`;
     const defaultReward =
       cfg.loyaltyReward ||
       cfg.rewardText ||
-      cfg.secondaryFields?.find((f) => f.label.toUpperCase().includes('PREMIO'))?.value ||
+      cfg.secondaryFields?.find((f) => f.label.toLowerCase().includes('premio'))?.value ||
       'Beneficio al completar tus sellos';
     const stampsReq = cfg.targetStamps || cfg.stampsRequired || 10;
 
@@ -205,7 +205,7 @@ export const ClubView: React.FC = () => {
   const planLimits = getPlanLimits(planState?.planId || planState?.status);
   const canCreateMoreCards = cards.length < planLimits.maxCards;
 
-  const activeCartelCode = locals[0]?.code || 'BURGER01';
+  const activeCartelCode = locals[0]?.code || 'MONROE01';
   const publicHubUrl =
     typeof window !== 'undefined'
       ? `${window.location.origin}/u/${activeCartelCode}`
@@ -249,11 +249,11 @@ export const ClubView: React.FC = () => {
     const cleanTitle = logoText.trim() || `Tarjeta de sellos de ${cleanOrg}`;
     const cleanReward = rewardText.trim() || 'Beneficio al completar tus sellos';
 
-    // Etiquetas fijas y no editables: SELLOS, PREMIO, SOCIO
-    const fixedPrimaryFields = [{ label: 'SELLOS', value: `1 / ${targetStamps}` }];
+    // Etiquetas fijas y no editables: Sellos, Premio, Cliente
+    const fixedPrimaryFields = [{ label: 'Sellos', value: `1 / ${targetStamps}` }];
     const fixedSecondaryFields = [
-      { label: 'PREMIO', value: cleanReward },
-      { label: 'SOCIO', value: cleanOrg },
+      { label: 'Premio', value: cleanReward },
+      { label: 'Cliente', value: cleanOrg },
     ];
 
     try {
@@ -274,7 +274,7 @@ export const ClubView: React.FC = () => {
         cardThemeColor: effectiveCardBgColor,
         colorPreset,
         customColor: customColor.trim() || undefined,
-        barcodeFormat: 'QR',
+        barcodeFormat: 'CODE128',
         logoUrl: logoUrl.trim() || undefined,
         headerFields: [],
         primaryFields: fixedPrimaryFields,
@@ -285,17 +285,17 @@ export const ClubView: React.FC = () => {
       const passRes = await api
         .createWalletPass({
           cartelCode: activeCartelCode,
-          memberId: updated.id || 'K7M2-9XQ4',
-          memberCode: 'K7M2-9XQ4',
+          memberId: updated.id || '48291037',
+          memberCode: '48291037',
           customerName: cleanOrg,
           stamps: 1,
           stampsRequired: targetStamps,
           logoText: cleanTitle,
           organizationName: cleanOrg,
           rewardText: cleanReward,
-          barcodeFormat: 'QR',
-          barcodeValue: 'K7M2-9XQ4',
-          barcodeAltText: 'K7M2-9XQ4',
+          barcodeFormat: 'CODE128',
+          barcodeValue: '48291037',
+          barcodeAltText: '48291037',
           colorPreset,
           color:
             customColor.trim() && /^#[0-9A-Fa-f]{6}$/.test(customColor.trim())
@@ -345,10 +345,10 @@ export const ClubView: React.FC = () => {
       setCreatingCard(true);
       const presetColorHex = PRESET_HEX_MAP[newCardPreset] || '#141418';
       const cleanOrg = business?.name || 'Mi Comercio';
-      const primary = [{ label: 'SELLOS', value: `1 / ${newCardStamps}` }];
+      const primary = [{ label: 'Sellos', value: `1 / ${newCardStamps}` }];
       const secondary = [
-        { label: 'PREMIO', value: newCardReward.trim() },
-        { label: 'SOCIO', value: cleanOrg },
+        { label: 'Premio', value: newCardReward.trim() },
+        { label: 'Cliente', value: cleanOrg },
       ];
 
       const created = await api.createClubCard({
@@ -359,7 +359,7 @@ export const ClubView: React.FC = () => {
         stampsRequired: newCardStamps,
         brandColor: presetColorHex,
         colorPreset: newCardPreset,
-        barcodeFormat: 'QR',
+        barcodeFormat: 'CODE128',
         primaryFields: primary,
         secondaryFields: secondary,
       });
@@ -367,17 +367,17 @@ export const ClubView: React.FC = () => {
       const passRes = await api
         .createWalletPass({
           cartelCode: activeCartelCode,
-          memberId: created.id || 'K7M2-9XQ4',
-          memberCode: 'K7M2-9XQ4',
+          memberId: created.id || '48291037',
+          memberCode: '48291037',
           customerName: cleanOrg,
           stamps: 1,
           stampsRequired: newCardStamps,
           logoText: newCardTitle.trim(),
           organizationName: cleanOrg,
           rewardText: newCardReward.trim(),
-          barcodeFormat: 'QR',
-          barcodeValue: 'K7M2-9XQ4',
-          barcodeAltText: 'K7M2-9XQ4',
+          barcodeFormat: 'CODE128',
+          barcodeValue: '48291037',
+          barcodeAltText: '48291037',
           colorPreset: newCardPreset,
           primaryFields: primary,
           secondaryFields: secondary,
@@ -800,11 +800,12 @@ export const ClubView: React.FC = () => {
                 <input
                   ref={scannerInputRef}
                   type="text"
+                  inputMode="numeric"
                   maxLength={9}
                   autoFocus
                   value={barcodeQuery}
-                  onChange={(e) => setBarcodeQuery(formatShortCodeInput(e.target.value))}
-                  placeholder="Escribí los caracteres (ej. K7M2-9XQ4)..."
+                  onChange={(e) => setBarcodeQuery(e.target.value.replace(/[^A-Za-z0-9-]/g, '').slice(0, 9))}
+                  placeholder="Ingresá los 8 números debajo del código de barras (ej. 48291037)..."
                   className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-[#0C0C0E] border border-[#282830] font-mono text-xs font-bold tracking-wider text-[#F4F4F6] placeholder-[#666672] focus:outline-none focus:border-[#D95B26]"
                 />
               </div>
@@ -1095,7 +1096,7 @@ export const ClubView: React.FC = () => {
                     required
                     value={rewardText}
                     onChange={(e) => setRewardText(e.target.value)}
-                    placeholder="Ej: 1 Burger con papas gratis en tu próxima visita"
+                    placeholder="Ej: Encordado o beneficio gratis al completar tus sellos"
                     className="w-full px-3.5 py-2 rounded-xl bg-[#0C0C0E] border border-[#282830] text-xs text-[#F4F4F6] focus:outline-none focus:border-[#D95B26]"
                   />
                 </div>
@@ -1109,22 +1110,22 @@ export const ClubView: React.FC = () => {
                     <span>Campos fijos de la tarjeta (no editables)</span>
                   </span>
                   <span className="text-[10px] text-[#9E9EA8]">
-                    Código corto siempre visible debajo del QR
+                    Código numérico de 8 dígitos siempre visible debajo del código de barras
                   </span>
                 </div>
                 <div className="grid grid-cols-3 gap-2 text-xs">
                   <div className="p-2 rounded-lg bg-[#141418] border border-[#242428]">
-                    <span className="block text-[9px] font-bold text-[#9E9EA8]">SELLOS</span>
+                    <span className="block text-[10px] font-bold text-[#9E9EA8]">Sellos</span>
                     <span className="font-mono font-bold text-[#F4F4F6]">1 / {targetStamps}</span>
                   </div>
                   <div className="p-2 rounded-lg bg-[#141418] border border-[#242428]">
-                    <span className="block text-[9px] font-bold text-[#9E9EA8]">PREMIO</span>
+                    <span className="block text-[10px] font-bold text-[#9E9EA8]">Premio</span>
                     <span className="font-semibold text-[#F4F4F6] truncate block">
                       {rewardText || 'Tu premio'}
                     </span>
                   </div>
                   <div className="p-2 rounded-lg bg-[#141418] border border-[#242428]">
-                    <span className="block text-[9px] font-bold text-[#9E9EA8]">SOCIO</span>
+                    <span className="block text-[10px] font-bold text-[#9E9EA8]">Cliente</span>
                     <span className="font-semibold text-[#F4F4F6] truncate block">
                       Nombre del cliente
                     </span>
@@ -1289,12 +1290,12 @@ export const ClubView: React.FC = () => {
                 businessName={
                   logoText || `Tarjeta de sellos de ${organizationName || business?.name || 'Mi Comercio'}`
                 }
-                memberName={organizationName || business?.name || 'Socio'}
+                memberName={organizationName || business?.name || 'Cliente'}
                 stamps={1}
                 stampsRequired={targetStamps}
                 rewardText={rewardText || 'Beneficio al completar tus sellos'}
-                barcodeToken="K7M2-9XQ4"
-                shortCode="K7M2-9XQ4"
+                barcodeToken="48291037"
+                shortCode="48291037"
                 colorPreset={colorPreset}
                 customColor={
                   customColor.trim() && /^#[0-9A-Fa-f]{6}$/.test(customColor.trim())

@@ -1,13 +1,12 @@
 /**
- * Toque — cliente oficial de la API de WalletWallet (para el Worker de Cloudflare)
+ * Toque — cliente oficial de WalletWallet para el Worker
  *
  * Basado en https://www.walletwallet.dev/docs/
  *
  * Reglas:
- *  - Se usa SOLO desde el servidor tras verificar sesión o código por mail.
- *  - La clave (WALLETWALLET_API_KEY) es un secreto del Worker (`npx wrangler secret put WALLETWALLET_API_KEY`).
+ *  - Se usa desde el servidor tras verificar sesión o código por correo.
  *  - Nunca se devuelve "éxito" si WalletWallet falló. Los errores se informan con claridad.
- *  - Guardar en D1 por socio: barcode_token, last_stamped_at, wallet_serial, wallet_last_notification, last_notified_at, wallet_sync_error.
+ *  - Guardar por cliente: barcode_token (8 dígitos numéricos), last_stamped_at, wallet_serial, wallet_apple_base64, wallet_google_url, wallet_last_notification, wallet_sync_error.
  */
 
 const BASE = 'https://api.walletwallet.dev';
@@ -20,34 +19,21 @@ export type ColorPreset = 'dark' | 'blue' | 'green' | 'red' | 'purple' | 'orange
 
 export interface CardInput {
   businessName: string;
-  /** Vacío en las tarjetas "sin datos". */
   memberName?: string;
   stamps: number;
   stampsRequired: number;
   rewardText: string;
-  /**
-   * Lo que codifica el QR de la tarjeta. Tiene que ser un token aleatorio criptográfico largo (16+ caracteres)
-   * que el servidor relaciona con el socio. Nunca un código corto adivinable.
-   */
+  /** Código numérico único de 8 dígitos para el código de barras CODE128 */
   barcodeToken: string;
   colorPreset?: ColorPreset;
-  /**
-   * El texto del último aviso. WalletWallet muestra la notificación en el celular cada vez que este
-   * valor CAMBIA. Por eso hay que mandarlo igual en cada actualización (`updatePass`): si en una
-   * actualización de sellos lo volvés a " ", el celular mostraría un aviso vacío.
-   */
   notification?: string;
-  /** Solo plan Pro. */
   locations?: { latitude: number; longitude: number; relevantText?: string }[];
-  /** Solo plan Pro. */
   color?: string;
-  /** Solo plan Pro. HTTPS o PNG en base64. */
   logoURL?: string;
 }
 
 export interface CreatedPass {
   serialNumber: string;
-  /** Página de WalletWallet que muestra el botón correcto según el celular (Apple o Google). */
   shareUrl: string;
   googleSaveUrl?: string;
   applePass?: string;
@@ -70,50 +56,45 @@ export class WalletError extends Error {
   }
 }
 
+/** Genera un código numérico único de 8 dígitos (ej. "48291037") */
 export function generateBarcodeToken(): string {
-  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-    return crypto.randomUUID().replace(/-/g, '');
-  }
-  const bytes = new Uint8Array(16);
+  const bytes = new Uint8Array(8);
   if (typeof crypto !== 'undefined' && typeof crypto.getRandomValues === 'function') {
     crypto.getRandomValues(bytes);
-    return Array.from(bytes)
-      .map((b) => b.toString(16).padStart(2, '0'))
-      .join('');
+    let out = '';
+    for (let i = 0; i < 8; i++) {
+      const digit = i === 0 ? (bytes[i] % 9) + 1 : bytes[i] % 10;
+      out += String(digit);
+    }
+    return out;
   }
-  return (
-    Math.random().toString(36).substring(2, 18) +
-    Math.random().toString(36).substring(2, 18)
-  ).slice(0, 32);
+  return String(Math.floor(10000000 + Math.random() * 90000000));
 }
 
 export function buildBody(c: CardInput): Record<string, unknown> {
   const body: Record<string, unknown> = {
     barcodeValue: c.barcodeToken,
-    barcodeFormat: 'QR',
-    barcodeAltText: '', // sin texto debajo del QR
+    barcodeFormat: 'CODE128',
+    barcodeAltText: c.barcodeToken,
     logoText: c.businessName.slice(0, 40),
     description: `Tarjeta de sellos de ${c.businessName}`.slice(0, 120),
     organizationName: c.businessName.slice(0, 64),
     primaryFields: [
       {
-        label: 'SELLOS',
+        label: 'Sellos',
         value: `${c.stamps} / ${c.stampsRequired}`,
-        changeMessage: 'Sellos: %@',
+        changeMessage: 'Puntos acumulados: %@',
       },
     ],
-    secondaryFields: [{ label: 'PREMIO', value: c.rewardText.slice(0, 60) }],
+    secondaryFields: [{ label: 'Premio', value: c.rewardText.slice(0, 60) }],
     headerFields: c.memberName
-      ? [{ label: 'SOCIO', value: c.memberName.slice(0, 40) }]
+      ? [{ label: 'Cliente', value: c.memberName.slice(0, 40) }]
       : undefined,
     notification: c.notification ?? ' ',
     sharingProhibited: true,
     colorPreset: c.colorPreset ?? 'dark',
   };
-
-  if (!body.headerFields) {
-    delete body.headerFields;
-  }
+  if (!body.headerFields) delete body.headerFields;
   if (c.locations?.length) body.locations = c.locations.slice(0, 10);
   if (c.color) body.color = c.color;
   if (c.logoURL) body.logoURL = c.logoURL;
@@ -143,7 +124,7 @@ async function fail(res: Response): Promise<never> {
     /* sin cuerpo */
   }
   if (res.status === 401)
-    throw new WalletError(401, 'bad_key', 'La clave de WalletWallet no es válida.');
+    throw new WalletError(401, 'bad_key', 'La clave de billetera no es válida.');
   if (res.status === 429)
     throw new WalletError(429, 'quota', 'Se agotó el cupo mensual de tarjetas.');
   if (res.status === 404)
@@ -154,16 +135,16 @@ async function fail(res: Response): Promise<never> {
     throw new WalletError(
       400,
       'invalid',
-      detail || 'WalletWallet rechazó los datos de la tarjeta.'
+      detail || 'Los datos de la tarjeta no pudieron validarse.'
     );
   throw new WalletError(
     502,
     'upstream',
-    'WalletWallet no respondió bien. Probá de nuevo más tarde.'
+    'El servicio de billetera no respondió bien. Probá de nuevo más tarde.'
   );
 }
 
-/** Crea la tarjeta. Cuenta 1 del cupo mensual. Guardá el serialNumber. */
+/** Crea la tarjeta y devuelve serialNumber, shareUrl, googleSaveUrl y applePass (base64 .pkpass). */
 export async function createPass(env: Env, card: CardInput): Promise<CreatedPass> {
   const res = await fetch(`${BASE}/api/passes`, {
     method: 'POST',
@@ -186,8 +167,7 @@ export async function createPass(env: Env, card: CardInput): Promise<CreatedPass
 }
 
 /**
- * Actualiza la tarjeta (por ejemplo, un sello nuevo). Hay que mandar la tarjeta COMPLETA, no solo lo que cambió.
- * Cuenta contra el cupo solo si algo cambió; si es idéntica devuelve unchanged: true y no cuesta nada.
+ * Actualiza la tarjeta enviando el diseño y datos completos.
  */
 export async function updatePass(
   env: Env,
@@ -204,7 +184,7 @@ export async function updatePass(
   return { unchanged: !!data.unchanged, notifiedDevices: data.notifiedDevices ?? 0 };
 }
 
-/** Invalida la tarjeta en todos los celulares (por ejemplo, cuando el cliente pide dar de baja su tarjeta). */
+/** Invalida la tarjeta en todos los celulares. */
 export async function revokePass(env: Env, serialNumber: string): Promise<void> {
   const res = await fetch(`${BASE}/api/passes/${encodeURIComponent(serialNumber)}`, {
     method: 'DELETE',
@@ -213,7 +193,7 @@ export async function revokePass(env: Env, serialNumber: string): Promise<void> 
   if (!res.ok) await fail(res);
 }
 
-/** Cuánto cupo queda este mes. Sirve para avisar antes de que se agote. */
+/** Consulta el cupo mensual disponible. */
 export async function getUsage(
   env: Env
 ): Promise<{ count: number; limit: number; remaining: number; plan: string }> {
@@ -227,7 +207,7 @@ export async function getUsage(
   };
 }
 
-/** Texto del saludo de cumpleaños. Cambia cada año para que WalletWallet no lo tome como "sin cambios". */
+/** Texto del saludo de cumpleaños. */
 export function birthdayMessage(
   businessName: string,
   year: number,

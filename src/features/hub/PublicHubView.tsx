@@ -13,6 +13,14 @@ import { Skeleton } from '../../components/ui/Skeleton';
 import { BrandLogo } from '../../components/ui/Avatar';
 import { WalletPassCard } from '../../components/wallet/WalletPassCard';
 import { DieCutTicket } from '../../components/ticket/DieCutTicket';
+import { BirthDatePicker } from '../../components/BirthDatePicker';
+import {
+  fetchConsumerMe,
+  getConsumerSessionEmail,
+  clearConsumerSession,
+  isIOSDevice,
+  isAndroidDevice,
+} from '../../lib/consumerSession';
 import { formatARS } from '../../lib/format';
 import {
   Star,
@@ -31,7 +39,6 @@ import {
   Check,
   Mail,
   User as UserIcon,
-  Calendar,
 } from 'lucide-react';
 
 function isConfiguredReviewUrl(url?: string): boolean {
@@ -82,7 +89,7 @@ export const PublicHubView: React.FC = () => {
   const navigate = useNavigate();
   const { showToast } = useToast();
 
-  const targetCode = code || 'BURGER01';
+  const targetCode = code || 'MONROE01';
 
   const [hub, setHub] = useState<PublicHub | null>(null);
   const [loading, setLoading] = useState(true);
@@ -91,19 +98,13 @@ export const PublicHubView: React.FC = () => {
   const [pinnedReceipt, setPinnedReceipt] = useState<Receipt | null>(null);
   const [isReceiptExpired, setIsReceiptExpired] = useState(false);
 
-  // Pasos del cliente en el Hub:
-  // - 'recognized_other_merchant': ya tiene cuenta verificada en Toque, suma tarjeta con 1 clic
-  // - 'email_login': no reconocido -> "Ingresá tu mail" -> código 6 dígitos -> entra directo si ya tenía cuenta
-  // - 'form': registro de cliente nuevo (nombre, mail, fecha de nacimiento >= 18)
-  // - 'verify_email': código de 6 dígitos para confirmar el alta
-  // - 'active': tarjeta activa con código corto grande + QR + botón "Agregar a mi billetera"
   const [step, setStep] = useState<
     'recognized_other_merchant' | 'email_login' | 'form' | 'verify_email' | 'active'
   >('form');
 
   const [recognizedAccount, setRecognizedAccount] = useState<RecognizedClientAccount | null>(null);
 
-  // Datos de registro (solo nombre, mail y fecha de nacimiento con selector nativo)
+  // Datos de registro (nombre, correo y fecha de nacimiento con selector nativo de 3 columnas)
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [birthDate, setBirthDate] = useState<string>('');
@@ -112,11 +113,11 @@ export const PublicHubView: React.FC = () => {
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
-  // Verificación OTP 6 dígitos (registro)
+  // Verificación de 6 dígitos (registro)
   const [emailOtpCode, setEmailOtpCode] = useState('');
   const [emailOtpHint, setEmailOtpHint] = useState<string | null>(null);
 
-  // Ingreso por mail ("Ingresá tu mail" -> código 6 dígitos)
+  // Ingreso por correo ("Ingresá tu correo" -> código 6 dígitos)
   const [loginEmail, setLoginEmail] = useState('');
   const [loginOtpSent, setLoginOtpSent] = useState(false);
   const [loginOtpCode, setLoginOtpCode] = useState('');
@@ -129,11 +130,12 @@ export const PublicHubView: React.FC = () => {
   const [cooldownRemainingMs, setCooldownRemainingMs] = useState<number>(0);
   const [newlyStampedSlot, setNewlyStampedSlot] = useState<number | null>(null);
 
-  // Botón "Agregar a mi billetera"
+  // Botón "Guardar en mi billetera"
   const [generatingPass, setGeneratingPass] = useState(false);
   const [walletUnconfigured, setWalletUnconfigured] = useState(false);
   const [walletStatusMessage, setWalletStatusMessage] = useState<string | null>(null);
   const [walletErrorMessage, setWalletErrorMessage] = useState<string | null>(null);
+  const [desktopFallbackUrl, setDesktopFallbackUrl] = useState<string | null>(null);
 
   const clubSectionRef = useRef<HTMLDivElement>(null);
   const processedReceiptStampsRef = useRef<Set<string>>(new Set());
@@ -149,9 +151,11 @@ export const PublicHubView: React.FC = () => {
     const loadInitial = async () => {
       try {
         setLoading(true);
-        const [data, recAcc] = await Promise.all([
+        const sessionEmail = getConsumerSessionEmail();
+        const [data, recAcc, meRes] = await Promise.all([
           api.getPublicHub(targetCode),
-          api.recognizeAccount().catch(() => null),
+          api.recognizeAccount(sessionEmail || undefined).catch(() => null),
+          fetchConsumerMe().catch(() => ({ authenticated: false, user: null, cards: [], receipts: [] })),
         ]);
         if (!active) return;
 
@@ -175,10 +179,31 @@ export const PublicHubView: React.FC = () => {
           return;
         }
 
-        // Reconocimiento de cuenta única en memoria / servidor
+        // Reconocimiento de sesión activa única (servidor o navegador)
+        let effectiveAcc = recAcc;
+        if (
+          (!effectiveAcc || !effectiveAcc.recognized) &&
+          meRes.authenticated &&
+          meRes.user?.email
+        ) {
+          effectiveAcc = await api
+            .recognizeAccount(meRes.user.email)
+            .catch(() => null);
+          if (!effectiveAcc || !effectiveAcc.recognized) {
+            effectiveAcc = {
+              recognized: true,
+              accountExists: true,
+              accountId: meRes.user.id,
+              name: meRes.user.fullName,
+              email: meRes.user.email,
+              cards: [],
+            };
+          }
+        }
+
         const existingCardInThisBusiness =
           data.club?.member ||
-          recAcc?.cards?.find((c) => c.businessId === data.business.id) ||
+          effectiveAcc?.cards?.find((c) => c.businessId === data.business.id) ||
           null;
 
         if (existingCardInThisBusiness) {
@@ -204,10 +229,10 @@ export const PublicHubView: React.FC = () => {
               // ignore
             }
           }
-        } else if (recAcc && recAcc.recognized && recAcc.email) {
-          // Ya tiene cuenta en Toque (mail verificado) en otro comercio -> no pedir nombre ni fecha de nacimiento
-          setRecognizedAccount(recAcc);
-          setMarketingConsent(false);
+        } else if (effectiveAcc && effectiveAcc.recognized && effectiveAcc.email) {
+          // Ya tiene sesión activa en Toque -> mostrar directamente "Hola, [Nombre]" y un único botón "Guardar mi tarjeta"
+          setRecognizedAccount(effectiveAcc);
+          setMarketingConsent(true);
           setStep('recognized_other_merchant');
         } else {
           setStep('form');
@@ -268,7 +293,7 @@ export const PublicHubView: React.FC = () => {
     window.location.href = hub.reviewUrl;
   };
 
-  // Cuenta única reconocida: sumar tarjeta de este comercio con 1 toque sin pedir nombre ni fecha de nacimiento
+  // Cuenta única reconocida: vincular o abrir su tarjeta de este comercio en un solo toque
   const handleAddCardForRecognizedAccount = async () => {
     if (!hub) return;
     setFormError(null);
@@ -290,13 +315,13 @@ export const PublicHubView: React.FC = () => {
     }
   };
 
-  // Pantalla "Ingresá tu mail" -> código de 6 dígitos -> si ya tenía cuenta, entra directo SIN pasar por el registro
+  // Pantalla "Ingresá tu correo" -> código de 6 dígitos -> si ya tenía cuenta, entra directo SIN pasar por el registro
   const handleSendLoginOtp = async (e: React.FormEvent) => {
     e.preventDefault();
     setFormError(null);
     const cleanMail = loginEmail.trim().toLowerCase();
     if (!cleanMail || !cleanMail.includes('@')) {
-      setFormError('Ingresá un mail válido.');
+      setFormError('Ingresá un correo válido.');
       return;
     }
     try {
@@ -328,21 +353,21 @@ export const PublicHubView: React.FC = () => {
       const acc = verifyRes.account || (await api.recognizeAccount(cleanMail));
 
       if (verifyRes.accountExists || (acc && acc.accountExists)) {
-        // Ya tenía cuenta en Toque: entra directo SIN pasar por el registro
+        // Ya tenía cuenta en Toque: entra directo SIN pasar por el formulario de registro
         const existingCardHere = acc?.cards?.find(
           (c) => !hub || c.businessId === hub.business.id
         );
         if (existingCardHere) {
           setJoinedMember(existingCardHere);
           setStep('active');
-          showToast(`¡Hola de nuevo, ${existingCardHere.name || acc.name || 'Socio'}!`, 'success');
+          showToast(`¡Hola, ${existingCardHere.name || acc.name || 'Socio'}!`, 'success');
         } else {
           setRecognizedAccount(acc);
-          setMarketingConsent(false);
+          setMarketingConsent(true);
           setStep('recognized_other_merchant');
         }
       } else {
-        // Ese mail NO tiene cuenta: recién ahí aparece el registro con el mail ya verificado
+        // Únicamente cuando es la primera vez absoluta que ese correo se usa en toda la plataforma
         setEmail(cleanMail);
         setEmailAlreadyVerifiedInLogin(true);
         setMarketingConsent(false);
@@ -355,7 +380,7 @@ export const PublicHubView: React.FC = () => {
     }
   };
 
-  // Registro del cliente: valida nombre, mail y que sea mayor de 18 años
+  // Registro del cliente: valida nombre, correo y que sea mayor de 18 años
   const handleStartRegistration = async (e: React.FormEvent) => {
     e.preventDefault();
     setFormError(null);
@@ -368,7 +393,7 @@ export const PublicHubView: React.FC = () => {
       return;
     }
     if (!cleanEmail || !cleanEmail.includes('@')) {
-      setFormError('Ingresá tu mail.');
+      setFormError('Ingresá tu correo.');
       return;
     }
     if (!birthDate) {
@@ -382,7 +407,7 @@ export const PublicHubView: React.FC = () => {
       return;
     }
 
-    // Si ya verificó el mail en el paso previo de ingreso, registramos directo
+    // Si ya verificó el correo en el paso previo de ingreso, registramos directo
     if (emailAlreadyVerifiedInLogin) {
       try {
         setSubmitting(true);
@@ -420,7 +445,7 @@ export const PublicHubView: React.FC = () => {
     }
   };
 
-  // Confirmar código de 6 dígitos y crear la tarjeta (guardando únicamente día y mes, nunca el año)
+  // Confirmar código de 6 dígitos y crear la tarjeta
   const handleConfirmEmailAndRegister = async (e: React.FormEvent) => {
     e.preventDefault();
     setFormError(null);
@@ -428,7 +453,7 @@ export const PublicHubView: React.FC = () => {
     const cleanCode = emailOtpCode.trim();
 
     if (cleanCode.length < 6) {
-      setFormError('Ingresá el código de 6 dígitos que enviamos a tu mail.');
+      setFormError('Ingresá el código de 6 dígitos que enviamos a tu correo.');
       return;
     }
 
@@ -440,7 +465,19 @@ export const PublicHubView: React.FC = () => {
 
     try {
       setSubmitting(true);
-      await api.verifyOtp(cleanEmail, cleanCode);
+      const verifyRes = await api.verifyOtp(cleanEmail, cleanCode);
+      // Si el correo ya existía en otra cuenta, nunca forzar nuevo registro
+      if (verifyRes.account?.accountExists) {
+        const res = await api.addCardToAccount({
+          localCode: hub?.cartel.code || targetCode,
+          marketingConsent,
+        });
+        setJoinedMember(res.member);
+        setNewlyStampedSlot(res.member.stamps || 1);
+        setStep('active');
+        showToast(`¡Hola, ${res.member.name || 'Socio'}! Ya tenés tu tarjeta activa.`, 'success');
+        return;
+      }
 
       const reg = await api.registerMember({
         localCode: hub?.cartel.code || targetCode,
@@ -455,7 +492,7 @@ export const PublicHubView: React.FC = () => {
       setJoinedMember(reg.member);
       setNewlyStampedSlot(reg.member.stamps || 1);
       setStep('active');
-      showToast('¡Mail verificado! Ya tenés tu 1° sello cargado en la tarjeta.', 'success');
+      showToast('¡Correo verificado! Ya tenés tu 1° sello cargado en la tarjeta.', 'success');
     } catch (err: any) {
       setFormError(err?.message || 'Código inválido o vencido.');
     } finally {
@@ -463,27 +500,29 @@ export const PublicHubView: React.FC = () => {
     }
   };
 
-  // Botón "Agregar a mi billetera": pide al servidor crear la tarjeta, recibe una dirección y la abre.
-  // No genera ni descarga ninguna imagen como reemplazo.
+  // Guardado directo en Apple Wallet (.pkpass) y Google Wallet (googleSaveUrl) sin pasar por shareUrl de WalletWallet
   const handleAddToWallet = async () => {
     if (!hub || !joinedMember || walletUnconfigured) return;
     setWalletErrorMessage(null);
     setWalletStatusMessage(null);
+    setDesktopFallbackUrl(null);
 
     try {
       setGeneratingPass(true);
-      const immutableShortCode =
-        joinedMember.shortCode || joinedMember.memberCode || 'K7M2-9XQ4';
+      const rawCode =
+        joinedMember.barcodeToken || joinedMember.shortCode || joinedMember.memberCode || '48291037';
+      const immutableShortCode = /^\d{8}$/.test(rawCode) ? rawCode : '48291037';
 
       const pass = await api.createWalletPass({
         cartelCode: hub.cartel.code,
         memberId: joinedMember.id,
         memberCode: immutableShortCode,
         barcodeValue: immutableShortCode,
+        barcodeFormat: 'CODE128',
         customerName: joinedMember.name || 'Socio',
         customerContact: joinedMember.email || joinedMember.maskedEmail || joinedMember.contact,
         stamps: joinedMember.stamps,
-        stampsRequired: hub.club?.config?.targetStamps || 10,
+        stampsRequired: hub.club?.config?.targetStamps || 5,
         rewardText:
           hub.club?.config?.loyaltyReward ||
           hub.club?.config?.rewardText ||
@@ -501,13 +540,28 @@ export const PublicHubView: React.FC = () => {
         return;
       }
 
-      const targetUrl = pass.shareUrl || pass.appleWalletUrl || pass.googleWalletUrl;
-      if (!pass.success || !targetUrl) {
+      if (!pass.success) {
         setWalletErrorMessage('No pudimos crear tu tarjeta. Probá de nuevo.');
         return;
       }
 
-      window.location.href = targetUrl;
+      const pkpassUrl = `/api/wallet/pass/${encodeURIComponent(immutableShortCode)}.pkpass`;
+      const googleUrl = pass.googleWalletUrl;
+
+      if (isIOSDevice()) {
+        window.location.href = pkpassUrl;
+        return;
+      }
+
+      if (isAndroidDevice() && googleUrl) {
+        window.location.href = googleUrl;
+        return;
+      }
+
+      // En computadora de escritorio: mostrar el pase en pantalla con el enlace de descarga como respaldo
+      const fallback = googleUrl || pkpassUrl;
+      setDesktopFallbackUrl(fallback);
+      setWalletStatusMessage('Tu pase está listo en pantalla. También podés descargarlo debajo.');
     } catch {
       setWalletErrorMessage('No pudimos crear tu tarjeta. Probá de nuevo.');
     } finally {
@@ -517,10 +571,10 @@ export const PublicHubView: React.FC = () => {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-[#0C0C0E] p-6 flex flex-col items-center justify-center">
+      <div className="min-h-screen bg-[#0A0A0A] p-6 flex flex-col items-center justify-center">
         <div className="max-w-md w-full space-y-4">
-          <Skeleton className="h-52 w-full rounded-3xl bg-[#141418]" />
-          <Skeleton className="h-60 w-full rounded-3xl bg-[#141418]" />
+          <Skeleton className="h-52 w-full rounded-3xl bg-[#141414]" />
+          <Skeleton className="h-60 w-full rounded-3xl bg-[#141414]" />
         </div>
       </div>
     );
@@ -528,8 +582,8 @@ export const PublicHubView: React.FC = () => {
 
   if (error || !hub) {
     return (
-      <div className="min-h-screen bg-[#0C0C0E] text-[#F4F4F6] p-6 flex items-center justify-center">
-        <div className="max-w-sm w-full rounded-3xl bg-[#141418] border border-[#282830] p-7 text-center space-y-4">
+      <div className="min-h-screen bg-[#0A0A0A] text-[#F4F4F6] p-6 flex items-center justify-center">
+        <div className="max-w-sm w-full rounded-3xl bg-[#141414] border border-[#242424] p-7 text-center space-y-4">
           <BrandLogo variant="isotipo" size="md" className="mx-auto" />
           <h1 className="text-lg font-bold text-[#F4F4F6]">Cartel no disponible</h1>
           <p className="text-xs text-[#9E9EA8]">
@@ -556,16 +610,17 @@ export const PublicHubView: React.FC = () => {
     : rawOrderedBlocks;
 
   const clubCfg = club?.config;
-  const cardBgColor = clubCfg?.cardThemeColor || clubCfg?.brandColor || '#D95B26';
-  const targetStamps = clubCfg?.targetStamps || clubCfg?.stampsRequired || 10;
+  const cardBgColor = clubCfg?.customColor || clubCfg?.cardThemeColor || clubCfg?.brandColor || '#141414';
+  const targetStamps = clubCfg?.targetStamps || clubCfg?.stampsRequired || 5;
   const currentStamps = Math.max(0, joinedMember?.stamps ?? 0);
   const remainingStamps = Math.max(0, targetStamps - currentStamps);
   const rewardLabel =
     clubCfg?.loyaltyReward ||
     clubCfg?.rewardText ||
-    'Combo aniversario sin cargo en tu visita #10';
-  const immutableShortCode =
-    joinedMember?.shortCode || joinedMember?.memberCode || 'K7M2-9XQ4';
+    'Beneficio exclusivo en tu próxima visita';
+  const rawShortCode =
+    joinedMember?.barcodeToken || joinedMember?.shortCode || joinedMember?.memberCode || '48291037';
+  const immutableShortCode = /^\d{8}$/.test(rawShortCode) ? rawShortCode : '48291037';
 
   const effectiveReviewUrl = config.googleReviewUrl?.trim() || hub.reviewUrl?.trim() || '';
   const hasRealReview = isConfiguredReviewUrl(effectiveReviewUrl);
@@ -588,15 +643,15 @@ export const PublicHubView: React.FC = () => {
 
   const renderClubAuthFlow = () => (
     <>
-      {/* B1. CUENTA ÚNICA RECONOCIDA EN OTRO COMERCIO */}
+      {/* B1. SESIÓN ACTIVA RECONOCIDA: "Hola, [Nombre]" + botón "Guardar mi tarjeta" en un solo toque */}
       {step === 'recognized_other_merchant' && recognizedAccount && (
         <section className="rounded-3xl bg-[#141414] border border-[#242424] p-5 space-y-4">
           <div className="space-y-1">
             <h2 className="text-base font-bold text-[#F4F4F6] leading-snug">
-              Hola, {recognizedAccount.name || 'Socio'}. ¿Sumás la tarjeta de {business.name} a tu cuenta?
+              Hola, {recognizedAccount.name || 'Socio'}
             </h2>
             <p className="text-xs text-[#9E9EA8]">
-              Usamos tu cuenta verificada ({recognizedAccount.email}) sin pedirte tus datos de nuevo.
+              Tu cuenta ({recognizedAccount.email}) ya está activa en este dispositivo. Tocá el botón para activar tu tarjeta de {business.name}.
             </p>
           </div>
 
@@ -609,44 +664,35 @@ export const PublicHubView: React.FC = () => {
             </div>
           )}
 
-          <label className="flex items-center gap-2 text-xs text-[#9E9EA8] cursor-pointer">
-            <input
-              type="checkbox"
-              checked={marketingConsent}
-              onChange={(e) => setMarketingConsent(e.target.checked)}
-              className="rounded border-[#282830] bg-[#0C0C0E] text-[#D95B26]"
-            />
-            <span>Quiero recibir avisos y beneficios de {business.name}</span>
-          </label>
-
           <button
             type="button"
             disabled={submitting}
             onClick={handleAddCardForRecognizedAccount}
-            className="w-full py-3 px-5 rounded-2xl bg-[#D95B26] hover:bg-[#e36630] text-white font-bold text-xs transition-colors disabled:opacity-50 cursor-pointer shadow-lg shadow-[#D95B26]/20"
+            className="w-full py-3.5 px-5 rounded-2xl bg-[#D95B26] hover:bg-[#e36630] text-white font-bold text-xs transition-colors disabled:opacity-50 cursor-pointer shadow-lg shadow-[#D95B26]/20"
           >
-            {submitting ? 'Sumando tarjeta...' : 'Sí, sumar'}
+            {submitting ? 'Guardando tarjeta...' : 'Guardar mi tarjeta'}
           </button>
 
           <button
             type="button"
             onClick={() => {
+              clearConsumerSession();
               setRecognizedAccount(null);
               setStep('email_login');
             }}
             className="w-full text-center text-[11px] text-[#9E9EA8] hover:text-white underline cursor-pointer"
           >
-            Usar otro mail
+            Ingresar con otro correo
           </button>
         </section>
       )}
 
-      {/* B2. PANTALLA "INGRESÁ TU MAIL" -> CÓDIGO DE 6 DÍGITOS -> ENTRA DIRECTO SI YA TIENE CUENTA */}
+      {/* B2. PANTALLA "Ingresá tu correo" -> CÓDIGO DE 6 DÍGITOS -> ENTRA DIRECTO SI YA TIENE CUENTA */}
       {step === 'email_login' && (
         <section className="rounded-3xl bg-[#141414] border border-[#242424] p-5 space-y-4">
           <div className="flex items-start justify-between gap-2">
             <div className="space-y-1">
-              <h2 className="text-base font-bold text-[#F4F4F6]">Ingresá tu mail</h2>
+              <h2 className="text-base font-bold text-[#F4F4F6]">Ingresá tu correo</h2>
               <p className="text-xs text-[#9E9EA8]">
                 Te enviamos un código de 6 dígitos. Si ya tenés cuenta en Toque, entrás directo sin registrarte de nuevo.
               </p>
@@ -681,8 +727,8 @@ export const PublicHubView: React.FC = () => {
                   required
                   value={loginEmail}
                   onChange={(e) => setLoginEmail(e.target.value)}
-                  placeholder="tu@mail.com"
-                  className="w-full pl-10 pr-4 py-3 rounded-2xl bg-[#0C0C0E] border border-[#282830] text-xs text-[#F4F4F6] placeholder-[#666672] focus:outline-none focus:border-[#D95B26]"
+                  placeholder="tu@correo.com"
+                  className="w-full pl-10 pr-4 py-3 rounded-2xl bg-[#0A0A0A] border border-[#242424] text-xs text-[#F4F4F6] placeholder-[#666672] focus:outline-none focus:border-[#D95B26]"
                 />
               </div>
               <button
@@ -696,7 +742,7 @@ export const PublicHubView: React.FC = () => {
           ) : (
             <form onSubmit={handleVerifyLoginOtp} className="space-y-3">
               {loginOtpHint && (
-                <p className="text-xs font-mono text-[#BEC8FF] bg-[#1C1C22] border border-[#282830] px-3 py-1.5 rounded-xl">
+                <p className="text-xs font-mono text-[#BEC8FF] bg-[#1C1C22] border border-[#242424] px-3 py-1.5 rounded-xl">
                   Código de prueba: <strong>{loginOtpHint}</strong>
                 </p>
               )}
@@ -711,7 +757,7 @@ export const PublicHubView: React.FC = () => {
                   setLoginOtpCode(e.target.value.replace(/\D/g, '').slice(0, 6))
                 }
                 placeholder="Código de 6 dígitos"
-                className="w-full px-4 py-3 rounded-2xl bg-[#0C0C0E] border border-[#282830] text-center font-mono text-base tracking-widest text-[#F4F4F6] focus:outline-none focus:border-[#D95B26]"
+                className="w-full px-4 py-3 rounded-2xl bg-[#0A0A0A] border border-[#242424] text-center font-mono text-base tracking-widest text-[#F4F4F6] focus:outline-none focus:border-[#D95B26]"
               />
               <div className="flex gap-2">
                 <button
@@ -720,9 +766,9 @@ export const PublicHubView: React.FC = () => {
                     setLoginOtpSent(false);
                     setLoginOtpCode('');
                   }}
-                  className="px-4 py-2.5 rounded-2xl bg-[#1C1C22] border border-[#282830] text-xs font-bold text-[#9E9EA8] cursor-pointer"
+                  className="px-4 py-2.5 rounded-2xl bg-[#1C1C22] border border-[#242424] text-xs font-bold text-[#9E9EA8] cursor-pointer"
                 >
-                  Cambiar mail
+                  Cambiar correo
                 </button>
                 <button
                   type="submit"
@@ -737,7 +783,7 @@ export const PublicHubView: React.FC = () => {
         </section>
       )}
 
-      {/* B3. REGISTRO DEL CLIENTE (nombre, mail, fecha de nacimiento con selector del celular, >= 18) */}
+      {/* B3. REGISTRO DEL CLIENTE (nombre, correo, BirthDatePicker nativo de 3 selectores, >= 18) */}
       {step === 'form' && (
         <section className="rounded-3xl bg-[#141414] border border-[#242424] p-5 space-y-4">
           <div className="flex items-start justify-between gap-2">
@@ -758,7 +804,7 @@ export const PublicHubView: React.FC = () => {
               }}
               className="shrink-0 text-[11px] font-bold text-[#BEC8FF] hover:text-white underline cursor-pointer"
             >
-              Ingresá tu mail →
+              Ingresá tu correo →
             </button>
           </div>
 
@@ -788,7 +834,7 @@ export const PublicHubView: React.FC = () => {
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   placeholder="Tu nombre"
-                  className="w-full pl-10 pr-4 py-2.5 rounded-2xl bg-[#0C0C0E] border border-[#282830] text-xs text-[#F4F4F6] placeholder-[#666672] focus:outline-none focus:border-[#D95B26]"
+                  className="w-full pl-10 pr-4 py-2.5 rounded-2xl bg-[#0A0A0A] border border-[#242424] text-xs text-[#F4F4F6] placeholder-[#666672] focus:outline-none focus:border-[#D95B26]"
                 />
               </div>
             </div>
@@ -798,7 +844,7 @@ export const PublicHubView: React.FC = () => {
                 htmlFor="hub-email-input"
                 className="block text-xs font-semibold text-[#F4F4F6] mb-1"
               >
-                Mail
+                Ingresá tu correo
               </label>
               <div className="relative">
                 <Mail className="w-4 h-4 text-[#9E9EA8] absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
@@ -811,8 +857,8 @@ export const PublicHubView: React.FC = () => {
                     setEmail(e.target.value);
                     setEmailAlreadyVerifiedInLogin(false);
                   }}
-                  placeholder="tu@mail.com"
-                  className="w-full pl-10 pr-4 py-2.5 rounded-2xl bg-[#0C0C0E] border border-[#282830] text-xs text-[#F4F4F6] placeholder-[#666672] focus:outline-none focus:border-[#D95B26]"
+                  placeholder="tu@correo.com"
+                  className="w-full pl-10 pr-4 py-2.5 rounded-2xl bg-[#0A0A0A] border border-[#242424] text-xs text-[#F4F4F6] placeholder-[#666672] focus:outline-none focus:border-[#D95B26]"
                 />
               </div>
             </div>
@@ -824,18 +870,11 @@ export const PublicHubView: React.FC = () => {
               >
                 Fecha de nacimiento
               </label>
-              <div className="relative">
-                <Calendar className="w-4 h-4 text-[#9E9EA8] absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-                <input
-                  id="hub-birthdate-input"
-                  type="date"
-                  required
-                  max={new Date().toISOString().split('T')[0]}
-                  value={birthDate}
-                  onChange={(e) => setBirthDate(e.target.value)}
-                  className="w-full pl-10 pr-3 py-2.5 rounded-2xl bg-[#0C0C0E] border border-[#282830] text-xs text-[#F4F4F6] focus:outline-none focus:border-[#D95B26]"
-                />
-              </div>
+              <BirthDatePicker
+                id="hub-birthdate-input"
+                value={birthDate}
+                onChange={setBirthDate}
+              />
             </div>
 
             <label className="flex items-center gap-2 text-xs text-[#9E9EA8] cursor-pointer pt-0.5">
@@ -843,7 +882,7 @@ export const PublicHubView: React.FC = () => {
                 type="checkbox"
                 checked={marketingConsent}
                 onChange={(e) => setMarketingConsent(e.target.checked)}
-                className="rounded border-[#282830] bg-[#0C0C0E] text-[#D95B26]"
+                className="rounded border-[#242424] bg-[#0A0A0A] text-[#D95B26]"
               />
               <span>Quiero recibir avisos y beneficios de {business.name}</span>
             </label>
@@ -869,7 +908,7 @@ export const PublicHubView: React.FC = () => {
                 {submitting
                   ? 'Enviando código...'
                   : emailAlreadyVerifiedInLogin
-                  ? 'Activar mi tarjeta'
+                  ? 'Guardar mi tarjeta'
                   : 'Recibir código y activar tarjeta'}
               </button>
             </div>
@@ -877,16 +916,16 @@ export const PublicHubView: React.FC = () => {
         </section>
       )}
 
-      {/* B4. PASO DE VERIFICACIÓN DE CÓDIGO DE 6 DÍGITOS ENVIADO AL MAIL */}
+      {/* B4. PASO DE VERIFICACIÓN DE CÓDIGO DE 6 DÍGITOS ENVIADO AL CORREO */}
       {step === 'verify_email' && (
         <section className="rounded-3xl bg-[#141414] border border-[#D95B26]/50 p-5 space-y-4">
           <div className="space-y-1">
-            <span className="text-xs font-bold text-[#D95B26]">Verificación de mail</span>
+            <span className="text-xs font-bold text-[#D95B26]">Verificación de correo</span>
             <h2 className="text-sm font-bold text-[#F4F4F6]">
               Ingresá el código de 6 dígitos que enviamos a {email}
             </h2>
             {emailOtpHint && (
-              <p className="text-xs font-mono text-[#BEC8FF] bg-[#1C1C22] border border-[#282830] px-3 py-1.5 rounded-xl mt-2">
+              <p className="text-xs font-mono text-[#BEC8FF] bg-[#1C1C22] border border-[#242424] px-3 py-1.5 rounded-xl mt-2">
                 Código de verificación: <strong>{emailOtpHint}</strong>
               </p>
             )}
@@ -910,7 +949,7 @@ export const PublicHubView: React.FC = () => {
                 setEmailOtpCode(e.target.value.replace(/\D/g, '').slice(0, 6))
               }
               placeholder="Código de 6 dígitos"
-              className="w-full px-4 py-3 rounded-2xl bg-[#0C0C0E] border border-[#282830] text-center font-mono text-base tracking-widest text-[#F4F4F6] focus:outline-none focus:border-[#D95B26]"
+              className="w-full px-4 py-3 rounded-2xl bg-[#0A0A0A] border border-[#242424] text-center font-mono text-base tracking-widest text-[#F4F4F6] focus:outline-none focus:border-[#D95B26]"
             />
 
             <div className="flex gap-2">
@@ -920,7 +959,7 @@ export const PublicHubView: React.FC = () => {
                   setStep('form');
                   setFormError(null);
                 }}
-                className="px-4 py-2.5 rounded-2xl bg-[#1C1C22] border border-[#282830] text-xs font-bold text-[#9E9EA8] cursor-pointer"
+                className="px-4 py-2.5 rounded-2xl bg-[#1C1C22] border border-[#242424] text-xs font-bold text-[#9E9EA8] cursor-pointer"
               >
                 Volver
               </button>
@@ -959,6 +998,7 @@ export const PublicHubView: React.FC = () => {
               stamps={currentStamps}
               stampsRequired={targetStamps}
               rewardText={rewardLabel}
+              barcodeToken={immutableShortCode}
               cardTitle={clubCfg?.loyaltyTitle || clubCfg?.logoText || `Tarjeta de sellos de ${business.name}`}
               colorPreset={clubCfg?.colorPreset || 'dark'}
               customColor={clubCfg?.customColor || cardBgColor}
@@ -1007,11 +1047,11 @@ export const PublicHubView: React.FC = () => {
                 </div>
 
                 <div className="text-right shrink-0">
-                  <span className="block text-[9px] tracking-widest text-white/75 font-semibold">
-                    SELLOS
+                  <span className="block text-[10px] text-white/75 font-semibold">
+                    Sellos acumulados
                   </span>
                   <span className="text-xl font-extrabold tracking-tight text-white">
-                    {currentStamps} / {targetStamps}
+                    {currentStamps} de {targetStamps}
                   </span>
                 </div>
               </div>
@@ -1028,7 +1068,7 @@ export const PublicHubView: React.FC = () => {
                     return (
                       <div
                         key={slotNumber}
-                        className={`aspect-square rounded-full bg-white text-[#0C0C0E] flex items-center justify-center shadow-md ${
+                        className={`aspect-square rounded-full bg-white text-[#0A0A0A] flex items-center justify-center shadow-md ${
                           isJustPopped ? 'animate-stamp-pop ring-4 ring-[#2FB36A]' : ''
                         }`}
                         title={`Sello ${slotNumber} obtenido`}
@@ -1080,7 +1120,7 @@ export const PublicHubView: React.FC = () => {
               <div className="pt-2 border-t border-white/15 flex items-center justify-between gap-2 text-xs">
                 <span className="font-semibold text-white/95">
                   {remainingStamps === 0
-                    ? '¡Completaste los sellos! Mostrá tu tarjeta en caja para canjear tu premio'
+                    ? 'Premio disponible: mostrá tu tarjeta en caja para canjearlo'
                     : `Faltan ${remainingStamps} ${
                         remainingStamps === 1 ? 'sello' : 'sellos'
                       } para tu premio`}
@@ -1094,7 +1134,7 @@ export const PublicHubView: React.FC = () => {
             {/* Si no hay comprobante en pantalla, mostramos el flujo de alta aquí directamente */}
             {!displayedReceipt && step !== 'active' && renderClubAuthFlow()}
 
-            {/* C. TARJETA ACTIVA DEL CLIENTE (Item 2: código corto grande + QR inmutable + botón "Agregar a mi billetera") */}
+            {/* C. TARJETA ACTIVA DEL CLIENTE (código de barras CODE128 con los 8 números grandes debajo + "Guardar en mi billetera") */}
             {step === 'active' && joinedMember && (
               <section className="rounded-3xl bg-[#141414] border border-[#242424] p-5 space-y-4">
                 <div className="flex items-center justify-between gap-2">
@@ -1104,7 +1144,7 @@ export const PublicHubView: React.FC = () => {
                     </div>
                     <div>
                       <h2 className="text-xs font-bold text-[#F4F4F6]">
-                        ¡Hola, {joinedMember.name || 'Socio'}!
+                        Hola, {joinedMember.name || 'Socio'}
                       </h2>
                       <p className="text-[11px] text-[#9E9EA8]">
                         {autoStampedThisVisit
@@ -1124,6 +1164,7 @@ export const PublicHubView: React.FC = () => {
                   <button
                     type="button"
                     onClick={() => {
+                      clearConsumerSession();
                       setJoinedMember(null);
                       setStep('email_login');
                     }}
@@ -1133,7 +1174,7 @@ export const PublicHubView: React.FC = () => {
                   </button>
                 </div>
 
-                {/* Tarjeta con código corto grande y QR que no cambian nunca */}
+                {/* Tarjeta con código de barras CODE128 y los 8 números grandes debajo */}
                 <WalletPassCard
                   businessName={clubCfg?.loyaltyTitle || business.name}
                   memberName={joinedMember.name || 'Socio'}
@@ -1147,7 +1188,7 @@ export const PublicHubView: React.FC = () => {
                   logoUrl={clubCfg?.logoUrl || business.logoUrl}
                 />
 
-                {/* Botón "Agregar a mi billetera" (sin generar ni descargar imágenes como reemplazo) */}
+                {/* Botón "Guardar en mi billetera" con descarga directa .pkpass en iOS y googleSaveUrl en Android */}
                 <div className="space-y-2">
                   <button
                     type="button"
@@ -1160,13 +1201,27 @@ export const PublicHubView: React.FC = () => {
                       {walletUnconfigured
                         ? 'Pronto vas a poder guardarla en tu billetera'
                         : generatingPass
-                        ? 'Creando tu tarjeta...'
-                        : 'Agregar a mi billetera'}
+                        ? 'Preparando tu tarjeta...'
+                        : 'Guardar en mi billetera'}
                     </span>
                   </button>
 
                   {walletStatusMessage && (
                     <p className="text-xs text-center text-[#9E9EA8]">{walletStatusMessage}</p>
+                  )}
+
+                  {desktopFallbackUrl && (
+                    <div className="pt-1 text-center">
+                      <a
+                        href={desktopFallbackUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#D95B26] hover:underline"
+                      >
+                        <span>Descargar archivo de billetera (.pkpass / Google Wallet)</span>
+                        <ExternalLink className="w-3.5 h-3.5" />
+                      </a>
+                    </div>
                   )}
 
                   {walletErrorMessage && (

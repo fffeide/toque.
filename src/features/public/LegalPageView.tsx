@@ -138,7 +138,7 @@ export const LegalPageView: React.FC<LegalPageViewProps> = ({ docKey }) => {
 
           {/* Resumen rápido en lenguaje claro */}
           <div className="pt-4 border-t border-[#242426] space-y-2.5">
-            <p className="text-xs font-bold uppercase tracking-wider text-[#bec8ff]">
+            <p className="text-xs font-bold tracking-wider text-[#bec8ff]">
               Resumen en lenguaje claro
             </p>
             <ul className="grid grid-cols-1 md:grid-cols-2 gap-2.5">

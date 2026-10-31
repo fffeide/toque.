@@ -169,9 +169,9 @@ export const ClubLocalsView: React.FC = () => {
   // Genera un archivo PNG de alta resolución del cartel vertical y lo descarga
   const generateHighResCartelPng = async (localTarget?: ClubLocal): Promise<string> => {
     const loc = localTarget || selectedLocal || locals[0];
-    const code = loc?.code || 'BURGER01';
+    const code = loc?.code || 'MONROE01';
     const localTitle = loc?.name || 'Mostrador Principal';
-    const bizTitle = business?.name || 'La Burger';
+    const bizTitle = business?.name || 'Musical Monroe';
     const hubUrl = getHubUrl(code);
     const isDark = printEdition === 'dark';
 
@@ -230,7 +230,7 @@ export const ClubLocalsView: React.FC = () => {
 
     ctx.fillStyle = isDark ? '#A1A1AA' : '#52525B';
     ctx.font = '600 28px Inter, sans-serif';
-    ctx.fillText(localTitle.toUpperCase(), width / 2, 315);
+    ctx.fillText(localTitle, width / 2, 315);
 
     // Generar QR Real en DataURL e insertarlo en el centro
     const qrSize = printFormat === 'tent_a5' ? 620 : 500;
@@ -298,7 +298,7 @@ export const ClubLocalsView: React.FC = () => {
 
       ctx.fillStyle = '#D95B26';
       ctx.font = 'bold 24px "JetBrains Mono", monospace';
-      ctx.fillText('CLUB DE BENEFICIOS Y COMPROBANTE DIGITAL', width / 2, boxY + 58);
+      ctx.fillText('Club de beneficios y comprobante digital', width / 2, boxY + 58);
 
       ctx.fillStyle = isDark ? '#F4F4F0' : '#0C0C0E';
       ctx.font = '600 28px Inter, sans-serif';
@@ -325,7 +325,7 @@ export const ClubLocalsView: React.FC = () => {
       if (local) setSelectedLocal(local);
       const dataUrl = await generateHighResCartelPng(local);
       const a = document.createElement('a');
-      const code = (local || selectedLocal || locals[0])?.code || 'BURGER01';
+      const code = (local || selectedLocal || locals[0])?.code || 'MONROE01';
       a.href = dataUrl;
       a.download = `cartel-toque-${code.toLowerCase()}-${printFormat}.png`;
       document.body.appendChild(a);
@@ -352,8 +352,8 @@ export const ClubLocalsView: React.FC = () => {
   };
 
   const activeLocal = selectedLocal || locals[0];
-  const activeHubUrl = activeLocal ? getHubUrl(activeLocal.code) : getHubUrl('BURGER01');
-  const merchantName = business?.name || 'La Burger';
+  const activeHubUrl = activeLocal ? getHubUrl(activeLocal.code) : getHubUrl('MONROE01');
+  const merchantName = business?.name || 'Musical Monroe';
 
   return (
     <div className="space-y-6 pb-12">
@@ -431,7 +431,7 @@ export const ClubLocalsView: React.FC = () => {
                     required
                     value={name}
                     onChange={(e) => setName(e.target.value)}
-                    placeholder="Ej: La Burger Palermo"
+                    placeholder="Ej: Musical Monroe Belgrano"
                     className="w-full h-10 px-3.5 rounded-xl border border-[#282830] bg-[#0C0C0E] text-[#F4F4F6] text-xs focus:outline-none focus:border-[#D95B26]"
                   />
                 </div>
@@ -722,14 +722,14 @@ export const ClubLocalsView: React.FC = () => {
               <div className="space-y-3 pt-2">
                 <div className="flex items-center justify-between">
                   <span
-                    className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-mono font-bold uppercase tracking-wider border ${
+                    className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-mono font-bold tracking-wider border ${
                       printEdition === 'dark'
                         ? 'bg-[#141418] text-[#A1A1AA] border-[#282830]'
                         : 'bg-zinc-100 text-zinc-800 border-zinc-300'
                     }`}
                   >
                     <span className="w-1.5 h-1.5 rounded-full bg-[#D95B26]" />
-                    {activeLocal?.code || 'BURGER01'}
+                    {activeLocal?.code || 'MONROE01'}
                   </span>
 
                   <div
@@ -740,7 +740,7 @@ export const ClubLocalsView: React.FC = () => {
                     }`}
                   >
                     <NfcWavesIcon className="w-3.5 h-3.5" />
-                    <span>NFC + QR ACTIVO</span>
+                    <span>NFC + QR activo</span>
                   </div>
                 </div>
 
@@ -749,7 +749,7 @@ export const ClubLocalsView: React.FC = () => {
                     {merchantName}
                   </h2>
                   <p
-                    className={`text-[11px] font-semibold uppercase tracking-widest ${
+                    className={`text-[11px] font-semibold tracking-wider ${
                       printEdition === 'dark' ? 'text-[#A1A1AA]' : 'text-zinc-500'
                     }`}
                   >
@@ -792,8 +792,8 @@ export const ClubLocalsView: React.FC = () => {
                     : 'bg-zinc-50 border-zinc-300'
                 }`}
               >
-                <div className="text-[10px] font-mono font-bold uppercase tracking-widest text-[#D95B26]">
-                  CLUB DE BENEFICIOS Y SELLOS DIGITALES
+                <div className="text-[11px] font-bold tracking-wide text-[#D95B26]">
+                  Club de beneficios y sellos digitales
                 </div>
                 <div
                   className={`text-xs font-semibold ${
@@ -816,7 +816,7 @@ export const ClubLocalsView: React.FC = () => {
                     printEdition === 'dark' ? 'text-[#A1A1AA]' : 'text-zinc-500'
                   }`}
                 >
-                  toque.com.ar/u/{activeLocal?.code || 'BURGER01'}
+                  toque.com.ar/u/{activeLocal?.code || 'MONROE01'}
                 </span>
               </div>
             </div>
@@ -841,7 +841,7 @@ export const ClubLocalsView: React.FC = () => {
                       printEdition === 'dark' ? 'text-[#A1A1AA]' : 'text-zinc-600'
                     }`}
                   >
-                    CÓDIGO: {activeLocal?.code || 'BURGER01'}
+                    Código: {activeLocal?.code || 'MONROE01'}
                   </p>
                 </div>
                 <div className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-[#D95B26] text-white text-[10px] font-extrabold">

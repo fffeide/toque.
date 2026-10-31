@@ -49,6 +49,11 @@ import {
   CashierMemberLookupResult,
 } from './types';
 import { TRIAL_DAYS, pruebaGratisDias, getPlanLimits } from '../config/pricing';
+import {
+  saveConsumerSession,
+  getConsumerSessionEmail,
+  getConsumerSessionToken,
+} from '../lib/consumerSession';
 
 interface OtpRecord {
   email: string;
@@ -80,17 +85,21 @@ export function formatCashierMemberName(fullName?: string): string {
   return `${firstName} ${lastInitial}.`;
 }
 
-const SHORT_CODE_CHARS = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
-
 export function generateShortCode(): string {
-  const pick = (len: number) => {
-    let out = '';
-    for (let i = 0; i < len; i++) {
-      out += SHORT_CODE_CHARS.charAt(Math.floor(Math.random() * SHORT_CODE_CHARS.length));
-    }
-    return out;
-  };
-  return `${pick(4)}-${pick(4)}`;
+  const bytes = new Uint8Array(8);
+  if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
+    crypto.getRandomValues(bytes);
+  } else {
+    for (let i = 0; i < 8; i++) bytes[i] = Math.floor(Math.random() * 256);
+  }
+  let code = '';
+  for (let i = 0; i < 8; i++) {
+    code += (bytes[i] % 10).toString();
+  }
+  if (code.startsWith('0')) {
+    code = ((bytes[0] % 9) + 1).toString() + code.slice(1);
+  }
+  return code;
 }
 
 function generateBarcodeToken32(): string {
@@ -169,20 +178,20 @@ class MockApi implements ToqueApi {
     );
   }
 
-  // Comercio por defecto: ejemplo neutro La Burger
+  // Comercio por defecto: Musical Monroe
   private businessProfile: BusinessProfile = {
-    id: 'la-burger',
-    name: 'La Burger',
-    ownerName: 'Encargado General',
+    id: 'musical-monroe',
+    name: 'Musical Monroe',
+    ownerName: 'Encargado general',
     email: 'nombre@comercio.com',
     ownerRole: 'Dueño/a',
     teamSize: '2 a 5',
-    category: 'Gastronomía',
+    category: 'Instrumentos y audio',
     planSelected: true,
     reviewUrl: 'https://maps.google.com',
-    cardThemeColor: '#141418',
-    loyaltyTitle: 'Tarjeta de sellos de La Burger',
-    loyaltyReward: '1 Combo Burger sin cargo',
+    cardThemeColor: '#141414',
+    loyaltyTitle: 'Tarjeta de sellos de Musical Monroe',
+    loyaltyReward: 'Beneficio exclusivo en tu próxima visita',
     howToEarn: '1 sello por visita o compra (máximo 1 por día)',
     expirationPolicy: 'No vencen',
     stampsRequired: 5,
@@ -200,20 +209,20 @@ class MockApi implements ToqueApi {
   // Lista real de todos los comercios registrados en la plataforma
   private businesses: Map<string, BusinessProfile> = new Map([
     [
-      'la-burger',
+      'musical-monroe',
       {
-        id: 'la-burger',
-        name: 'La Burger',
-        ownerName: 'Encargado General',
+        id: 'musical-monroe',
+        name: 'Musical Monroe',
+        ownerName: 'Encargado general',
         email: 'nombre@comercio.com',
         ownerRole: 'Dueño/a',
         teamSize: '2 a 5',
-        category: 'Gastronomía',
+        category: 'Instrumentos y audio',
         planSelected: true,
         reviewUrl: 'https://maps.google.com',
-        cardThemeColor: '#141418',
-        loyaltyTitle: 'Tarjeta de sellos de La Burger',
-        loyaltyReward: '1 Combo Burger sin cargo',
+        cardThemeColor: '#141414',
+        loyaltyTitle: 'Tarjeta de sellos de Musical Monroe',
+        loyaltyReward: 'Beneficio exclusivo en tu próxima visita',
         howToEarn: '1 sello por visita o compra (máximo 1 por día)',
         expirationPolicy: 'No vencen',
         stampsRequired: 5,
@@ -238,11 +247,11 @@ class MockApi implements ToqueApi {
   // Locales del comercio
   private locals: ClubLocal[] = [
     {
-      id: 'local-burger-1',
-      businessId: 'la-burger',
-      code: 'BURGER01',
-      name: 'Sucursal Central',
-      address: 'Av. Corrientes 1840, CABA',
+      id: 'local-monroe-1',
+      businessId: 'musical-monroe',
+      code: 'MONROE01',
+      name: 'Sucursal central',
+      address: 'Av. Monroe 2450, CABA',
       visitsCount: 4,
       newMembersCount: 1,
       returningCount: 3,
@@ -254,59 +263,61 @@ class MockApi implements ToqueApi {
   // Equipo del comercio
   private teamMembers: TeamMember[] = [
     {
-      id: 'team-burger-owner',
-      businessId: 'la-burger',
-      name: 'Encargado General',
+      id: 'team-monroe-owner',
+      businessId: 'musical-monroe',
+      name: 'Encargado general',
       email: 'nombre@comercio.com',
       role: 'owner',
-      assignedCartelId: 'cartel-burger-01',
-      assignedCartelCode: 'BURGER01',
-      assignedLocalIds: ['local-burger-1'],
+      assignedCartelId: 'cartel-monroe-01',
+      assignedCartelCode: 'MONROE01',
+      assignedLocalIds: ['local-monroe-1'],
       status: 'active',
       addedAt: new Date().toISOString(),
     },
     {
-      id: 'team-burger-manager',
-      businessId: 'la-burger',
+      id: 'team-monroe-manager',
+      businessId: 'musical-monroe',
       name: 'Lucía Gómez',
       email: 'encargado@comercio.com',
       role: 'manager',
-      assignedCartelId: 'cartel-burger-01',
-      assignedCartelCode: 'BURGER01',
-      assignedLocalIds: ['local-burger-1'],
+      assignedCartelId: 'cartel-monroe-01',
+      assignedCartelCode: 'MONROE01',
+      assignedLocalIds: ['local-monroe-1'],
       status: 'active',
       addedAt: new Date().toISOString(),
     },
     {
-      id: 'team-burger-cashier',
-      businessId: 'la-burger',
+      id: 'team-monroe-cashier',
+      businessId: 'musical-monroe',
       name: 'Mateo Díaz',
       email: 'cajero@comercio.com',
       role: 'cashier',
-      assignedCartelId: 'cartel-burger-01',
-      assignedCartelCode: 'BURGER01',
-      assignedLocalIds: ['local-burger-1'],
+      assignedCartelId: 'cartel-monroe-01',
+      assignedCartelCode: 'MONROE01',
+      assignedLocalIds: ['local-monroe-1'],
       status: 'active',
       addedAt: new Date().toISOString(),
     },
   ];
 
-  // Configuración de Tarjeta de Sellos por defecto (meta 5 sellos para probar 4/5 -> 5/5)
+  // Configuración de Tarjeta de Sellos por defecto
   private clubConfig: ClubConfig = {
     id: 'card-default-1',
-    name: 'Tarjeta de sellos de La Burger',
-    clubName: 'Tarjeta de sellos de La Burger',
-    loyaltyTitle: 'Tarjeta de sellos de La Burger',
-    brandColor: '#141418',
-    cardThemeColor: '#141418',
+    name: 'Tarjeta de sellos de Musical Monroe',
+    clubName: 'Tarjeta de sellos de Musical Monroe',
+    loyaltyTitle: 'Tarjeta de sellos de Musical Monroe',
+    brandColor: '#141414',
+    cardThemeColor: '#141414',
+    colorPreset: 'dark',
     logoUrl: '',
     targetStamps: 5,
     stampsRequired: 5,
-    rewardText: '1 Combo Burger sin cargo',
-    loyaltyReward: '1 Combo Burger sin cargo',
+    rewardText: 'Beneficio exclusivo en tu próxima visita',
+    loyaltyReward: 'Beneficio exclusivo en tu próxima visita',
+    rewardValueArs: 12500,
     howToEarn: '1 sello por visita o compra (máximo 1 por día)',
     expirationPolicy: 'No vencen',
-    welcomeBenefitText: '1 Combo Burger sin cargo',
+    welcomeBenefitText: 'Beneficio exclusivo en tu próxima visita',
     pointsPerVisit: 1,
     enabled: true,
     mode: 'per_visit',
@@ -322,27 +333,27 @@ class MockApi implements ToqueApi {
     },
     rewards: [
       {
-        id: 'rew-burger-1',
-        label: '1 Combo Burger sin cargo',
+        id: 'rew-monroe-1',
+        label: 'Beneficio exclusivo en tu próxima visita',
         target: 5,
       },
     ],
     active: true,
   };
 
-  // Socios del Club en memoria (incluye a Daniel R. con código K7M2-9XQ4 y 4 / 5 sellos)
+  // Socios del Club en memoria (incluye a Daniel R. con código numérico de 8 dígitos 48291037 y 4 / 5 sellos)
   private clubMembers: ClubMember[] = [
     {
       id: 'member-daniel-r',
       accountId: 'acc-daniel-r',
-      businessId: 'la-burger',
-      businessName: 'La Burger',
-      localId: 'local-burger-1',
-      localCode: 'BURGER01',
-      localName: 'Sucursal Central',
-      shortCode: 'K7M2-9XQ4',
-      memberCode: 'K7M2-9XQ4',
-      barcodeToken: 'K7M2-9XQ4',
+      businessId: 'musical-monroe',
+      businessName: 'Musical Monroe',
+      localId: 'local-monroe-1',
+      localCode: 'MONROE01',
+      localName: 'Sucursal central',
+      shortCode: '48291037',
+      memberCode: '48291037',
+      barcodeToken: '48291037',
       name: 'Daniel Rojas',
       email: 'daniel@ejemplo.com',
       contact: 'd***@ejemplo.com',
@@ -355,7 +366,7 @@ class MockApi implements ToqueApi {
       stamps: 4,
       stampsRequired: 5,
       targetStamps: 5,
-      rewardText: '1 Combo Burger sin cargo',
+      rewardText: 'Beneficio exclusivo en tu próxima visita',
       rewardValueArs: 12500,
       colorPreset: 'dark',
       rewardsRedeemed: 0,
@@ -367,41 +378,41 @@ class MockApi implements ToqueApi {
         {
           id: 'st-dan-4',
           memberId: 'member-daniel-r',
-          localId: 'local-burger-1',
-          localName: 'Sucursal Central',
+          localId: 'local-monroe-1',
+          localName: 'Sucursal central',
           count: 1,
           source: 'cashier',
-          actorName: 'Caja Mostrador',
+          actorName: 'Caja mostrador',
           createdAt: new Date(Date.now() - 2 * 86400000).toISOString(),
         },
         {
           id: 'st-dan-3',
           memberId: 'member-daniel-r',
-          localId: 'local-burger-1',
-          localName: 'Sucursal Central',
+          localId: 'local-monroe-1',
+          localName: 'Sucursal central',
           count: 1,
           source: 'cashier',
-          actorName: 'Caja Mostrador',
+          actorName: 'Caja mostrador',
           createdAt: new Date(Date.now() - 5 * 86400000).toISOString(),
         },
         {
           id: 'st-dan-2',
           memberId: 'member-daniel-r',
-          localId: 'local-burger-1',
-          localName: 'Sucursal Central',
+          localId: 'local-monroe-1',
+          localName: 'Sucursal central',
           count: 1,
           source: 'cashier',
-          actorName: 'Caja Mostrador',
+          actorName: 'Caja mostrador',
           createdAt: new Date(Date.now() - 8 * 86400000).toISOString(),
         },
         {
           id: 'st-dan-1',
           memberId: 'member-daniel-r',
-          localId: 'local-burger-1',
-          localName: 'Sucursal Central',
+          localId: 'local-monroe-1',
+          localName: 'Sucursal central',
           count: 1,
           source: 'self',
-          actorName: 'Alta en el Club (+1 sello)',
+          actorName: 'Alta en el club (+1 sello)',
           createdAt: new Date(Date.now() - 12 * 86400000).toISOString(),
         },
       ],
@@ -417,14 +428,14 @@ class MockApi implements ToqueApi {
   private stampLogs: StampLogEntry[] = [
     {
       id: 'log-dan-4',
-      businessId: 'la-burger',
+      businessId: 'musical-monroe',
       memberId: 'member-daniel-r',
-      memberCode: 'K7M2-9XQ4',
+      memberCode: '48291037',
       memberName: 'Daniel Rojas',
       memberEmail: 'd***@ejemplo.com',
       action: 'stamp_added',
       stampsDelta: 1,
-      localName: 'Sucursal Central',
+      localName: 'Sucursal central',
       staffEmail: 'cajero@comercio.com',
       createdAt: new Date(Date.now() - 2 * 86400000).toISOString(),
     },
@@ -433,7 +444,7 @@ class MockApi implements ToqueApi {
   // Toquecitos guardados por cuenta
   private toquecitos: ToquecitoItem[] = [];
 
-  // Usuarios y comprobantes en memoria (sin localStorage)
+  // Usuarios y comprobantes en memoria
   private consumerUsers: Map<string, ConsumerUser> = new Map();
   private consumerReceipts: Map<string, ConsumerReceipt[]> = new Map();
 
@@ -445,7 +456,7 @@ class MockApi implements ToqueApi {
     {
       id: 'tpl-birthday',
       type: 'birthday',
-      title: '¡Feliz cumpleaños de parte de La Burger!',
+      title: '¡Feliz cumpleaños de parte de Musical Monroe!',
       message:
         'Hoy es tu día. Pasá por el local esta semana y tenés un beneficio especial presentando tu tarjeta de sellos.',
       active: true,
@@ -455,7 +466,7 @@ class MockApi implements ToqueApi {
     {
       id: 'tpl-nearby',
       type: 'nearby',
-      title: 'Estás cerca de La Burger',
+      title: 'Estás cerca de Musical Monroe',
       message: 'Mostrá tu tarjeta en mostrador y sumá tu sello en tu visita.',
       active: true,
       scheduleInfo:
@@ -487,14 +498,14 @@ class MockApi implements ToqueApi {
   // Lista de espera en memoria
   private waitlistEntries: WaitlistEntry[] = [];
 
-  // Cartel activo vinculado por defecto: BURGER01
+  // Cartel activo vinculado por defecto: MONROE01
   private carteles: Cartel[] = [
     {
-      id: 'cartel-burger-01',
-      code: 'BURGER01',
+      id: 'cartel-monroe-01',
+      code: 'MONROE01',
       pin: '102030',
-      businessId: 'la-burger',
-      name: 'Mostrador Principal',
+      businessId: 'musical-monroe',
+      name: 'Mostrador principal',
       role: 'caja',
       status: 'active',
       reviewUrl: '',
@@ -583,7 +594,7 @@ class MockApi implements ToqueApi {
   private loadPersistedState(): void {
     if (typeof window === 'undefined') return;
     try {
-      const clubRaw = window.sessionStorage.getItem('toque_unified_club_v1');
+      const clubRaw = window.sessionStorage.getItem('toque_unified_club_v2');
       if (clubRaw) {
         const parsed = JSON.parse(clubRaw);
         if (parsed.recognizedClient !== undefined) {
@@ -593,7 +604,16 @@ class MockApi implements ToqueApi {
           this.clientAccountsByEmail = new Map(parsed.clientAccountsEntries);
         }
         if (Array.isArray(parsed.clubMembers)) {
-          this.clubMembers = parsed.clubMembers;
+          this.clubMembers = parsed.clubMembers.map((m: ClubMember) => {
+            const rawCode = m.barcodeToken || m.shortCode || m.memberCode || '';
+            const clean8 = /^\d{8}$/.test(rawCode) ? rawCode : m.id === 'member-daniel-r' ? '48291037' : generateShortCode();
+            return {
+              ...m,
+              shortCode: clean8,
+              memberCode: clean8,
+              barcodeToken: clean8,
+            };
+          });
         }
         if (parsed.memberRawEmails && typeof parsed.memberRawEmails === 'object') {
           this.memberRawEmails = parsed.memberRawEmails;
@@ -609,7 +629,32 @@ class MockApi implements ToqueApi {
         }
       }
 
-      const posRaw = window.sessionStorage.getItem('toque_unified_pos_v1');
+      // Restaurar sesión activa del navegador si existe en toque_session
+      const persistedEmail = getConsumerSessionEmail();
+      if (persistedEmail && !this.recognizedClient) {
+        const existingAcc = this.clientAccountsByEmail.get(persistedEmail);
+        if (existingAcc) {
+          this.recognizedClient = existingAcc;
+        } else {
+          const matchingMember = this.clubMembers.find(
+            (m) =>
+              m.email?.toLowerCase() === persistedEmail ||
+              this.memberRawEmails[m.id]?.toLowerCase() === persistedEmail
+          );
+          if (matchingMember) {
+            this.recognizedClient = {
+              accountId: matchingMember.accountId || `acc-${persistedEmail}`,
+              name: matchingMember.name || persistedEmail.split('@')[0],
+              email: persistedEmail,
+              birthDay: matchingMember.birthDay,
+              birthMonth: matchingMember.birthMonth,
+            };
+            this.clientAccountsByEmail.set(persistedEmail, this.recognizedClient);
+          }
+        }
+      }
+
+      const posRaw = window.sessionStorage.getItem('toque_unified_pos_v2');
       if (posRaw) {
         const parsed = JSON.parse(posRaw);
         if (Array.isArray(parsed.sales)) {
@@ -623,7 +668,7 @@ class MockApi implements ToqueApi {
         }
       }
 
-      const bizRaw = window.sessionStorage.getItem('toque_unified_biz_v1');
+      const bizRaw = window.sessionStorage.getItem('toque_unified_biz_v2');
       if (bizRaw) {
         const parsed = JSON.parse(bizRaw);
         if (parsed.businessProfile) {
@@ -638,7 +683,7 @@ class MockApi implements ToqueApi {
         if (parsed.planState) {
           this.planState = parsed.planState;
         }
-        const bizId = this.businessProfile.id || 'la-burger';
+        const bizId = this.businessProfile.id || 'musical-monroe';
         this.businesses.set(bizId, { ...this.businessProfile });
         this.businessClubConfigs.set(bizId, { ...this.clubConfig });
         this.businessHubConfigs.set(bizId, { ...this.hubConfig });
@@ -652,7 +697,7 @@ class MockApi implements ToqueApi {
     if (typeof window === 'undefined') return;
     try {
       window.sessionStorage.setItem(
-        'toque_unified_club_v1',
+        'toque_unified_club_v2',
         JSON.stringify({
           recognizedClient: this.recognizedClient,
           clientAccountsEntries: Array.from(this.clientAccountsByEmail.entries()),
@@ -672,7 +717,7 @@ class MockApi implements ToqueApi {
     if (typeof window === 'undefined') return;
     try {
       window.sessionStorage.setItem(
-        'toque_unified_pos_v1',
+        'toque_unified_pos_v2',
         JSON.stringify({
           sales: this.sales,
           receipts: this.receipts,
@@ -688,7 +733,7 @@ class MockApi implements ToqueApi {
     if (typeof window === 'undefined') return;
     try {
       window.sessionStorage.setItem(
-        'toque_unified_biz_v1',
+        'toque_unified_biz_v2',
         JSON.stringify({
           businessProfile: this.businessProfile,
           clubConfig: this.clubConfig,
@@ -720,7 +765,7 @@ class MockApi implements ToqueApi {
   }
 
   private getActiveBusinessId(): string {
-    return this.currentUser?.businessId || this.businessProfile.id || 'la-burger';
+    return this.currentUser?.businessId || this.businessProfile.id || 'musical-monroe';
   }
 
   private syncActiveBusinessStore(): void {
@@ -918,6 +963,25 @@ class MockApi implements ToqueApi {
 
     // Si es flujo de cliente del Club
     if (purpose === 'register_client' || purpose === 'cashier_confirm') {
+      // Verificar también en el servidor (/api/consumer/verify-code)
+      let serverConsumer: {
+        needsRegistration?: boolean;
+        sessionToken?: string;
+        user?: { id: string; email: string; fullName: string; birthDate?: string };
+      } | null = null;
+      try {
+        const cRes = await fetch('/api/consumer/verify-code', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: cleanEmail, code: cleanCode }),
+        });
+        if (cRes.ok) {
+          serverConsumer = await cRes.json();
+        }
+      } catch {
+        // Fallback en memoria
+      }
+
       const existingAcc = this.clientAccountsByEmail.get(cleanEmail);
       const hasMemberCard = this.clubMembers.some(
         (m) =>
@@ -925,19 +989,47 @@ class MockApi implements ToqueApi {
           this.memberRawEmails[m.id]?.toLowerCase() === cleanEmail
       );
 
-      if (existingAcc || hasMemberCard) {
+      if (
+        (serverConsumer && serverConsumer.needsRegistration === false && serverConsumer.user) ||
+        existingAcc ||
+        hasMemberCard
+      ) {
         const firstCard = this.clubMembers.find(
           (m) =>
             m.email?.toLowerCase() === cleanEmail ||
             this.memberRawEmails[m.id]?.toLowerCase() === cleanEmail
         );
-        this.recognizedClient = existingAcc || {
-          accountId: firstCard?.accountId || `acc-${cleanEmail}`,
-          name: firstCard?.name || cleanEmail.split('@')[0],
+        const resolvedName =
+          serverConsumer?.user?.fullName ||
+          existingAcc?.name ||
+          firstCard?.name ||
+          cleanEmail.split('@')[0];
+        const resolvedAccountId =
+          serverConsumer?.user?.id ||
+          existingAcc?.accountId ||
+          firstCard?.accountId ||
+          `acc-${cleanEmail}`;
+
+        this.recognizedClient = {
+          accountId: resolvedAccountId,
+          name: resolvedName,
           email: cleanEmail,
-          birthDay: firstCard?.birthDay,
-          birthMonth: firstCard?.birthMonth,
+          birthDay: existingAcc?.birthDay || firstCard?.birthDay,
+          birthMonth: existingAcc?.birthMonth || firstCard?.birthMonth,
         };
+        this.clientAccountsByEmail.set(cleanEmail, this.recognizedClient);
+
+        const sessionToken =
+          serverConsumer?.sessionToken ||
+          getConsumerSessionToken() ||
+          `sess-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+        saveConsumerSession(sessionToken, cleanEmail, {
+          id: resolvedAccountId,
+          email: cleanEmail,
+          fullName: resolvedName,
+          birthDate: serverConsumer?.user?.birthDate,
+        });
+
         const account = await this.recognizeAccount(cleanEmail);
         return {
           verified: true,
@@ -965,7 +1057,7 @@ class MockApi implements ToqueApi {
     // Si es registro de nuevo comercio
     if (purpose === 'register_merchant' || extra?.businessName) {
       const reg = await this.register({
-        businessName: extra?.businessName || 'La Burger',
+        businessName: extra?.businessName || 'Musical Monroe',
         ownerName: extra?.ownerName || cleanEmail.split('@')[0],
         email: cleanEmail,
         ownerRole: extra?.ownerRole,
@@ -985,7 +1077,7 @@ class MockApi implements ToqueApi {
     const isSuperAdmin = this.isAuthorizedSuperAdmin(cleanEmail);
 
     if (teamMember || isSuperAdmin) {
-      const targetBizId = teamMember?.businessId || 'la-burger';
+      const targetBizId = teamMember?.businessId || 'musical-monroe';
       const biz = this.businesses.get(targetBizId);
       if (biz) {
         this.businessProfile = { ...biz };
@@ -1001,8 +1093,8 @@ class MockApi implements ToqueApi {
         name: teamMember ? teamMember.name : 'Fede (Super Admin Toque)',
         businessId: targetBizId,
         role: isSuperAdmin ? 'superadmin' : teamMember!.role,
-        assignedCartelId: teamMember?.assignedCartelId || 'cartel-burger-01',
-        assignedCartelCode: teamMember?.assignedCartelCode || 'BURGER01',
+        assignedCartelId: teamMember?.assignedCartelId || 'cartel-monroe-01',
+        assignedCartelCode: teamMember?.assignedCartelCode || 'MONROE01',
         assignedLocalIds:
           teamMember?.assignedLocalIds ||
           this.locals.filter((l) => l.businessId === targetBizId).map((l) => l.id),
@@ -1038,7 +1130,7 @@ class MockApi implements ToqueApi {
     category?: string;
   }): Promise<{ user: User; token: string }> {
     const cleanEmail = data.email.trim().toLowerCase();
-    const cleanBizName = data.businessName.trim() || 'La Burger';
+    const cleanBizName = data.businessName.trim() || 'Musical Monroe';
     const cleanOwnerName = data.ownerName.trim() || cleanEmail.split('@')[0];
 
     const slug =
@@ -1298,7 +1390,7 @@ class MockApi implements ToqueApi {
     clubCfg: ClubConfig;
     hubCfg: HubConfig;
   } {
-    const clean = (codeOrSlug || 'BURGER01').trim();
+    const clean = (codeOrSlug || 'MONROE01').trim();
     const upper = clean.toUpperCase();
     const lower = clean.toLowerCase();
 
@@ -1307,7 +1399,7 @@ class MockApi implements ToqueApi {
     let local = this.locals.find((l) => l.code.toUpperCase() === upper);
     let business = cartel?.businessId ? this.businesses.get(cartel.businessId) : undefined;
 
-    // 2. Si no se encontró por código, buscar por businessId / slug (ej. la-burger)
+    // 2. Si no se encontró por código, buscar por businessId / slug (ej. musical-monroe)
     if (!business) {
       business =
         this.businesses.get(lower) ||
@@ -1317,7 +1409,7 @@ class MockApi implements ToqueApi {
     }
 
     if (!business) {
-      business = this.businesses.get('la-burger') || this.businessProfile;
+      business = this.businesses.get('musical-monroe') || this.businessProfile;
     }
 
     if (!cartel) {
@@ -1429,7 +1521,7 @@ class MockApi implements ToqueApi {
     }
 
     const derivedName = (data.name || '').trim() || cleanEmail.split('@')[0];
-    const pub = await this.getClubPublic(data.localCode || 'BURGER01');
+    const pub = await this.getClubPublic(data.localCode || 'MONROE01');
     const masked = maskEmailAddress(cleanEmail);
     const accountId =
       this.recognizedClient?.accountId ||
@@ -1459,6 +1551,35 @@ class MockApi implements ToqueApi {
     this.recognizedClient = clientAcc;
     this.clientAccountsByEmail.set(cleanEmail, clientAcc);
 
+    // Persistir sesión única del consumidor en navegador y servidor
+    let sessionToken =
+      getConsumerSessionToken() ||
+      `sess-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+    try {
+      const regRes = await fetch('/api/consumer/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: cleanEmail,
+          fullName: derivedName,
+          birthDate: data.birthDate,
+          tenantId: pub.businessId,
+        }),
+      });
+      if (regRes.ok) {
+        const regJson = await regRes.json();
+        if (regJson.sessionToken) sessionToken = regJson.sessionToken;
+      }
+    } catch {
+      // Fallback en memoria
+    }
+    saveConsumerSession(sessionToken, cleanEmail, {
+      id: accountId,
+      email: cleanEmail,
+      fullName: derivedName,
+      birthDate: data.birthDate,
+    });
+
     let existing = this.clubMembers.find(
       (m) =>
         (this.memberRawEmails[m.id] === cleanEmail || m.email?.toLowerCase() === cleanEmail) &&
@@ -1467,7 +1588,10 @@ class MockApi implements ToqueApi {
 
     if (!existing) {
       const newId = `member-${Date.now().toString(36)}`;
-      const shortCode = generateShortCode();
+      let shortCode = generateShortCode();
+      while (this.clubMembers.some((m) => m.barcodeToken === shortCode || m.shortCode === shortCode)) {
+        shortCode = generateShortCode();
+      }
       const nowIso = new Date().toISOString();
 
       existing = {
@@ -1511,7 +1635,7 @@ class MockApi implements ToqueApi {
             localName: pub.localName,
             count: 1,
             source: 'self',
-            actorName: 'Alta en el Club (+1 sello)',
+            actorName: 'Alta en el club (+1 sello)',
             createdAt: nowIso,
           },
         ],
@@ -1542,10 +1666,10 @@ class MockApi implements ToqueApi {
       this.notifyHubListeners(pub.localCode);
       this.notifyHubListeners(pub.businessId);
     } else {
-      if (!existing.shortCode) {
+      if (!existing.shortCode || !/^\d{8}$/.test(existing.shortCode)) {
         const sc =
-          existing.memberCode && /^[A-Z0-9]{4}-[A-Z0-9]{4}$/i.test(existing.memberCode)
-            ? existing.memberCode.toUpperCase()
+          existing.memberCode && /^\d{8}$/.test(existing.memberCode)
+            ? existing.memberCode
             : generateShortCode();
         existing.shortCode = sc;
         existing.memberCode = sc;
@@ -1574,7 +1698,14 @@ class MockApi implements ToqueApi {
 
   async recognizeAccount(email?: string): Promise<RecognizedClientAccount> {
     this.loadPersistedState();
-    const targetEmail = (email || this.recognizedClient?.email || '').trim().toLowerCase();
+    const targetEmail = (
+      email ||
+      this.recognizedClient?.email ||
+      getConsumerSessionEmail() ||
+      ''
+    )
+      .trim()
+      .toLowerCase();
     if (!targetEmail) {
       return { recognized: false, accountExists: false };
     }
@@ -1590,26 +1721,28 @@ class MockApi implements ToqueApi {
         const cfg = m.businessId
           ? this.businessClubConfigs.get(m.businessId) || this.clubConfig
           : this.clubConfig;
-        if (!m.shortCode) {
+        if (!m.shortCode || !/^\d{8}$/.test(m.shortCode)) {
           const sc =
-            m.memberCode && /^[A-Z0-9]{4}-[A-Z0-9]{4}$/i.test(m.memberCode)
-              ? m.memberCode.toUpperCase()
+            m.memberCode && /^\d{8}$/.test(m.memberCode)
+              ? m.memberCode
+              : m.id === 'member-daniel-r'
+              ? '48291037'
               : generateShortCode();
           m.shortCode = sc;
           m.memberCode = sc;
           m.barcodeToken = sc;
         }
-        m.businessName = m.businessName || biz?.name || 'La Burger';
+        m.businessName = biz?.name || m.businessName || 'Musical Monroe';
         m.rewardText =
-          m.rewardText ||
           cfg.loyaltyReward ||
           cfg.rewardText ||
+          m.rewardText ||
           'Beneficio al completar tus sellos';
-        m.rewardValueArs = m.rewardValueArs ?? cfg.rewardValueArs ?? 0;
-        m.colorPreset = m.colorPreset || cfg.colorPreset || 'dark';
-        m.customColor = m.customColor || cfg.customColor;
-        m.logoUrl = m.logoUrl || cfg.logoUrl;
-        m.stampsRequired = m.stampsRequired || m.targetStamps || cfg.targetStamps || 5;
+        m.rewardValueArs = cfg.rewardValueArs ?? m.rewardValueArs ?? 0;
+        m.colorPreset = cfg.colorPreset || m.colorPreset || 'dark';
+        m.customColor = cfg.customColor || m.customColor;
+        m.logoUrl = cfg.logoUrl || m.logoUrl;
+        m.stampsRequired = cfg.targetStamps || cfg.stampsRequired || m.stampsRequired || m.targetStamps || 5;
         m.targetStamps = m.stampsRequired;
         return m;
       });
@@ -1881,9 +2014,9 @@ class MockApi implements ToqueApi {
       member.rewardText ||
       cfg.loyaltyReward ||
       cfg.rewardText ||
-      '1 Combo Burger sin cargo';
+      'Beneficio exclusivo en tu próxima visita';
     const cooldown = this.computeCooldownState(member);
-    const shortCode = member.shortCode || member.memberCode || member.barcodeToken || 'K7M2-9XQ4';
+    const shortCode = member.shortCode || member.memberCode || member.barcodeToken || '48291037';
 
     return {
       id: member.id,
@@ -2720,13 +2853,20 @@ class MockApi implements ToqueApi {
   }
 
   async updateClubConfig(patch: Partial<ClubConfig>): Promise<ClubConfig> {
-    const nextColor = patch.cardThemeColor || patch.brandColor || this.clubConfig.brandColor || '#1e1b4b';
+    const nextColor = patch.cardThemeColor || patch.brandColor || this.clubConfig.brandColor || '#141414';
     const nextTitle =
       patch.loyaltyTitle || patch.name || patch.clubName || this.clubConfig.loyaltyTitle || this.clubConfig.name;
     const nextReward =
       patch.loyaltyReward || patch.rewardText || this.clubConfig.loyaltyReward || this.clubConfig.rewardText;
     const nextTarget =
-      patch.stampsRequired || patch.targetStamps || this.clubConfig.targetStamps || 10;
+      patch.stampsRequired || patch.targetStamps || this.clubConfig.targetStamps || 5;
+    const nextLogo = patch.logoUrl !== undefined ? patch.logoUrl : this.clubConfig.logoUrl;
+    const nextPreset = patch.colorPreset || this.clubConfig.colorPreset || 'dark';
+    const nextCustomColor = patch.customColor !== undefined ? patch.customColor : this.clubConfig.customColor;
+    const nextRewardValueArs =
+      patch.rewardValueArs !== undefined ? patch.rewardValueArs : this.clubConfig.rewardValueArs;
+    const nextBizName =
+      patch.organizationName || patch.logoText || this.businessProfile.name;
 
     this.clubConfig = {
       ...this.clubConfig,
@@ -2736,8 +2876,12 @@ class MockApi implements ToqueApi {
       loyaltyTitle: nextTitle,
       brandColor: nextColor,
       cardThemeColor: nextColor,
+      colorPreset: nextPreset,
+      customColor: nextCustomColor,
+      logoUrl: nextLogo,
       rewardText: nextReward,
       loyaltyReward: nextReward,
+      rewardValueArs: nextRewardValueArs,
       targetStamps: nextTarget,
       stampsRequired: nextTarget,
       howToEarn: patch.howToEarn ?? this.clubConfig.howToEarn ?? '1 sello por visita o compra',
@@ -2758,6 +2902,8 @@ class MockApi implements ToqueApi {
 
     this.businessProfile = {
       ...this.businessProfile,
+      name: nextBizName,
+      logoUrl: nextLogo || this.businessProfile.logoUrl,
       cardThemeColor: nextColor,
       loyaltyTitle: nextTitle,
       loyaltyReward: nextReward,
@@ -2766,8 +2912,56 @@ class MockApi implements ToqueApi {
       stampsRequired: nextTarget,
     };
 
+    this.hubConfig = {
+      ...this.hubConfig,
+      businessName: nextBizName,
+      logoUrl: nextLogo || this.hubConfig.logoUrl,
+      colorPreset: nextPreset,
+      customColor: nextCustomColor,
+      stampsRequired: nextTarget,
+      rewardText: nextReward,
+      rewardValueArs: nextRewardValueArs,
+    };
+
+    // Propagar diseño actualizado en tiempo real a todas las tarjetas de este comercio
+    const bizId = this.getActiveBusinessId();
+    this.clubMembers = this.clubMembers.map((m) => {
+      if (!m.businessId || m.businessId === bizId) {
+        return {
+          ...m,
+          businessName: this.businessProfile.name,
+          logoUrl: nextLogo || m.logoUrl,
+          colorPreset: nextPreset,
+          customColor: nextCustomColor,
+          rewardText: nextReward || m.rewardText,
+          rewardValueArs: nextRewardValueArs ?? m.rewardValueArs,
+          stampsRequired: nextTarget,
+          targetStamps: nextTarget,
+        };
+      }
+      return m;
+    });
+
     this.syncActiveBusinessStore();
+    this.persistClubData();
     this.notifyHubListeners();
+
+    // Sincronizar con el servidor y disparar actualización de pases activos en Apple/Google Wallet
+    fetch('/api/merchant/hub-config', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        tenantId: bizId,
+        businessName: this.businessProfile.name,
+        logoUrl: nextLogo,
+        brandColor: nextCustomColor || nextColor,
+        colorPreset: nextPreset,
+        stampsRequired: nextTarget,
+        rewardText: nextReward,
+        rewardValueArs: nextRewardValueArs,
+      }),
+    }).catch(() => {});
+
     return { ...this.clubConfig };
   }
 
@@ -2827,7 +3021,7 @@ class MockApi implements ToqueApi {
       loyaltyTitle: cleanName,
       logoText: data.logoText || cleanName,
       organizationName: data.organizationName || this.businessProfile.name,
-      barcodeFormat: data.barcodeFormat || 'QR',
+      barcodeFormat: data.barcodeFormat || 'CODE128',
       barcodeValue: data.barcodeValue || '',
       barcodeAltText: data.barcodeAltText || '',
       colorPreset: data.colorPreset || 'dark',
@@ -2838,10 +3032,10 @@ class MockApi implements ToqueApi {
       wideLogoUrl: data.wideLogoUrl || '',
       iconUrl: data.iconUrl || '',
       headerFields: data.headerFields || [],
-      primaryFields: data.primaryFields || [{ label: 'SELLOS', value: `1 / ${targetStamps}` }],
+      primaryFields: data.primaryFields || [{ label: 'Sellos', value: `1 de ${targetStamps}` }],
       secondaryFields: data.secondaryFields || [
-        { label: 'PREMIO', value: cleanReward },
-        { label: 'SOCIO', value: this.businessProfile.name },
+        { label: 'Premio', value: cleanReward },
+        { label: 'Cliente', value: this.businessProfile.name },
       ],
       targetStamps,
       stampsRequired: targetStamps,
@@ -3352,7 +3546,7 @@ class MockApi implements ToqueApi {
     location?: string;
   }): Promise<Cartel> {
     const bizId = this.getActiveBusinessId();
-    const code = (data.code || `BURGER0${this.carteles.length + 1}`).toUpperCase();
+    const code = (data.code || `MONROE0${this.carteles.length + 1}`).toUpperCase();
     const pin = data.pin || data.activationPin || '102030';
     const created: Cartel = {
       id: `cartel-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 5)}`,
@@ -3394,6 +3588,36 @@ class MockApi implements ToqueApi {
 
   async updateHubConfig(patch: Partial<HubConfig>): Promise<HubConfig> {
     this.hubConfig = { ...this.hubConfig, ...patch };
+    if (patch.businessName && patch.businessName.trim()) {
+      this.businessProfile.name = patch.businessName.trim();
+      this.clubConfig.organizationName = patch.businessName.trim();
+      this.clubConfig.logoText = patch.businessName.trim();
+    }
+    if (patch.logoUrl !== undefined) {
+      this.businessProfile.logoUrl = patch.logoUrl;
+      this.clubConfig.logoUrl = patch.logoUrl;
+    }
+    if (patch.colorPreset !== undefined) {
+      this.clubConfig.colorPreset = patch.colorPreset;
+    }
+    if (patch.customColor !== undefined) {
+      this.clubConfig.customColor = patch.customColor;
+      this.clubConfig.brandColor = patch.customColor || this.clubConfig.brandColor;
+      this.businessProfile.cardThemeColor = patch.customColor || this.businessProfile.cardThemeColor;
+    }
+    if (patch.stampsRequired !== undefined) {
+      this.clubConfig.stampsRequired = patch.stampsRequired;
+      this.clubConfig.targetStamps = patch.stampsRequired;
+      this.businessProfile.stampsRequired = patch.stampsRequired;
+    }
+    if (patch.rewardText !== undefined) {
+      this.clubConfig.rewardText = patch.rewardText;
+      this.clubConfig.loyaltyReward = patch.rewardText;
+      this.businessProfile.loyaltyReward = patch.rewardText;
+    }
+    if (patch.rewardValueArs !== undefined) {
+      this.clubConfig.rewardValueArs = patch.rewardValueArs;
+    }
     if (patch.googleReviewUrl !== undefined) {
       this.businessProfile.reviewUrl = patch.googleReviewUrl;
       for (const c of this.carteles) {
@@ -3402,9 +3626,44 @@ class MockApi implements ToqueApi {
         }
       }
     }
+
+    const bizId = this.getActiveBusinessId();
+    this.clubMembers = this.clubMembers.map((m) => {
+      if (!m.businessId || m.businessId === bizId) {
+        return {
+          ...m,
+          businessName: this.businessProfile.name,
+          logoUrl: this.clubConfig.logoUrl || m.logoUrl,
+          colorPreset: this.clubConfig.colorPreset || m.colorPreset || 'dark',
+          customColor: this.clubConfig.customColor || m.customColor,
+          rewardText: this.clubConfig.rewardText || m.rewardText,
+          rewardValueArs: this.clubConfig.rewardValueArs ?? m.rewardValueArs,
+          stampsRequired: this.clubConfig.stampsRequired || m.stampsRequired,
+          targetStamps: this.clubConfig.targetStamps || m.targetStamps,
+        };
+      }
+      return m;
+    });
+
     this.syncActiveBusinessStore();
     this.persistClubData();
     this.notifyHubListeners();
+
+    fetch('/api/merchant/hub-config', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        tenantId: bizId,
+        businessName: this.businessProfile.name,
+        logoUrl: this.clubConfig.logoUrl || this.hubConfig.logoUrl,
+        brandColor: this.clubConfig.customColor || this.clubConfig.brandColor,
+        colorPreset: this.clubConfig.colorPreset || this.hubConfig.colorPreset || 'dark',
+        stampsRequired: this.clubConfig.stampsRequired,
+        rewardText: this.clubConfig.rewardText,
+        rewardValueArs: this.clubConfig.rewardValueArs,
+      }),
+    }).catch(() => {});
+
     return { ...this.hubConfig };
   }
 
@@ -3677,7 +3936,7 @@ class MockApi implements ToqueApi {
   }
 
   subscribeToCartelHub(code: string, onUpdate: (hub: PublicHub) => void): () => void {
-    const key = (code || 'BURGER01').trim();
+    const key = (code || 'MONROE01').trim();
     if (!this.hubListeners.has(key)) {
       this.hubListeners.set(key, new Set());
     }
@@ -3850,19 +4109,27 @@ class MockApi implements ToqueApi {
   }): Promise<WalletPassResponse> {
     this.loadPersistedState();
     const { business, cartel, clubCfg } = this.resolveCartelAndBusiness(
-      data.cartelCode || 'BURGER01'
+      data.cartelCode || 'MONROE01'
     );
     const member = data.memberId
       ? this.clubMembers.find((m) => m.id === data.memberId)
       : undefined;
 
-    const immutableCode =
+    const rawCandidate =
+      member?.barcodeToken ||
       member?.shortCode ||
       member?.memberCode ||
       data.memberCode ||
       data.barcodeValue ||
       clubCfg.barcodeValue ||
-      generateShortCode();
+      '';
+    const immutableCode = /^\d{8}$/.test(rawCandidate) ? rawCandidate : generateShortCode();
+
+    if (member) {
+      member.shortCode = immutableCode;
+      member.memberCode = immutableCode;
+      member.barcodeToken = immutableCode;
+    }
 
     const payload = {
       businessId: business.id,
@@ -3881,7 +4148,7 @@ class MockApi implements ToqueApi {
         data.color || clubCfg.customColor || clubCfg.cardThemeColor || clubCfg.brandColor || '#141414',
       color: data.color || clubCfg.customColor || undefined,
       colorPreset: data.colorPreset || member?.colorPreset || clubCfg.colorPreset || 'dark',
-      barcodeFormat: 'QR',
+      barcodeFormat: 'CODE128',
       barcodeValue: immutableCode,
       barcodeToken: immutableCode,
       barcodeAltText: immutableCode,
@@ -3949,12 +4216,17 @@ class MockApi implements ToqueApi {
         member.passId = passRes.serialNumber || passRes.passId;
         member.walletSerial = passRes.serialNumber || passRes.passId;
         member.shareUrl = passRes.shareUrl || passRes.appleWalletUrl;
-        member.appleWalletUrl = passRes.shareUrl || passRes.appleWalletUrl;
+        member.appleWalletUrl = `/api/wallet/pass/${encodeURIComponent(immutableCode)}.pkpass`;
         member.googleWalletUrl = passRes.googleWalletUrl || passRes.shareUrl;
         member.walletSyncError = passRes.walletSyncError || undefined;
         this.persistClubData();
       }
-      return { ...passRes, configured: true };
+      return {
+        ...passRes,
+        appleWalletUrl: `/api/wallet/pass/${encodeURIComponent(immutableCode)}.pkpass`,
+        barcodeValue: immutableCode,
+        configured: true,
+      };
     } catch (err: any) {
       if (err?.message === 'Pronto vas a poder guardarla en tu billetera') {
         return {
@@ -4062,7 +4334,7 @@ class MockApi implements ToqueApi {
       id: `rcp-${Date.now()}`,
       saleId: sale.id,
       businessId: sale.businessId,
-      cartelCode: sale.cartelCode || 'BURGER01',
+      cartelCode: sale.cartelCode || 'MONROE01',
       status: 'ready',
       expiresAt: new Date(Date.now() + 120000).toISOString(),
       businessName: this.businessProfile.name,
@@ -4417,7 +4689,21 @@ class MockApi implements ToqueApi {
 
   async updateBusinessProfile(patch: Partial<BusinessProfile>): Promise<BusinessProfile> {
     this.businessProfile = { ...this.businessProfile, ...patch };
+    if (patch.name) {
+      this.clubConfig.organizationName = patch.name;
+      this.clubConfig.logoText = patch.name;
+      this.hubConfig.businessName = patch.name;
+      const bizId = this.getActiveBusinessId();
+      this.clubMembers = this.clubMembers.map((m) =>
+        !m.businessId || m.businessId === bizId ? { ...m, businessName: patch.name! } : m
+      );
+    }
+    if (patch.logoUrl !== undefined) {
+      this.clubConfig.logoUrl = patch.logoUrl;
+      this.hubConfig.logoUrl = patch.logoUrl;
+    }
     this.syncActiveBusinessStore();
+    this.persistClubData();
     this.notifyHubListeners();
     return { ...this.businessProfile };
   }
@@ -4433,7 +4719,7 @@ class MockApi implements ToqueApi {
     for (const tm of this.teamMembers) {
       const biz = this.businesses.get(tm.businessId);
       const roleMap: Record<string, string> = {
-        owner: 'Dueño de Comercio',
+        owner: 'Dueño de comercio',
         manager: 'Encargado',
         cashier: 'Cajero',
       };
@@ -4456,11 +4742,11 @@ class MockApi implements ToqueApi {
       records.push({
         id: `usr-member-${m.id}`,
         category: 'club_member',
-        roleLabel: m.anonymous ? 'Socio Anónimo' : 'Socio Club de Sellos',
+        roleLabel: m.anonymous ? 'Socio anónimo' : 'Socio club de sellos',
         displayName: m.name || m.memberCode || 'Socio',
         emailOrContact: m.maskedEmail || m.contact,
-        businessId: m.businessId || 'la-burger',
-        businessName: biz?.name || 'La Burger',
+        businessId: m.businessId || 'musical-monroe',
+        businessName: biz?.name || 'Musical Monroe',
         stamps: m.stamps,
         rewardsRedeemed: m.rewardsRedeemed || 0,
         walletPassIssued: Boolean(m.passId),

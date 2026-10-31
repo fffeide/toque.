@@ -11,7 +11,7 @@ export const PricingView: React.FC = () => {
 
       <main className="flex-1 max-w-5xl w-full mx-auto px-4 sm:px-6 py-12 space-y-10">
         <div className="text-center max-w-2xl mx-auto space-y-3">
-          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#bec8ff]/15 border border-[#bec8ff]/30 text-[#bec8ff] text-xs font-bold uppercase tracking-wider">
+          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#bec8ff]/15 border border-[#bec8ff]/30 text-[#bec8ff] text-xs font-bold tracking-wider">
             <Sparkles className="w-3.5 h-3.5" />
             <span>Precios simples</span>
           </span>

@@ -110,7 +110,7 @@ function isValidReviewLink(url?: string): boolean {
 export const HubEditorView: React.FC = () => {
   const { showToast } = useToast();
   const [config, setConfig] = useState<HubConfig | null>(null);
-  const [activeCartelCode, setActiveCartelCode] = useState<string>('BURGER01');
+  const [activeCartelCode, setActiveCartelCode] = useState<string>('MONROE01');
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
 
@@ -122,7 +122,7 @@ export const HubEditorView: React.FC = () => {
       api.listCarteles().catch(() => []),
     ])
       .then(([data, biz, clubCfg, carteles]) => {
-        const firstCode = carteles?.[0]?.code || 'BURGER01';
+        const firstCode = carteles?.[0]?.code || 'MONROE01';
         setActiveCartelCode(firstCode);
         const cleanGoogleUrl =
           data.googleReviewUrl === 'https://maps.google.com' ? '' : data.googleReviewUrl || '';
@@ -134,7 +134,7 @@ export const HubEditorView: React.FC = () => {
           ...data,
           hubConfigured: alreadyHasData,
           googleReviewUrl: cleanGoogleUrl,
-          businessName: data.businessName || biz?.name || clubCfg?.organizationName || 'La Burger',
+          businessName: data.businessName || biz?.name || clubCfg?.organizationName || 'Musical Monroe',
           rewardText:
             data.rewardText ||
             clubCfg?.loyaltyReward ||
@@ -275,7 +275,7 @@ export const HubEditorView: React.FC = () => {
                 type="text"
                 value={config.businessName || ''}
                 onChange={(e) => setConfig({ ...config, businessName: e.target.value })}
-                placeholder="Ej. La Burger"
+                placeholder="Ej. Musical Monroe"
                 className="w-full px-3.5 py-2.5 rounded-xl bg-[#161619] border border-[#28282a] text-sm text-[#f1f1ee] focus:outline-none focus:border-[#D95B26]"
               />
             </div>
@@ -827,12 +827,12 @@ export const HubEditorView: React.FC = () => {
                     <div key="club" className="pt-1">
                       <WalletPassCard
                         businessName={config.businessName || 'Mi Comercio'}
-                        memberName="Socio"
+                        memberName="Cliente"
                         stamps={1}
                         stampsRequired={config.stampsRequired || 5}
                         rewardText={config.rewardText || 'Beneficio al completar tus sellos'}
-                        barcodeToken="K7M2-9XQ4"
-                        shortCode="K7M2-9XQ4"
+                        barcodeToken="48291037"
+                        shortCode="48291037"
                         colorPreset={config.colorPreset || 'dark'}
                         customColor={config.customColor}
                         logoUrl={config.logoUrl}

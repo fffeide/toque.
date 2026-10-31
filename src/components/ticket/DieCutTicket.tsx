@@ -9,7 +9,12 @@ import {
   MapPin,
   ChevronDown,
 } from 'lucide-react';
-import { ColorPreset, resolvePassBackgroundColor } from '../wallet/WalletPassCard';
+import { Barcode128 } from '../Barcode128';
+import {
+  ColorPreset,
+  resolvePassBackgroundColor,
+  ensure8DigitBarcode,
+} from '../wallet/WalletPassCard';
 
 export interface DieCutTicketData {
   id: string;
@@ -28,6 +33,7 @@ export interface DieCutTicketData {
   itemsSummary?: string;
   items?: Array<{ name: string; quantity?: number; price: number }>;
   barcodeDigits?: [string, string, string];
+  barcodeToken?: string;
   colorPreset?: string;
 }
 
@@ -54,6 +60,7 @@ export interface DieCutTicketProps {
   logoUrl?: string;
   memberName?: string;
   memberCode?: string;
+  barcodeToken?: string;
   isDark?: boolean;
   onViewPass?: () => void;
   onDownloadPdf?: () => void;
@@ -98,6 +105,8 @@ export const DieCutTicket: React.FC<DieCutTicketProps> = ({
   customColor,
   logoUrl,
   memberName,
+  memberCode,
+  barcodeToken,
   isDark = true,
   onViewPass,
   onDownloadPdf,
@@ -135,10 +144,13 @@ export const DieCutTicket: React.FC<DieCutTicketProps> = ({
   })();
 
   const effectiveStamps = typeof stamps === 'number' ? stamps : isRegisteredInHub ? 1 : 0;
-  const effectiveTarget = stampsRequired || 5;
-  const effectiveReward = rewardText || providedTicket?.rewardNote || 'Beneficio al completar tus sellos';
-  const effectiveAddress = (providedTicket?.businessAddress ?? businessAddress ?? '').trim() || undefined;
-  const effectiveHours = (providedTicket?.businessHours ?? businessHours ?? '').trim() || undefined;
+  const effectiveTarget = stampsRequired || 10;
+  const effectiveReward =
+    rewardText || providedTicket?.rewardNote || 'Beneficio al completar tus sellos';
+  const effectiveAddress =
+    (providedTicket?.businessAddress ?? businessAddress ?? '').trim() || undefined;
+  const effectiveHours =
+    (providedTicket?.businessHours ?? businessHours ?? '').trim() || undefined;
   const effectiveCashTendered = providedTicket?.cashTendered ?? cashTendered;
   const effectiveChangeDue = providedTicket?.changeDue ?? changeDue;
 
@@ -164,15 +176,23 @@ export const DieCutTicket: React.FC<DieCutTicketProps> = ({
         paymentMethod: formatPaymentMethodLabel(method),
         dateTime: formattedDate,
         stampAdded: isRegisteredInHub
-          ? `${effectiveStamps} / ${effectiveTarget} sellos`
-          : `Meta: ${effectiveTarget} sellos`,
+          ? `+1 sello (${effectiveStamps} de ${effectiveTarget})`
+          : `+1 sello disponible`,
         items: normalizedItems,
       };
 
+  const ticketBarcode = ensure8DigitBarcode(
+    barcodeToken || memberCode || providedTicket?.barcodeToken || ticket.id
+  );
+
   const hasItems = Boolean(ticket.items && ticket.items.length > 0);
   const itemsTotalSum = hasItems
-    ? ticket.items!.reduce((acc, it) => acc + (it.price || 0) * (it.quantity || 1), 0)
+    ? ticket.items!.reduce((acc, it) => acc + (it.price || 0) * (itemQty(it)), 0)
     : ticket.amountArs;
+
+  function itemQty(it: { quantity?: number }): number {
+    return it.quantity || 1;
+  }
 
   const computedSubtotal = ticket.subtotalArs ?? (hasItems ? itemsTotalSum : ticket.amountArs);
   const computedDiscount =
@@ -208,7 +228,7 @@ export const DieCutTicket: React.FC<DieCutTicketProps> = ({
     try {
       const itemsCount = hasItems ? Math.min(ticket.items!.length, 10) : 0;
       const baseHeight =
-        520 +
+        560 +
         (ticket.businessAddress ? 28 : 0) +
         (ticket.businessHours ? 28 : 0) +
         (hasItems ? 60 + itemsCount * 32 + 34 : 0) +
@@ -221,7 +241,6 @@ export const DieCutTicket: React.FC<DieCutTicketProps> = ({
       const ctx = canvas.getContext('2d');
       if (!ctx) return;
 
-      // Fondo igual al comprobante del Hub
       ctx.fillStyle = '#0A0A0A';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
 
@@ -235,30 +254,33 @@ export const DieCutTicket: React.FC<DieCutTicketProps> = ({
 
       let y = 78;
 
-      // Badge "Cobro realizado"
       ctx.fillStyle = 'rgba(47, 179, 106, 0.15)';
       ctx.beginPath();
-      ctx.roundRect(280, y - 24, 200, 34, 17);
+      ctx.roundRect(260, y - 24, 240, 34, 17);
       ctx.fill();
       ctx.fillStyle = '#2FB36A';
       ctx.font = 'bold 16px Inter, sans-serif';
       ctx.textAlign = 'center';
-      ctx.fillText('✓ Cobro realizado', 380, y - 2);
-      y += 58;
+      ctx.fillText('Comprobante de visita', 380, y - 2);
+      y += 46;
 
-      // Monto total grande
       ctx.fillStyle = '#FFFFFF';
-      ctx.font = 'bold 54px Inter, sans-serif';
-      ctx.fillText(`$${ticket.amountArs.toLocaleString('es-AR')}`, 380, y);
-      y += 36;
+      ctx.font = 'bold 26px Inter, sans-serif';
+      ctx.fillText('¡Gracias por tu visita!', 380, y);
+      y += 48;
 
-      // Fecha y hora
+      if (ticket.amountArs > 0) {
+        ctx.fillStyle = '#FFFFFF';
+        ctx.font = 'bold 48px Inter, sans-serif';
+        ctx.fillText(`$${ticket.amountArs.toLocaleString('es-AR')}`, 380, y);
+        y += 34;
+      }
+
       ctx.fillStyle = '#9E9EA8';
       ctx.font = '500 18px Inter, sans-serif';
       ctx.fillText(ticket.dateTime, 380, y);
       y += 28;
 
-      // Línea divisoria punteada
       const drawDashedDivider = (posY: number) => {
         ctx.save();
         ctx.strokeStyle = '#2A2A2E';
@@ -293,14 +315,14 @@ export const DieCutTicket: React.FC<DieCutTicketProps> = ({
       if (ticket.businessHours) {
         drawRow('Horarios', ticket.businessHours, '#D4D4D8');
       }
+      drawRow('Sello sumado', ticket.stampAdded || '+1 sello', '#2FB36A', true);
       drawRow('Medio de pago', ticket.paymentMethod || formatPaymentMethodLabel(method));
-      drawRow('N.º de comprobante', ticket.id);
+      drawRow('Código de barras', ticketBarcode);
 
       y += 6;
       drawDashedDivider(y);
       y += 36;
 
-      // Solo dibujar Detalle de ítems si realmente hay ítems cargados
       if (hasItems && ticket.items) {
         ctx.textAlign = 'left';
         ctx.fillStyle = '#9E9EA8';
@@ -330,7 +352,6 @@ export const DieCutTicket: React.FC<DieCutTicketProps> = ({
         y += 36;
       }
 
-      // Solo dibujar Subtotal y Descuentos cuando correspondan
       if (hasItems || hasDiscount) {
         drawRow('Subtotal', `$${computedSubtotal.toLocaleString('es-AR')}`, '#D4D4D8');
       }
@@ -338,15 +359,16 @@ export const DieCutTicket: React.FC<DieCutTicketProps> = ({
         drawRow('Descuentos', `-$${computedDiscount.toLocaleString('es-AR')}`, '#2FB36A', true);
       }
 
-      // Total
-      ctx.textAlign = 'left';
-      ctx.fillStyle = '#FFFFFF';
-      ctx.font = 'bold 22px Inter, sans-serif';
-      ctx.fillText('Total', 64, y);
-      ctx.textAlign = 'right';
-      ctx.fillStyle = '#FFFFFF';
-      ctx.fillText(`$${ticket.amountArs.toLocaleString('es-AR')}`, 696, y);
-      y += 34;
+      if (ticket.amountArs > 0) {
+        ctx.textAlign = 'left';
+        ctx.fillStyle = '#FFFFFF';
+        ctx.font = 'bold 22px Inter, sans-serif';
+        ctx.fillText('Total', 64, y);
+        ctx.textAlign = 'right';
+        ctx.fillStyle = '#FFFFFF';
+        ctx.fillText(`$${ticket.amountArs.toLocaleString('es-AR')}`, 696, y);
+        y += 34;
+      }
 
       if (hasCashChange) {
         drawRow('Pagó con', `$${ticket.cashTendered!.toLocaleString('es-AR')}`, '#D4D4D8');
@@ -360,7 +382,7 @@ export const DieCutTicket: React.FC<DieCutTicketProps> = ({
       ctx.textAlign = 'center';
       ctx.fillStyle = '#9E9EA8';
       ctx.font = '500 15px Inter, sans-serif';
-      ctx.fillText('Comprobante de compra. No es una factura.', 380, y);
+      ctx.fillText('Comprobante de visita. No es una factura.', 380, y);
 
       const a = document.createElement('a');
       a.href = canvas.toDataURL('image/png');
@@ -381,7 +403,7 @@ export const DieCutTicket: React.FC<DieCutTicketProps> = ({
     const shareUrl = `${window.location.origin}/r/${encodeURIComponent(ticket.id)}`;
     const shareData = {
       title: `Comprobante de ${ticket.businessName}`,
-      text: `Cobro realizado por $${ticket.amountArs.toLocaleString('es-AR')} en ${ticket.businessName}`,
+      text: `Comprobante de visita en ${ticket.businessName}`,
       url: shareUrl,
     };
 
@@ -390,7 +412,7 @@ export const DieCutTicket: React.FC<DieCutTicketProps> = ({
         await navigator.share(shareData);
         return;
       } catch {
-        // fallback al portapapeles
+        // fallback
       }
     }
 
@@ -424,31 +446,58 @@ export const DieCutTicket: React.FC<DieCutTicketProps> = ({
           isExpiredBlur ? 'blur-md pointer-events-none select-none opacity-65' : ''
         }`}
       >
-        {/* Comprobante completo estilo billetera virtual */}
+        {/* Ticket físico troquelado con muescas circulares laterales y borde inferior dentado */}
         <div
-          className={`relative w-full rounded-3xl p-5 sm:p-6 overflow-hidden transition-colors shadow-xl space-y-4 ${
+          className={`relative w-full rounded-t-3xl rounded-b-xl p-5 sm:p-6 pb-8 overflow-hidden transition-colors shadow-xl space-y-4 ${
             isDark
               ? 'bg-[#141414] border border-[#242424] text-white'
               : 'bg-white border border-zinc-200/80 text-[#111111]'
           }`}
         >
-          {/* 1. Estado ("Cobro realizado"), monto grande, fecha y hora */}
-          <div className="flex flex-col items-center text-center space-y-1.5 pb-4 border-b border-dashed border-current/15">
-            <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#2FB36A]/15 border border-[#2FB36A]/30 text-[#2FB36A] text-xs font-bold">
-              <CheckCircle2 className="w-3.5 h-3.5" />
-              <span>Cobro realizado</span>
+          {/* Muescas circulares laterales de troquel */}
+          <div
+            aria-hidden="true"
+            className="w-6 h-6 rounded-full bg-[#0A0A0A] border border-[#242424] absolute -left-3 top-1/2 -translate-y-1/2 pointer-events-none"
+          />
+          <div
+            aria-hidden="true"
+            className="w-6 h-6 rounded-full bg-[#0A0A0A] border border-[#242424] absolute -right-3 top-1/2 -translate-y-1/2 pointer-events-none"
+          />
+
+          {/* 1. Cabecera con logo del comercio arriba, "¡Gracias por tu visita!", "Comprobante de visita", monto y fecha */}
+          <div className="flex flex-col items-center text-center space-y-2 pb-4 border-b border-dashed border-current/15">
+            {logoUrl ? (
+              <img
+                src={logoUrl}
+                alt={ticket.businessName}
+                className="w-12 h-12 rounded-2xl object-cover border border-white/15 shadow-sm"
+              />
+            ) : (
+              <div className="w-12 h-12 rounded-2xl bg-[#D95B26]/15 border border-[#D95B26]/30 text-[#D95B26] font-extrabold text-lg flex items-center justify-center">
+                {ticket.businessName.charAt(0)}
+              </div>
+            )}
+
+            <div className="space-y-0.5">
+              <p className="text-base font-bold">¡Gracias por tu visita!</p>
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-[#2FB36A]/15 border border-[#2FB36A]/30 text-[#2FB36A] text-[11px] font-semibold">
+                <CheckCircle2 className="w-3.5 h-3.5" />
+                <span>Comprobante de visita</span>
+              </span>
             </div>
 
-            <div className="text-3xl sm:text-4xl font-extrabold font-mono tracking-tight tabular-nums pt-0.5">
-              ${ticket.amountArs.toLocaleString('es-AR')}
-            </div>
+            {ticket.amountArs > 0 && (
+              <div className="text-3xl sm:text-4xl font-extrabold font-mono tracking-tight tabular-nums pt-0.5">
+                ${ticket.amountArs.toLocaleString('es-AR')}
+              </div>
+            )}
 
             <p className={`text-xs ${isDark ? 'text-[#9E9EA8]' : 'text-zinc-500'}`}>
               {ticket.dateTime}
             </p>
           </div>
 
-          {/* 2. Comercio (solo datos reales configurados), medio de pago y número de comprobante */}
+          {/* 2. Comercio, sello sumado, medio de pago y número de comprobante */}
           <div className="space-y-2 text-xs pb-4 border-b border-dashed border-current/15">
             <div className="flex items-start justify-between gap-3">
               <span className={isDark ? 'text-[#9E9EA8]' : 'text-zinc-500'}>Comercio</span>
@@ -470,6 +519,13 @@ export const DieCutTicket: React.FC<DieCutTicketProps> = ({
                   </p>
                 )}
               </div>
+            </div>
+
+            <div className="flex items-center justify-between gap-3">
+              <span className={isDark ? 'text-[#9E9EA8]' : 'text-zinc-500'}>Sello sumado</span>
+              <span className="font-semibold text-[#2FB36A]">
+                {ticket.stampAdded || `+1 sello (${effectiveStamps} de ${effectiveTarget})`}
+              </span>
             </div>
 
             <div className="flex items-center justify-between gap-3">
@@ -510,50 +566,59 @@ export const DieCutTicket: React.FC<DieCutTicketProps> = ({
             </div>
           )}
 
-          {/* 4. Subtotal (si hay ítems o descuento), Descuentos (solo si hay descuento), Total y Efectivo/Vuelto */}
-          <div className="space-y-1.5 text-xs pb-4 border-b border-dashed border-current/15">
-            {(hasItems || hasDiscount) && (
-              <div className="flex items-center justify-between">
-                <span className={isDark ? 'text-[#9E9EA8]' : 'text-zinc-500'}>Subtotal</span>
-                <span className="font-mono">${computedSubtotal.toLocaleString('es-AR')}</span>
-              </div>
-            )}
+          {/* 4. Subtotal, Descuentos, Total y Efectivo/Vuelto */}
+          {(hasItems || hasDiscount || ticket.amountArs > 0 || hasCashChange) && (
+            <div className="space-y-1.5 text-xs pb-4 border-b border-dashed border-current/15">
+              {(hasItems || hasDiscount) && (
+                <div className="flex items-center justify-between">
+                  <span className={isDark ? 'text-[#9E9EA8]' : 'text-zinc-500'}>Subtotal</span>
+                  <span className="font-mono">${computedSubtotal.toLocaleString('es-AR')}</span>
+                </div>
+              )}
 
-            {hasDiscount && (
-              <div className="flex items-center justify-between">
-                <span className={isDark ? 'text-[#9E9EA8]' : 'text-zinc-500'}>Descuentos</span>
-                <span className="font-mono text-[#2FB36A]">
-                  -${computedDiscount.toLocaleString('es-AR')}
-                </span>
-              </div>
-            )}
+              {hasDiscount && (
+                <div className="flex items-center justify-between">
+                  <span className={isDark ? 'text-[#9E9EA8]' : 'text-zinc-500'}>Descuentos</span>
+                  <span className="font-mono text-[#2FB36A]">
+                    -${computedDiscount.toLocaleString('es-AR')}
+                  </span>
+                </div>
+              )}
 
-            <div className="flex items-center justify-between pt-0.5 text-sm font-extrabold">
-              <span>Total</span>
-              <span className="font-mono text-base">
-                ${ticket.amountArs.toLocaleString('es-AR')}
-              </span>
+              {ticket.amountArs > 0 && (
+                <div className="flex items-center justify-between pt-0.5 text-sm font-extrabold">
+                  <span>Total</span>
+                  <span className="font-mono text-base">
+                    ${ticket.amountArs.toLocaleString('es-AR')}
+                  </span>
+                </div>
+              )}
+
+              {hasCashChange && (
+                <div className="pt-2 mt-2 border-t border-current/10 space-y-1">
+                  <div className="flex items-center justify-between">
+                    <span className={isDark ? 'text-[#9E9EA8]' : 'text-zinc-500'}>Pagó con</span>
+                    <span className="font-mono font-semibold">
+                      ${ticket.cashTendered!.toLocaleString('es-AR')}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className={isDark ? 'text-[#9E9EA8]' : 'text-zinc-500'}>Vuelto</span>
+                    <span className="font-mono font-bold text-[#2FB36A]">
+                      ${calculatedChange.toLocaleString('es-AR')}
+                    </span>
+                  </div>
+                </div>
+              )}
             </div>
+          )}
 
-            {hasCashChange && (
-              <div className="pt-2 mt-2 border-t border-current/10 space-y-1">
-                <div className="flex items-center justify-between">
-                  <span className={isDark ? 'text-[#9E9EA8]' : 'text-zinc-500'}>Pagó con</span>
-                  <span className="font-mono font-semibold">
-                    ${ticket.cashTendered!.toLocaleString('es-AR')}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className={isDark ? 'text-[#9E9EA8]' : 'text-zinc-500'}>Vuelto</span>
-                  <span className="font-mono font-bold text-[#2FB36A]">
-                    ${calculatedChange.toLocaleString('es-AR')}
-                  </span>
-                </div>
-              </div>
-            )}
+          {/* 5. Código de barras CODE128 con su número de 8 dígitos debajo */}
+          <div className="pt-1 pb-2 border-b border-dashed border-current/15">
+            <Barcode128 value={ticketBarcode} />
           </div>
 
-          {/* 5. Vista previa de la tarjeta de sellos del comercio en el comprobante + desplegable suave "Entrar al club" */}
+          {/* 6. Vista previa de la tarjeta de sellos del comercio en el comprobante */}
           {!hideClubSection && (
             <div className="space-y-2.5">
               <div
@@ -575,8 +640,8 @@ export const DieCutTicket: React.FC<DieCutTicketProps> = ({
                   </div>
                   {memberName ? (
                     <div className="text-right shrink-0">
-                      <span className="block text-[9px] text-white/60 font-semibold">SOCIO</span>
-                      <span className="block text-[11px] font-medium truncate max-w-[95px]">
+                      <span className="block text-[10px] text-white/65 font-medium">Cliente</span>
+                      <span className="block text-xs font-medium truncate max-w-[95px]">
                         {memberName}
                       </span>
                     </div>
@@ -585,16 +650,16 @@ export const DieCutTicket: React.FC<DieCutTicketProps> = ({
 
                 <div className="flex items-end justify-between gap-3">
                   <div>
-                    <div className="text-[9px] font-semibold tracking-wider text-white/65">
-                      SELLOS
+                    <div className="text-[10px] font-medium text-white/70">
+                      Sellos acumulados
                     </div>
                     <div className="text-xl font-bold leading-none mt-0.5">
                       {effectiveStamps} / {effectiveTarget}
                     </div>
                   </div>
                   <div className="text-right min-w-0 flex-1">
-                    <div className="text-[9px] font-semibold tracking-wider text-white/65">
-                      PREMIO
+                    <div className="text-[10px] font-medium text-white/70">
+                      Premio disponible
                     </div>
                     <div className="text-xs font-medium text-white/95 truncate mt-0.5">
                       {effectiveReward}
@@ -614,7 +679,7 @@ export const DieCutTicket: React.FC<DieCutTicketProps> = ({
                     }}
                     className="w-full py-2.5 px-3.5 rounded-xl bg-[#D95B26] hover:bg-[#E56732] text-white text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-sm"
                   >
-                    <span>Entrar al club</span>
+                    <span>Guardar mi tarjeta</span>
                     {clubRegisterContent && (
                       <ChevronDown
                         className={`w-4 h-4 transition-transform duration-300 ${
@@ -636,7 +701,6 @@ export const DieCutTicket: React.FC<DieCutTicketProps> = ({
                 )}
               </div>
 
-              {/* Desplegable suave con el formulario de alta al club */}
               {!isRegisteredInHub && clubRegisterContent && (
                 <div
                   className={`grid transition-all duration-300 ease-out overflow-hidden ${
@@ -651,14 +715,27 @@ export const DieCutTicket: React.FC<DieCutTicketProps> = ({
             </div>
           )}
 
-          {/* 6. Pie obligatorio */}
+          {/* 7. Pie obligatorio */}
           <p
             className={`text-center text-[11px] pt-1 ${
               isDark ? 'text-[#9E9EA8]' : 'text-zinc-500'
             }`}
           >
-            Comprobante de compra. No es una factura.
+            Comprobante de visita. No es una factura.
           </p>
+
+          {/* Borde inferior dentado estilo ticket troquelado */}
+          <div
+            aria-hidden="true"
+            className="absolute bottom-0 left-0 right-0 h-3 flex overflow-hidden pointer-events-none"
+          >
+            {Array.from({ length: 28 }).map((_, idx) => (
+              <div
+                key={idx}
+                className="w-4 h-4 -mb-2 rounded-full bg-[#0A0A0A] border border-[#242424] shrink-0"
+              />
+            ))}
+          </div>
         </div>
 
         {/* Botones "Descargar" y "Compartir" */}
@@ -685,7 +762,7 @@ export const DieCutTicket: React.FC<DieCutTicketProps> = ({
             }`}
           >
             <Share2 className="w-4 h-4 text-[#D95B26]" />
-            <span>{copiedFeedback ? 'Link copiado' : 'Compartir'}</span>
+            <span>{copiedFeedback ? 'Enlace copiado' : 'Compartir'}</span>
           </button>
         </div>
       </div>
@@ -704,7 +781,7 @@ export const DieCutTicket: React.FC<DieCutTicketProps> = ({
               <p className="text-xs text-[#8E8E93] leading-relaxed">
                 {isRegisteredInHub
                   ? 'Ya quedó guardado en tu cuenta de Toquecitos.'
-                  : 'Ingresá a Toquecitos o registrá tu tarjeta abajo para conservarlo en tu cuenta.'}
+                  : 'Ingresá a Toquecitos o guardá tu tarjeta abajo para conservarlo en tu cuenta.'}
               </p>
             </div>
             {onOpenToquecitos && (
@@ -714,7 +791,7 @@ export const DieCutTicket: React.FC<DieCutTicketProps> = ({
                 className="w-full py-2.5 px-4 rounded-2xl bg-[#D95B26] hover:bg-[#E56732] text-white text-xs font-semibold flex items-center justify-center gap-2 shadow-lg transition-all cursor-pointer"
               >
                 <Sparkles className="w-4 h-4" />
-                <span>Ingresar a Toquecitos para verlo</span>
+                <span>Abrir en Toquecitos</span>
               </button>
             )}
           </div>

@@ -168,8 +168,8 @@ export function renderWelcomeCardEmail(params: {
         <td>
           <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="margin-bottom:14px;">
             <tr>
-              <td align="left" style="font-family:${BASE_STYLES.fontMono};font-size:11px;color:${BASE_STYLES.textSecondary};text-transform:uppercase;letter-spacing:0.08em;">
-                TUS SELLOS
+              <td align="left" style="font-family:${BASE_STYLES.fontMono};font-size:11px;color:${BASE_STYLES.textSecondary};letter-spacing:0.08em;">
+                Tus sellos
               </td>
               <td align="right" style="font-family:${BASE_STYLES.fontMono};font-size:20px;font-weight:700;color:${BASE_STYLES.textPrimary};">
                 ${stamps} <span style="color:${BASE_STYLES.textSecondary};font-size:14px;">/ ${stampsRequired}</span>
@@ -241,8 +241,8 @@ export function renderRecoverCardEmail(params: {
 
     <!-- Caja de Código OTP -->
     <div style="background-color:${BASE_STYLES.surfaceElevated};border:1px solid ${BASE_STYLES.border};border-radius:16px;padding:18px;text-align:center;margin-bottom:20px;">
-      <div style="font-family:${BASE_STYLES.fontMono};font-size:11px;color:${BASE_STYLES.textSecondary};text-transform:uppercase;letter-spacing:0.1em;margin-bottom:6px;">
-        CÓDIGO DE ACCESO RÁPIDO
+      <div style="font-family:${BASE_STYLES.fontMono};font-size:11px;color:${BASE_STYLES.textSecondary};letter-spacing:0.1em;margin-bottom:6px;">
+        Código de acceso rápido
       </div>
       <div style="font-family:${BASE_STYLES.fontMono};font-size:32px;font-weight:700;letter-spacing:0.25em;color:${BASE_STYLES.brandOrange};">
         ${otpCode}
@@ -273,8 +273,8 @@ export function renderMerchantBroadcastEmail(params: {
     params;
 
   const body = `
-    <div style="display:inline-block;background-color:rgba(217,91,38,0.15);border:1px solid ${BASE_STYLES.brandOrange};color:${BASE_STYLES.brandOrange};font-family:${BASE_STYLES.fontMono};font-size:11px;font-weight:700;padding:4px 10px;border-radius:999px;margin-bottom:14px;text-transform:uppercase;">
-      NOVEDAD EXCLUSIVA DEL CLUB
+    <div style="display:inline-block;background-color:rgba(217,91,38,0.15);border:1px solid ${BASE_STYLES.brandOrange};color:${BASE_STYLES.brandOrange};font-family:${BASE_STYLES.fontMono};font-size:11px;font-weight:700;padding:4px 10px;border-radius:999px;margin-bottom:14px;">
+      Novedad exclusiva del club
     </div>
 
     <h1 style="margin:0 0 12px 0;font-size:22px;font-weight:700;color:${BASE_STYLES.textPrimary};line-height:1.3;">

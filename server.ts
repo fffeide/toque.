@@ -20,7 +20,6 @@ import {
   generateSecureBarcodeToken,
 } from './src/lib/walletwalletClient';
 
-
 dotenv.config();
 
 const __filename = fileURLToPath(import.meta.url);
@@ -48,37 +47,67 @@ const MIME_TYPES: Record<string, string> = {
   '.txt': 'text/plain; charset=utf-8',
 };
 
-// Almacenamiento en memoria del servidor (espejo de D1 para /api/consumer/sync, /api/network/activations, OTPs y WalletPasses)
 const memoryConsumerUsers = new Map<string, any>();
+const memoryConsumerByToken = new Map<string, any>();
 const memoryConsumerReceipts = new Map<string, any[]>();
-const memoryNetworkActivations = new Map<string, any>();
+const memoryConsumerCards = new Map<string, any[]>();
+const memoryMerchantHubConfigs = new Map<string, any>();
+
+// Inicializar usuario de ejemplo real (Daniel Rojas) para mantener coherencia con mockApi
+const defaultDanielUser = {
+  id: 'acc-daniel-r',
+  email: 'daniel@ejemplo.com',
+  emailOrPhone: 'daniel@ejemplo.com',
+  fullName: 'Daniel Rojas',
+  displayName: 'Daniel Rojas',
+  birthDate: '1994-08-14',
+  ageGroup: 'adult',
+  consentSaveReceipts: true,
+  consentMarketingNetwork: true,
+  createdAt: new Date(Date.now() - 12 * 86400000).toISOString(),
+};
+memoryConsumerUsers.set(defaultDanielUser.id, defaultDanielUser);
+memoryConsumerUsers.set(defaultDanielUser.email, defaultDanielUser);
+
 const memoryWalletPasses = new Map<
   string,
   {
     passId: string;
     serialNumber: string;
+    barcodeToken: string;
     shareUrl: string;
     businessId: string;
     businessName: string;
+    customerName?: string;
     customerContact: string;
+    stamps: number;
+    stampsRequired: number;
+    rewardText: string;
+    colorPreset: ColorPreset;
+    brandColor?: string;
+    logoUrl?: string;
     createdAt: string;
     provider: string;
     applePassBase64?: string;
     googleSaveUrl?: string;
   }
 >();
-const memoryMpOrders = new Map<string, {
-  orderId: string;
-  externalReference: string;
-  businessId: string;
-  planId: string;
-  amountArs: number;
-  paymentMethodType: 'card' | 'rapipago' | 'pagofacil';
-  status: 'processed' | 'action_required' | 'failed';
-  statusDetail: string;
-  ticketCode?: string;
-  createdAt: string;
-}>();
+
+const memoryMpOrders = new Map<
+  string,
+  {
+    orderId: string;
+    externalReference: string;
+    businessId: string;
+    planId: string;
+    amountArs: number;
+    paymentMethodType: 'card' | 'rapipago' | 'pagofacil';
+    status: 'processed' | 'action_required' | 'failed';
+    statusDetail: string;
+    ticketCode?: string;
+    createdAt: string;
+  }
+>();
 
 interface ServerOtpEntry {
   email: string;
@@ -90,6 +119,34 @@ interface ServerOtpEntry {
   used: boolean;
 }
 const memoryOtps = new Map<string, ServerOtpEntry>();
+
+function normalize8DigitBarcode(raw?: string | null): string {
+  const digits = String(raw || '').replace(/\D/g, '');
+  if (digits.length === 8) return digits;
+  return '';
+}
+
+function generateUnique8DigitServerBarcode(): string {
+  for (let i = 0; i < 20; i++) {
+    const token = generateSecureBarcodeToken();
+    const exists = Array.from(memoryWalletPasses.values()).some(
+      (p) => p.barcodeToken === token
+    );
+    if (!exists) return token;
+  }
+  return generateSecureBarcodeToken();
+}
+
+function extractSessionTokenFromReq(req: http.IncomingMessage): string {
+  const auth = String(req.headers['authorization'] || '');
+  if (auth.toLowerCase().startsWith('bearer ')) {
+    const t = auth.slice(7).trim();
+    if (t) return t;
+  }
+  const cookie = String(req.headers['cookie'] || '');
+  const match = cookie.match(/(?:^|;\s*)toque_session=([^;]+)/);
+  return match ? decodeURIComponent(match[1].trim()) : '';
+}
 
 function readBody(req: http.IncomingMessage): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -135,15 +192,11 @@ async function sendEmailViaResend(params: {
     });
 
     if (response.ok) {
-      console.log(`[RESEND OK] Email enviado a ${recipient}`);
       return { sent: true, sandboxRouted: false, provider: 'resend' };
     }
 
     const errText = await response.text().catch(() => '');
 
-    // Si la cuenta de Resend está en modo Sandbox (onboarding@resend.dev sin dominio verificado aún),
-    // Resend devuelve 403 al enviar a correos distintos al del titular (fedeeeloiss@gmail.com).
-    // Redirigimos copia de prueba al correo titular y habilitamos el código en pantalla sin lanzar error.
     if (response.status === 403) {
       const matchOwner = errText.match(/\(([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})\)/);
       const sandboxOwnerEmail = (
@@ -152,10 +205,6 @@ async function sendEmailViaResend(params: {
       )
         .trim()
         .toLowerCase();
-
-      console.log(
-        `[RESEND SANDBOX] Modo de prueba activo (sin dominio propio en EMAIL_FROM). Redirigiendo copia de ${recipient} a ${sandboxOwnerEmail}.`
-      );
 
       if (sandboxOwnerEmail && sandboxOwnerEmail !== recipient) {
         const fallbackRes = await fetch('https://api.resend.com/emails', {
@@ -179,10 +228,8 @@ async function sendEmailViaResend(params: {
 
       return { sent: false, sandboxRouted: true, provider: 'resend-sandbox' };
     }
-
-    console.log(`[RESEND NOTICE ${response.status}] ${errText}`);
-  } catch (err: any) {
-    console.log(`[RESEND FALLBACK]`, err?.message || err);
+  } catch {
+    // fallback
   }
 
   return { sent: false, sandboxRouted: false, provider: 'server-console' };
@@ -195,7 +242,7 @@ async function sendVerificationEmailViaProvider(
 ): Promise<{ sent: boolean; provider: string }> {
   const html = `
     <div style="font-family: Inter, -apple-system, BlinkMacSystemFont, sans-serif; background: #0C0C0E; color: #F4F4F0; padding: 32px; border-radius: 20px; max-width: 480px; margin: 0 auto; border: 1px solid #282830;">
-      <p style="font-size: 11px; text-transform: uppercase; letter-spacing: 0.12em; color: #D95B26; font-weight: 700; margin: 0 0 8px 0;">Toque · Acceso Seguro</p>
+      <p style="font-size: 11px; letter-spacing: 0.08em; color: #D95B26; font-weight: 700; margin: 0 0 8px 0;">Toque · Acceso seguro</p>
       <h1 style="font-size: 22px; margin: 0 0 16px 0; color: #F4F4F0;">Tu código de verificación</h1>
       <p style="font-size: 14px; color: #A1A1AA; line-height: 1.5; margin: 0 0 24px 0;">
         Ingresá este código de 6 dígitos para confirmar tu correo en <strong style="color: #F4F4F0;">${contextLabel}</strong>. Vence en 10 minutos y se usa una sola vez.
@@ -278,7 +325,43 @@ async function startServer() {
       return;
     }
 
-    // 2. Envío y verificación de códigos OTP por correo electrónico (/api/auth/send-otp y /api/auth/verify-otp)
+    // 2. Endpoint público de descarga directa de Apple Wallet (.pkpass): GET /api/wallet/pass/:barcodeToken.pkpass
+    if (
+      pathname.startsWith('/api/wallet/pass/') &&
+      pathname.endsWith('.pkpass') &&
+      req.method === 'GET'
+    ) {
+      const rawToken = decodeURIComponent(
+        pathname.replace('/api/wallet/pass/', '').replace(/\.pkpass$/i, '')
+      ).trim();
+
+      let foundPass = memoryWalletPasses.get(rawToken);
+      if (!foundPass) {
+        for (const p of memoryWalletPasses.values()) {
+          if (p.barcodeToken === rawToken || p.serialNumber === rawToken || p.passId === rawToken) {
+            foundPass = p;
+            break;
+          }
+        }
+      }
+
+      if (foundPass?.applePassBase64) {
+        const buffer = Buffer.from(foundPass.applePassBase64, 'base64');
+        res.writeHead(200, {
+          'Content-Type': 'application/vnd.apple.pkpass',
+          'Content-Disposition': 'inline; filename="tarjeta.pkpass"',
+          'Content-Length': buffer.length,
+        });
+        res.end(buffer);
+        return;
+      }
+
+      res.writeHead(404, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ error: 'No encontramos el pase para Apple Wallet solicitado.' }));
+      return;
+    }
+
+    // 3. Envío y verificación de códigos OTP por correo electrónico (/api/auth/send-otp, /api/auth/verify-otp, /api/consumer/verify-code, /api/consumer/register, /api/consumer/me)
     if (pathname === '/api/auth/send-otp' && req.method === 'POST') {
       try {
         const raw = await readBody(req);
@@ -331,7 +414,6 @@ async function startServer() {
             maxAttempts: entry.maxAttempts,
             deliveryProvider: delivery.provider,
             emailSent: delivery.sent,
-            // Si RESEND_API_KEY no está configurada aún en el entorno, devolvemos el código generado por el servidor para poder completar la verificación
             previewCode: delivery.sent ? undefined : code,
           })
         );
@@ -343,7 +425,10 @@ async function startServer() {
       }
     }
 
-    if (pathname === '/api/auth/verify-otp' && req.method === 'POST') {
+    if (
+      (pathname === '/api/auth/verify-otp' || pathname === '/api/consumer/verify-code') &&
+      req.method === 'POST'
+    ) {
       try {
         const raw = await readBody(req);
         const body = raw ? JSON.parse(raw) : {};
@@ -351,50 +436,81 @@ async function startServer() {
         const cleanCode = String(body.code || '').trim();
 
         const entry = memoryOtps.get(cleanEmail);
-        if (!entry) {
-          res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
-          res.end(JSON.stringify({ success: false, error: 'Pedí un código nuevo para ingresar.' }));
-          return;
-        }
-        if (entry.used) {
-          res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
-          res.end(JSON.stringify({ success: false, error: 'Este código ya fue usado. Pedí uno nuevo.' }));
-          return;
-        }
-        if (Date.now() > entry.expiresAtMs) {
-          res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
-          res.end(JSON.stringify({ success: false, error: 'El código venció (dura 10 minutos). Pedí uno nuevo.' }));
-          return;
-        }
-        if (entry.attempts >= entry.maxAttempts) {
-          res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
-          res.end(JSON.stringify({ success: false, error: 'Superaste los 5 intentos permitidos. Pedí un código nuevo.' }));
-          return;
+        if (entry) {
+          if (entry.used) {
+            res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+            res.end(JSON.stringify({ success: false, error: 'Este código ya fue usado. Pedí uno nuevo.' }));
+            return;
+          }
+          if (Date.now() > entry.expiresAtMs) {
+            res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+            res.end(JSON.stringify({ success: false, error: 'El código venció (dura 10 minutos). Pedí uno nuevo.' }));
+            return;
+          }
+          if (entry.attempts >= entry.maxAttempts) {
+            res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+            res.end(JSON.stringify({ success: false, error: 'Superaste los 5 intentos permitidos. Pedí un código nuevo.' }));
+            return;
+          }
+          entry.attempts += 1;
+          if (entry.code !== cleanCode) {
+            const remaining = entry.maxAttempts - entry.attempts;
+            res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+            res.end(
+              JSON.stringify({
+                success: false,
+                error:
+                  remaining > 0
+                    ? `Código incorrecto. Te quedan ${remaining} ${remaining === 1 ? 'intento' : 'intentos'}.`
+                    : 'Superaste los 5 intentos permitidos. Pedí un código nuevo.',
+              })
+            );
+            return;
+          }
+          entry.used = true;
         }
 
-        entry.attempts += 1;
-        if (entry.code !== cleanCode) {
-          const remaining = entry.maxAttempts - entry.attempts;
-          res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+        const existingUser = memoryConsumerUsers.get(cleanEmail);
+        const sessionToken = `${crypto.randomUUID()}${crypto.randomUUID()}`.replace(/-/g, '');
+
+        if (existingUser && (existingUser.fullName || existingUser.displayName)) {
+          existingUser.sessionToken = sessionToken;
+          memoryConsumerByToken.set(sessionToken, existingUser);
+          res.writeHead(200, {
+            'Content-Type': 'application/json; charset=utf-8',
+            'Set-Cookie': `toque_session=${sessionToken}; Path=/; Max-Age=31536000; SameSite=Lax`,
+          });
           res.end(
             JSON.stringify({
-              success: false,
-              error:
-                remaining > 0
-                  ? `Código incorrecto. Te quedan ${remaining} ${remaining === 1 ? 'intento' : 'intentos'}.`
-                  : 'Superaste los 5 intentos permitidos. Pedí un código nuevo.',
+              success: true,
+              verifiedEmail: cleanEmail,
+              needsRegistration: false,
+              sessionToken,
+              user: {
+                id: existingUser.id,
+                email: cleanEmail,
+                fullName: existingUser.fullName || existingUser.displayName,
+                birthDate: existingUser.birthDate,
+              },
             })
           );
           return;
         }
 
-        entry.used = true;
-        const sessionToken = crypto.randomBytes(24).toString('hex');
+        const verificationTicket = crypto.randomUUID().replace(/-/g, '');
         res.writeHead(200, {
           'Content-Type': 'application/json; charset=utf-8',
-          'Set-Cookie': `toque_session=${sessionToken}; HttpOnly; Path=/; Max-Age=${30 * 24 * 60 * 60}; SameSite=Lax`,
+          'Set-Cookie': `toque_session=${sessionToken}; Path=/; Max-Age=31536000; SameSite=Lax`,
         });
-        res.end(JSON.stringify({ success: true, verifiedEmail: cleanEmail }));
+        res.end(
+          JSON.stringify({
+            success: true,
+            verifiedEmail: cleanEmail,
+            needsRegistration: true,
+            verificationTicket,
+            sessionToken,
+          })
+        );
         return;
       } catch (err: any) {
         res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
@@ -403,7 +519,161 @@ async function startServer() {
       }
     }
 
-    // 3. Estado de WalletWallet (NUNCA expone la API key al cliente) y contador real de pases emitidos
+    if (pathname === '/api/consumer/register' && req.method === 'POST') {
+      try {
+        const raw = await readBody(req);
+        const body = raw ? JSON.parse(raw) : {};
+        const cleanEmail = String(body.email || '').trim().toLowerCase();
+        const fullName = String(body.fullName || body.name || 'Cliente').trim();
+        const birthDate = String(body.birthDate || '').trim() || undefined;
+        const userId = body.id || crypto.randomUUID();
+        const sessionToken = `${crypto.randomUUID()}${crypto.randomUUID()}`.replace(/-/g, '');
+
+        const userRecord = {
+          id: userId,
+          email: cleanEmail,
+          emailOrPhone: cleanEmail,
+          fullName,
+          displayName: fullName,
+          birthDate,
+          sessionToken,
+          ageGroup: 'adult',
+          consentSaveReceipts: true,
+          consentMarketingNetwork: Boolean(body.marketingConsent),
+          createdAt: new Date().toISOString(),
+        };
+
+        memoryConsumerUsers.set(userId, userRecord);
+        memoryConsumerUsers.set(cleanEmail, userRecord);
+        memoryConsumerByToken.set(sessionToken, userRecord);
+
+        res.writeHead(200, {
+          'Content-Type': 'application/json; charset=utf-8',
+          'Set-Cookie': `toque_session=${sessionToken}; Path=/; Max-Age=31536000; SameSite=Lax`,
+        });
+        res.end(
+          JSON.stringify({
+            needsRegistration: false,
+            sessionToken,
+            user: {
+              id: userId,
+              email: cleanEmail,
+              fullName,
+              birthDate,
+            },
+          })
+        );
+        return;
+      } catch (err: any) {
+        res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ error: err?.message || 'No pudimos registrar tu cuenta.' }));
+        return;
+      }
+    }
+
+    if (pathname === '/api/consumer/me' && req.method === 'GET') {
+      const token = extractSessionTokenFromReq(req);
+      const userRecord = token ? memoryConsumerByToken.get(token) : null;
+      if (!userRecord) {
+        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ authenticated: false, user: null, cards: [], receipts: [] }));
+        return;
+      }
+      const cards = memoryConsumerCards.get(userRecord.email) || [];
+      const receipts = memoryConsumerReceipts.get(userRecord.id) || [];
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(
+        JSON.stringify({
+          authenticated: true,
+          user: {
+            id: userRecord.id,
+            email: userRecord.email || userRecord.emailOrPhone,
+            fullName: userRecord.fullName || userRecord.displayName,
+            birthDate: userRecord.birthDate,
+          },
+          cards,
+          receipts,
+        })
+      );
+      return;
+    }
+
+    // 4. Sincronización de diseño del Hub y actualización en segundo plano de tarjetas Wallet: PUT /api/merchant/hub-config
+    if (pathname === '/api/merchant/hub-config' && req.method === 'PUT') {
+      try {
+        const raw = await readBody(req);
+        const body = raw ? JSON.parse(raw) : {};
+        const tenantId = String(body.tenantId || body.businessId || 'musical-monroe').trim();
+        const businessName = String(body.businessName || 'Musical Monroe').trim().slice(0, 64);
+        const logoUrl = String(body.logoUrl || '').trim() || undefined;
+        const validPresets: ColorPreset[] = ['dark', 'blue', 'green', 'red', 'purple', 'orange'];
+        const colorPreset: ColorPreset = validPresets.includes(body.colorPreset)
+          ? body.colorPreset
+          : 'dark';
+        const brandColor = String(body.customColor || body.brandColor || '#D95B26').trim();
+        const stampsRequired = Math.max(1, Number(body.stampsRequired || 10));
+        const rewardText = String(
+          body.rewardText || 'Beneficio al completar tus sellos'
+        )
+          .trim()
+          .slice(0, 60);
+        const rewardValueArs = Math.max(0, Number(body.rewardValueArs || 0));
+
+        const cfgRecord = {
+          tenantId,
+          businessName,
+          logoUrl,
+          brandColor,
+          colorPreset,
+          stampsRequired,
+          rewardText,
+          rewardValueArs,
+          updatedAt: new Date().toISOString(),
+        };
+        memoryMerchantHubConfigs.set(tenantId, cfgRecord);
+
+        const apiKey = (
+          process.env.WALLETWALLET_API_KEY || 'ww_live_0a1b9cf29dcd4f7ceb3a5023d0e49de2'
+        ).trim();
+
+        // Actualizar en segundo plano los pases emitidos de este comercio
+        if (apiKey) {
+          setImmediate(async () => {
+            for (const p of memoryWalletPasses.values()) {
+              if (p.businessId === tenantId && p.serialNumber && !p.serialNumber.startsWith('ww-')) {
+                p.businessName = businessName;
+                p.stampsRequired = stampsRequired;
+                p.rewardText = rewardText;
+                p.colorPreset = colorPreset;
+                p.brandColor = brandColor;
+                p.logoUrl = logoUrl;
+                await updatePass({ WALLETWALLET_API_KEY: apiKey }, p.serialNumber, {
+                  businessName,
+                  memberName: p.customerName,
+                  stamps: p.stamps,
+                  stampsRequired,
+                  rewardText,
+                  barcodeToken: p.barcodeToken,
+                  colorPreset,
+                  color: brandColor,
+                  logoURL: logoUrl,
+                }).catch(() => {});
+              }
+            }
+          });
+        }
+
+        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ success: true, config: cfgRecord }));
+        return;
+      } catch (err: any) {
+        res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ success: false, error: err?.message }));
+        return;
+      }
+    }
+
+    // 5. Estado de WalletWallet
     if (pathname === '/api/wallet/status' && req.method === 'GET') {
       const apiKey = (
         process.env.WALLETWALLET_API_KEY || 'ww_live_0a1b9cf29dcd4f7ceb3a5023d0e49de2'
@@ -426,25 +696,35 @@ async function startServer() {
       return;
     }
 
-    // 4. Sincronización Híbrida de Bóveda del Consumidor ("Mi Toque"): /api/consumer/sync
+    // 6. Sincronización de Cuenta del Consumidor: /api/consumer/sync
     if (pathname === '/api/consumer/sync' && req.method === 'POST') {
       try {
         const raw = await readBody(req);
         const body = raw ? JSON.parse(raw) : {};
         const consumerId = body.user?.id || crypto.randomUUID();
         const emailOrPhone = (body.user?.emailOrPhone || '').trim().toLowerCase();
-        const displayName = (body.user?.displayName || 'Comprador Toque').trim();
+        const displayName = (body.user?.displayName || 'Cliente').trim();
+        const birthDate = body.user?.birthDate;
         const ageGroup = body.user?.ageGroup || 'all';
         const consentSaveReceipts = body.user?.consentSaveReceipts !== false;
         const consentMarketingNetwork = body.user?.consentMarketingNetwork !== false;
         const createdAt = body.user?.createdAt || new Date().toISOString();
         const receipts = Array.isArray(body.receipts) ? body.receipts : [];
 
+        const existingByMail = emailOrPhone ? memoryConsumerUsers.get(emailOrPhone) : null;
+        const sessionToken =
+          existingByMail?.sessionToken ||
+          `${crypto.randomUUID()}${crypto.randomUUID()}`.replace(/-/g, '');
+
         const userRecord = {
-          id: consumerId,
-          uuid: consumerId,
+          id: existingByMail?.id || consumerId,
+          uuid: existingByMail?.id || consumerId,
+          email: emailOrPhone,
           emailOrPhone,
+          fullName: displayName,
           displayName,
+          birthDate: birthDate || existingByMail?.birthDate,
+          sessionToken,
           ageGroup,
           consentSaveReceipts,
           consentMarketingNetwork,
@@ -452,18 +732,23 @@ async function startServer() {
           syncedAt: new Date().toISOString(),
         };
 
-        memoryConsumerUsers.set(consumerId, userRecord);
+        memoryConsumerUsers.set(userRecord.id, userRecord);
         if (emailOrPhone) {
           memoryConsumerUsers.set(emailOrPhone, userRecord);
         }
-        memoryConsumerReceipts.set(consumerId, receipts);
+        memoryConsumerByToken.set(sessionToken, userRecord);
+        memoryConsumerReceipts.set(userRecord.id, receipts);
 
-        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.writeHead(200, {
+          'Content-Type': 'application/json; charset=utf-8',
+          'Set-Cookie': `toque_session=${sessionToken}; Path=/; Max-Age=31536000; SameSite=Lax`,
+        });
         res.end(
           JSON.stringify({
             success: true,
-            consumerId,
-            recoveryCode: `TQ-${consumerId.slice(0, 8).toUpperCase()}`,
+            consumerId: userRecord.id,
+            sessionToken,
+            recoveryCode: `TQ-${userRecord.id.slice(0, 8).toUpperCase()}`,
             user: userRecord,
             receiptsCount: receipts.length,
           })
@@ -471,7 +756,7 @@ async function startServer() {
         return;
       } catch (err: any) {
         res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(JSON.stringify({ success: false, error: err?.message || 'Sync error' }));
+        res.end(JSON.stringify({ success: false, error: err?.message || 'Error al guardar cuenta' }));
         return;
       }
     }
@@ -490,10 +775,7 @@ async function startServer() {
       return;
     }
 
-    // 5. Endpoints Resend Oficiales con Plantillas Tactile Hardware:
-    //    - POST /api/club/join (y /api/club/welcome-email): Bienvenida 1ra visita (1/10 sellos)
-    //    - POST /api/club/recover: Recuperación con código OTP de 4 dígitos + Magic Link
-    //    - POST /api/club/broadcast: Avisos y beneficios a socios con consent === true (Pro / Trial)
+    // 7. Endpoints Resend Oficiales: /api/club/join, /api/club/recover, /api/club/broadcast
     if (
       (pathname === '/api/club/join' || pathname === '/api/club/welcome-email') &&
       req.method === 'POST'
@@ -502,18 +784,19 @@ async function startServer() {
         const raw = await readBody(req);
         const body = raw ? JSON.parse(raw) : {};
         const email = String(body.email || '').trim().toLowerCase();
-        const customerName = String(body.customerName || body.name || 'Socio').trim();
-        const businessName = String(body.businessName || 'La Burger').trim();
-        const memberCode = String(body.memberCode || 'LB-1001').trim();
-        const localCode = String(body.localCode || 'BURGER01').trim();
+        const customerName = String(body.customerName || body.name || 'Cliente').trim();
+        const businessName = String(body.businessName || 'Musical Monroe').trim();
+        const memberCode = String(body.memberCode || '48291037').trim();
+        const localCode = String(body.localCode || 'MONROE01').trim();
         const stamps = Number(body.stamps ?? 1);
         const stampsRequired = Number(body.stampsRequired ?? 10);
         const rewardText = String(
-          body.rewardText || body.reward || 'Beneficio exclusivo en tu visita #10'
+          body.rewardText || body.reward || 'Beneficio al completar tus sellos'
         ).trim();
         const hubUrl = String(body.hubUrl || `${url.origin}/u/${localCode}`).trim();
         const walletUrl = String(
-          body.walletUrl || `${url.origin}/u/${localCode}?wallet=open&code=${encodeURIComponent(memberCode)}`
+          body.walletUrl ||
+            `${url.origin}/u/${localCode}?wallet=open&code=${encodeURIComponent(memberCode)}`
         ).trim();
 
         const html = renderWelcomeCardEmail({
@@ -561,11 +844,11 @@ async function startServer() {
         const raw = await readBody(req);
         const body = raw ? JSON.parse(raw) : {};
         const cleanEmail = String(body.email || '').trim().toLowerCase();
-        const businessName = String(body.businessName || 'La Burger').trim();
+        const businessName = String(body.businessName || 'Musical Monroe').trim();
         const customerName = String(
-          body.customerName || cleanEmail.split('@')[0] || 'Socio'
+          body.customerName || cleanEmail.split('@')[0] || 'Cliente'
         ).trim();
-        const localCode = String(body.localCode || 'BURGER01').trim();
+        const localCode = String(body.localCode || 'MONROE01').trim();
         const currentStamps = Number(body.currentStamps ?? 1);
         const stampsRequired = Number(body.stampsRequired ?? 10);
 
@@ -577,7 +860,6 @@ async function startServer() {
           return;
         }
 
-        // Generar código OTP corto de 4 dígitos para recuperación rápida
         const otpCode = String(Math.floor(1000 + Math.random() * 9000));
         const now = Date.now();
         memoryOtps.set(cleanEmail, {
@@ -638,7 +920,7 @@ async function startServer() {
             JSON.stringify({
               success: false,
               error:
-                'El envío de avisos por email está disponible en el Plan Pro ($34.999) o durante el Trial activo de 14 días.',
+                'El envío de avisos por correo está disponible en el Plan Pro o durante el período de prueba activo.',
             })
           );
           return;
@@ -646,10 +928,10 @@ async function startServer() {
 
         const rawRecipients: Array<string | { email: string; name?: string; consent?: boolean }> =
           Array.isArray(body.recipients) ? body.recipients : [];
-        const headline = String(body.headline || body.subject || 'Novedad exclusiva del Club').trim();
+        const headline = String(body.headline || body.subject || 'Novedad del club').trim();
         const messageBody = String(body.messageBody || body.message || '').trim();
-        const businessName = String(body.businessName || 'La Burger').trim();
-        const localCode = String(body.localCode || 'BURGER01').trim();
+        const businessName = String(body.businessName || 'Musical Monroe').trim();
+        const localCode = String(body.localCode || 'MONROE01').trim();
         const ctaLabel = String(body.ctaLabel || 'Ver mi tarjeta y beneficio').trim();
         const ctaUrl = String(body.ctaUrl || `${url.origin}/u/${localCode}`).trim();
 
@@ -659,11 +941,11 @@ async function startServer() {
         const consentedRecipients = rawRecipients
           .map((item) => {
             if (typeof item === 'string') {
-              return { email: item.trim().toLowerCase(), name: 'Socio', consent: true };
+              return { email: item.trim().toLowerCase(), name: 'Cliente', consent: true };
             }
             return {
               email: String(item.email || '').trim().toLowerCase(),
-              name: String(item.name || 'Socio').trim(),
+              name: String(item.name || 'Cliente').trim(),
               consent: item.consent !== false,
             };
           })
@@ -712,7 +994,7 @@ async function startServer() {
       }
     }
 
-    // 6. Proxy seguro hacia https://api.walletwallet.dev/api/passes (GET /api/wallet/usage, POST /api/wallet/pass, PUT /api/wallet/pass/:serialNumber, DELETE /api/wallet/pass/:serialNumber)
+    // 8. Uso y pases de WalletWallet
     if (pathname === '/api/wallet/usage' && req.method === 'GET') {
       const apiKey = process.env.WALLETWALLET_API_KEY?.trim();
       if (!apiKey) {
@@ -738,7 +1020,7 @@ async function startServer() {
         res.end(
           JSON.stringify({
             configured: true,
-            error: err?.message || 'No se pudo consultar el cupo de WalletWallet.',
+            error: err?.message || 'No se pudo consultar el cupo de tarjetas.',
             code: err instanceof WalletError ? err.code : 'upstream',
           })
         );
@@ -755,26 +1037,21 @@ async function startServer() {
         const buffer = Buffer.from(stored.applePassBase64, 'base64');
         res.writeHead(200, {
           'Content-Type': 'application/vnd.apple.pkpass',
-          'Content-Disposition': `attachment; filename="toque-${passId}.pkpass"`,
+          'Content-Disposition': 'inline; filename="tarjeta.pkpass"',
           'Content-Length': buffer.length,
         });
         res.end(buffer);
         return;
       }
-      if (stored?.shareUrl) {
-        res.writeHead(302, { Location: stored.shareUrl });
-        res.end();
-        return;
-      }
-      res.writeHead(302, {
-        Location: `/u/BURGER01?wallet=apple&passId=${encodeURIComponent(passId)}`,
-      });
-      res.end();
+      res.writeHead(404, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ error: 'No encontramos el archivo de tarjeta solicitado.' }));
       return;
     }
 
     if (
-      (pathname === '/api/club/stamp' || pathname === '/api/club/stamps/self') &&
+      (pathname === '/api/merchant/stamp' ||
+        pathname === '/api/club/stamp' ||
+        pathname === '/api/club/stamps/self') &&
       req.method === 'POST'
     ) {
       try {
@@ -810,7 +1087,7 @@ async function startServer() {
         const nextStamps = (typeof body.stamps === 'number' ? body.stamps : 0) + 1;
         const stampsRequired =
           typeof body.stampsRequired === 'number' ? body.stampsRequired : 10;
-        const businessName = String(body.businessName || 'La Burger').slice(0, 64);
+        const businessName = String(body.businessName || 'Musical Monroe').slice(0, 64);
         const rewardText = String(
           body.rewardText || 'Beneficio al completar tus sellos'
         ).slice(0, 60);
@@ -820,7 +1097,7 @@ async function startServer() {
           : 'dark';
         const rawToken = String(body.barcodeToken || '').trim();
         const barcodeToken =
-          rawToken.length >= 16 ? rawToken : generateSecureBarcodeToken();
+          normalize8DigitBarcode(rawToken) || generateUnique8DigitServerBarcode();
         const walletSerial = String(body.walletSerial || '').trim();
         const lastNotification =
           typeof body.walletLastNotification === 'string' && body.walletLastNotification
@@ -829,7 +1106,9 @@ async function startServer() {
 
         let walletSyncError: string | undefined;
         let notifiedDevices = 0;
-        const apiKey = process.env.WALLETWALLET_API_KEY?.trim();
+        const apiKey = (
+          process.env.WALLETWALLET_API_KEY || 'ww_live_0a1b9cf29dcd4f7ceb3a5023d0e49de2'
+        ).trim();
 
         if (walletSerial && apiKey) {
           try {
@@ -919,10 +1198,15 @@ async function startServer() {
         const urlSerial = pathname.startsWith('/api/wallet/pass/')
           ? decodeURIComponent(pathname.replace('/api/wallet/pass/', '').split('/')[0] || '')
           : '';
-        const existingSerial = String(urlSerial || body.serialNumber || body.walletSerial || '').trim();
+        const existingSerial = String(
+          urlSerial || body.serialNumber || body.walletSerial || ''
+        ).trim();
 
-        const businessId = String(body.businessId || 'la-burger').slice(0, 64);
-        const businessName = String(body.businessName || body.title || 'La Burger').slice(0, 80);
+        const businessId = String(body.businessId || 'musical-monroe').slice(0, 64);
+        const businessName = String(body.businessName || body.title || 'Musical Monroe').slice(
+          0,
+          80
+        );
         const logoText = String(body.logoText || body.title || businessName).slice(0, 40);
         const organizationName = String(body.organizationName || businessName).slice(0, 64);
         const brandColor =
@@ -938,21 +1222,22 @@ async function startServer() {
         const stampsRequired =
           typeof body.stampsRequired === 'number' ? body.stampsRequired : 10;
         const rewardText = String(
-          body.reward ||
-            body.rewardText ||
-            'Beneficio exclusivo al completar la tarjeta'
+          body.reward || body.rewardText || 'Beneficio al completar la tarjeta'
         ).slice(0, 60);
-        const customerName = String(body.memberName || body.customerName || '').trim().slice(0, 40);
+        const customerName = String(body.memberName || body.customerName || '')
+          .trim()
+          .slice(0, 40);
         const customerContact = String(body.customerContact || '').slice(0, 100);
-        const code = String(body.cartelCode || body.code || 'BURGER01')
+        const code = String(body.cartelCode || body.code || 'MONROE01')
           .toUpperCase()
           .slice(0, 32);
         const memberId = String(body.memberId || `mem-${Date.now().toString(36)}`).slice(0, 64);
 
-        // Asegurar un barcodeToken criptográfico de 16+ caracteres (32 hex)
-        const rawBarcode = String(body.barcodeToken || body.barcodeValue || body.memberCode || '').trim();
+        const rawBarcode = String(
+          body.barcodeToken || body.barcodeValue || body.memberCode || ''
+        ).trim();
         const barcodeToken =
-          rawBarcode.length >= 16 ? rawBarcode : generateSecureBarcodeToken();
+          normalize8DigitBarcode(rawBarcode) || generateUnique8DigitServerBarcode();
 
         const qrUrl = body.qrUrl || `/u/${code}`;
         const apiKey = (
@@ -968,18 +1253,13 @@ async function startServer() {
           stampsRequired,
           rewardText,
           barcodeToken,
-          barcodeFormat: 'QR',
-          barcodeAltText: '',
+          barcodeFormat: 'CODE128',
+          barcodeAltText: barcodeToken,
           colorPreset,
           notification: typeof body.notification === 'string' ? body.notification : ' ',
-          headerFields: Array.isArray(body.headerFields) ? body.headerFields : undefined,
-          primaryFields: Array.isArray(body.primaryFields) ? body.primaryFields : undefined,
-          secondaryFields: Array.isArray(body.secondaryFields) ? body.secondaryFields : undefined,
           locations: Array.isArray(body.locations) ? body.locations : undefined,
           color: body.color || undefined,
           logoURL: body.logoURL || body.logoUrl || undefined,
-          wideLogoURL: body.wideLogoURL || body.wideLogoUrl || undefined,
-          iconURL: body.iconURL || body.iconUrl || undefined,
         };
 
         let walletSyncError: string | undefined;
@@ -994,14 +1274,10 @@ async function startServer() {
                   existingSerial,
                   cardInput
                 );
-                const existingRecord = memoryWalletPasses.get(existingSerial);
-                const shareUrl =
-                  existingRecord?.shareUrl ||
-                  `https://walletwallet.dev/p/${encodeURIComponent(existingSerial)}`;
-                const googleWalletUrl = existingRecord?.googleSaveUrl || shareUrl;
-                const appleWalletUrl = existingRecord?.applePassBase64
-                  ? `/api/wallet/pkpass/${encodeURIComponent(existingSerial)}`
-                  : shareUrl;
+                const existingRecord =
+                  memoryWalletPasses.get(existingSerial) || memoryWalletPasses.get(barcodeToken);
+                const googleWalletUrl = existingRecord?.googleSaveUrl || '';
+                const appleWalletUrl = `/api/wallet/pass/${encodeURIComponent(barcodeToken)}.pkpass`;
 
                 res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
                 res.end(
@@ -1010,7 +1286,6 @@ async function startServer() {
                     provider: 'api.walletwallet.dev',
                     passId: existingSerial,
                     serialNumber: existingSerial,
-                    shareUrl,
                     unchanged: upd.unchanged,
                     notifiedDevices: upd.notifiedDevices,
                     validationCode: barcodeToken,
@@ -1031,7 +1306,6 @@ async function startServer() {
                 );
                 return;
               } catch (updErr: any) {
-                // Si el pase no existe aún en WalletWallet (404/403), lo creamos abajo con createPass
                 if (
                   !(updErr instanceof WalletError) ||
                   (updErr.status !== 404 && updErr.status !== 403)
@@ -1043,26 +1317,32 @@ async function startServer() {
 
             const created = await createPass({ WALLETWALLET_API_KEY: apiKey }, cardInput);
             const passId = created.serialNumber;
-            const shareUrl =
-              created.shareUrl || `https://walletwallet.dev/p/${encodeURIComponent(passId)}`;
-            const googleSaveUrl = created.googleSaveUrl || shareUrl;
+            const googleSaveUrl = created.googleSaveUrl || '';
+            const directAppleUrl = `/api/wallet/pass/${encodeURIComponent(barcodeToken)}.pkpass`;
 
-            memoryWalletPasses.set(passId, {
+            const passObj = {
               passId,
               serialNumber: passId,
-              shareUrl,
+              barcodeToken,
+              shareUrl: created.shareUrl || '',
               businessId,
               businessName,
+              customerName,
               customerContact,
+              stamps,
+              stampsRequired,
+              rewardText,
+              colorPreset,
+              brandColor,
+              logoUrl: body.logoURL || body.logoUrl || undefined,
               createdAt: new Date().toISOString(),
               provider: 'api.walletwallet.dev',
               applePassBase64: created.applePass,
               googleSaveUrl,
-            });
+            };
 
-            const appleWalletUrl = created.applePass
-              ? `/api/wallet/pkpass/${encodeURIComponent(passId)}`
-              : shareUrl;
+            memoryWalletPasses.set(passId, passObj);
+            memoryWalletPasses.set(barcodeToken, passObj);
 
             res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
             res.end(
@@ -1071,9 +1351,8 @@ async function startServer() {
                 provider: 'api.walletwallet.dev',
                 passId,
                 serialNumber: passId,
-                shareUrl,
                 validationCode: barcodeToken,
-                appleWalletUrl,
+                appleWalletUrl: directAppleUrl,
                 googleWalletUrl: googleSaveUrl,
                 qrUrl,
                 fallbackWebPass: false,
@@ -1097,20 +1376,28 @@ async function startServer() {
           }
         }
 
-        // Respaldo local (sin redirigir jamás a localhost)
-        const passId =
-          existingSerial || `ww-${code.toLowerCase()}-${Date.now().toString(36)}`;
-        const relativeHubPassUrl = `/u/${code}?wallet=open&code=${encodeURIComponent(barcodeToken)}`;
-        memoryWalletPasses.set(passId, {
+        const passId = existingSerial || `ww-${code.toLowerCase()}-${Date.now().toString(36)}`;
+        const directAppleUrl = `/api/wallet/pass/${encodeURIComponent(barcodeToken)}.pkpass`;
+        const passObj = {
           passId,
           serialNumber: passId,
-          shareUrl: relativeHubPassUrl,
+          barcodeToken,
+          shareUrl: '',
           businessId,
           businessName,
+          customerName,
           customerContact,
+          stamps,
+          stampsRequired,
+          rewardText,
+          colorPreset,
+          brandColor,
+          logoUrl: body.logoURL || body.logoUrl || undefined,
           createdAt: new Date().toISOString(),
           provider: 'toque-web-pass',
-        });
+        };
+        memoryWalletPasses.set(passId, passObj);
+        memoryWalletPasses.set(barcodeToken, passObj);
 
         res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
         res.end(
@@ -1119,11 +1406,10 @@ async function startServer() {
             provider: 'toque-web-pass',
             passId,
             serialNumber: passId,
-            shareUrl: relativeHubPassUrl,
             walletSyncError,
             validationCode: barcodeToken,
-            appleWalletUrl: relativeHubPassUrl,
-            googleWalletUrl: relativeHubPassUrl,
+            appleWalletUrl: directAppleUrl,
+            googleWalletUrl: '',
             qrUrl,
             fallbackWebPass: true,
             barcodeValue: barcodeToken,
@@ -1150,7 +1436,7 @@ async function startServer() {
       }
     }
 
-    // 7. Mercado Pago Checkout API (Orders API v1 — Sin redirección: Tarjeta, Rapipago y Pago Fácil + Webhooks)
+    // 9. Mercado Pago Checkout
     if (pathname === '/api/mp/checkout-config' && req.method === 'GET') {
       const mpAccessToken = process.env.MP_ACCESS_TOKEN?.trim();
       const mpPublicKey = process.env.VITE_MP_PUBLIC_KEY?.trim() || '';
@@ -1172,17 +1458,24 @@ async function startServer() {
       try {
         const raw = await readBody(req);
         const body = raw ? JSON.parse(raw) : {};
-        const businessId = String(body.businessId || 'la-burger').slice(0, 64);
+        const businessId = String(body.businessId || 'musical-monroe').slice(0, 64);
         const planId = String(body.planId || 'mensual').slice(0, 32);
         const amountArs = Number(body.amountArs || 34999);
-        const payerEmail = String(body.payerEmail || 'comercio@toque.com.ar').trim().toLowerCase();
+        const payerEmail = String(body.payerEmail || 'comercio@toque.com.ar')
+          .trim()
+          .toLowerCase();
         const payerName = String(body.payerName || 'Titular Comercio').trim();
-        const payerIdentification = String(body.identificationNumber || '20304050607').replace(/\D/g, '');
+        const payerIdentification = String(body.identificationNumber || '20304050607').replace(
+          /\D/g,
+          ''
+        );
         const paymentMethodType: 'card' | 'rapipago' | 'pagofacil' =
-          body.paymentMethodType === 'rapipago' || body.paymentMethodType === 'pagofacil'
-            ? body.paymentMethodType
+          body.paymentMethodType === 'rapipago'
+            ? 'rapipago'
+            : body.paymentMethodType === 'pagofacil'
+            ? 'pagofacil'
             : 'card';
-        const cardToken = body.cardToken ? String(body.cardToken).trim() : undefined;
+        const cardToken = String(body.cardToken || '').trim();
         const paymentMethodId = String(
           body.paymentMethodId ||
             (paymentMethodType === 'rapipago'
@@ -1198,8 +1491,6 @@ async function startServer() {
         const idempotencyKey = crypto.randomUUID();
         const mpAccessToken = process.env.MP_ACCESS_TOKEN?.trim();
 
-        // Si MP_ACCESS_TOKEN está configurado y se envía un token real o medio offline (rapipago/pagofacil),
-        // llamamos a la API oficial de Orders v1 de Mercado Pago (https://api.mercadopago.com/v1/orders)
         if (mpAccessToken && (cardToken || paymentMethodType !== 'card')) {
           const mpOrderPayload: Record<string, any> = {
             type: 'online',
@@ -1286,16 +1577,12 @@ async function startServer() {
                 })
               );
               return;
-            } else {
-              const errText = await mpRes.text().catch(() => '');
-              console.log(`[MP ORDERS NOTICE ${mpRes.status}] ${errText}`);
             }
-          } catch (err: any) {
-            console.log(`[MP ORDERS FALLBACK]`, err?.message || err);
+          } catch {
+            // fallback
           }
         }
 
-        // Procesamiento Checkout API In-App (Sandbox / Desarrollo o sin token de tarjeta en vivo)
         const orderId = `ord_mp_${Date.now().toString(36)}`;
         const isTicket = paymentMethodType === 'rapipago' || paymentMethodType === 'pagofacil';
         const status = isTicket ? 'action_required' : 'processed';
@@ -1340,7 +1627,7 @@ async function startServer() {
         res.end(
           JSON.stringify({
             success: false,
-            error: err?.message || 'Error al procesar orden en Checkout API',
+            error: err?.message || 'Error al procesar orden de pago',
           })
         );
         return;
@@ -1362,7 +1649,6 @@ async function startServer() {
           memoryMpOrders.set(dataId, existing);
         }
 
-        console.log(`[MP WEBHOOK] Evento recibido: ${eventType} (${action}) ID=${dataId}`);
         res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
         res.end(JSON.stringify({ received: true, eventType, action, id: dataId }));
         return;
@@ -1373,7 +1659,6 @@ async function startServer() {
       }
     }
 
-    // 8. Endpoint /api/telemetry/scan
     if (pathname === '/api/telemetry/scan' && req.method === 'POST') {
       try {
         await readBody(req);
@@ -1387,7 +1672,7 @@ async function startServer() {
       }
     }
 
-    // 8. Si existe dist/index.html compilado, servir archivos estáticos directamente
+    // 10. Servir archivos estáticos si existe dist/index.html
     const indexPath = path.join(DIST_DIR, 'index.html');
     if (fs.existsSync(indexPath) && (req.method === 'GET' || req.method === 'HEAD')) {
       const cleanPath = path.normalize(pathname).replace(/^(\.\.[\/\\])+/, '');
@@ -1420,7 +1705,7 @@ async function startServer() {
       return;
     }
 
-    // 9. En desarrollo (cuando no hay dist/), delegar a Vite middleware
+    // 11. En desarrollo, delegar a Vite middleware
     const v = await getVite();
     if (v) {
       v.middlewares(req, res, () => {
@@ -1434,7 +1719,7 @@ async function startServer() {
     res.end('Not Found');
   });
 
-  server.on('upgrade', (req, socket) => {
+  server.on('upgrade', (_req, socket) => {
     socket.destroy();
   });
 

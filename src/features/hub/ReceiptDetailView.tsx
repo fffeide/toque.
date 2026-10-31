@@ -40,7 +40,7 @@ export const ReceiptDetailView: React.FC = () => {
           return;
         }
 
-        const hub = await api.getPublicHub(data.cartelCode || 'BURGER01').catch(() => null);
+        const hub = await api.getPublicHub(data.cartelCode || 'MONROE01').catch(() => null);
         if (active && hub) {
           setBusinessAddress(hub.config?.details?.address?.trim() || undefined);
           setBusinessHours(hub.config?.details?.hours?.trim() || undefined);

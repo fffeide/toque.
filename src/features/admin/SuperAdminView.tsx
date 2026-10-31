@@ -465,7 +465,7 @@ export const SuperAdminView: React.FC = () => {
                                 {member.name}
                               </span>
                               <span
-                                className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${
+                                className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
                                   isFounder
                                     ? 'bg-[#D95B26]/20 text-[#D95B26]'
                                     : 'bg-[#BEC8FF]/15 text-[#BEC8FF]'
@@ -514,12 +514,12 @@ export const SuperAdminView: React.FC = () => {
                 <div className="overflow-x-auto">
                   <table className="w-full text-left border-collapse">
                     <thead>
-                      <tr className="border-b border-[#282830] bg-[#1C1C22] text-[11px] font-semibold uppercase tracking-wider text-[#A1A1AA]">
+                      <tr className="border-b border-[#282830] bg-[#1C1C22] text-[11px] font-semibold tracking-wider text-[#A1A1AA]">
                         <th className="py-3.5 px-5">Comercio</th>
                         <th className="py-3.5 px-5">Titular</th>
-                        <th className="py-3.5 px-5">Carteles / Locales</th>
-                        <th className="py-3.5 px-5">Socios Club</th>
-                        <th className="py-3.5 px-5">Wallets Generadas</th>
+                        <th className="py-3.5 px-5">Carteles / locales</th>
+                        <th className="py-3.5 px-5">Socios club</th>
+                        <th className="py-3.5 px-5">Tarjetas generadas</th>
                         <th className="py-3.5 px-5">Productos</th>
                         <th className="py-3.5 px-5 text-right">Detalle</th>
                       </tr>
@@ -638,12 +638,12 @@ export const SuperAdminView: React.FC = () => {
                 <div className="overflow-x-auto">
                   <table className="w-full text-left border-collapse">
                     <thead>
-                      <tr className="border-b border-[#282830] bg-[#1C1C22] text-[11px] font-semibold uppercase tracking-wider text-[#A1A1AA]">
-                        <th className="py-3 px-4">Categoría / Rol</th>
-                        <th className="py-3 px-4">Nombre / Identificador</th>
+                      <tr className="border-b border-[#282830] bg-[#1C1C22] text-[11px] font-semibold tracking-wider text-[#A1A1AA]">
+                        <th className="py-3 px-4">Categoría / rol</th>
+                        <th className="py-3 px-4">Nombre / identificador</th>
                         <th className="py-3 px-4">Contacto</th>
-                        <th className="py-3 px-4">Comercio Vinculado</th>
-                        <th className="py-3 px-4">Estado / Actividad</th>
+                        <th className="py-3 px-4">Comercio vinculado</th>
+                        <th className="py-3 px-4">Estado / actividad</th>
                         <th className="py-3 px-4">Alta</th>
                       </tr>
                     </thead>
@@ -711,13 +711,13 @@ export const SuperAdminView: React.FC = () => {
                 <div className="overflow-x-auto">
                   <table className="w-full text-left border-collapse">
                     <thead>
-                      <tr className="border-b border-[#282830] bg-[#1C1C22] text-[11px] font-semibold uppercase tracking-wider text-[#A1A1AA]">
+                      <tr className="border-b border-[#282830] bg-[#1C1C22] text-[11px] font-semibold tracking-wider text-[#A1A1AA]">
                         <th className="py-3.5 px-5">Código</th>
                         <th className="py-3.5 px-5">Nombre</th>
                         <th className="py-3.5 px-5">Estado</th>
                         <th className="py-3.5 px-5">Modo</th>
-                        <th className="py-3.5 px-5">Escaneos Reales</th>
-                        <th className="py-3.5 px-5 text-right">Vista Pública</th>
+                        <th className="py-3.5 px-5">Escaneos reales</th>
+                        <th className="py-3.5 px-5 text-right">Vista pública</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-[#282830] text-sm">
@@ -732,7 +732,7 @@ export const SuperAdminView: React.FC = () => {
                               {c.status}
                             </span>
                           </td>
-                          <td className="py-4 px-5 text-xs text-[#A1A1AA] uppercase">
+                          <td className="py-4 px-5 text-xs text-[#A1A1AA]">
                             {c.mode}
                           </td>
                           <td className="py-4 px-5 font-semibold text-[#F4F4F0]">
@@ -775,7 +775,7 @@ export const SuperAdminView: React.FC = () => {
                   <div className="overflow-x-auto">
                     <table className="w-full text-left border-collapse">
                       <thead>
-                        <tr className="border-b border-[#282830] bg-[#1C1C22] text-[11px] font-semibold uppercase tracking-wider text-[#A1A1AA]">
+                        <tr className="border-b border-[#282830] bg-[#1C1C22] text-[11px] font-semibold tracking-wider text-[#A1A1AA]">
                           <th className="py-3.5 px-5">Correo</th>
                           <th className="py-3.5 px-5">Producto</th>
                           <th className="py-3.5 px-5">Consentimiento</th>
@@ -786,7 +786,7 @@ export const SuperAdminView: React.FC = () => {
                         {waitlist.map((entry) => (
                           <tr key={entry.id} className="hover:bg-[#1C1C22]">
                             <td className="py-4 px-5 font-medium text-[#F4F4F0]">{entry.email}</td>
-                            <td className="py-4 px-5 text-xs text-[#BEC8FF] font-bold uppercase">
+                            <td className="py-4 px-5 text-xs text-[#BEC8FF] font-bold">
                               {entry.product}
                             </td>
                             <td className="py-4 px-5 text-xs text-[#2FB36A]">
@@ -886,9 +886,9 @@ export const SuperAdminView: React.FC = () => {
 
                 <div className="rounded-2xl bg-[#1C1C22] border border-[#282830] p-5 space-y-3">
                   <div className="flex items-center justify-between">
-                    <h4 className="text-xs font-bold uppercase tracking-wider text-[#BEC8FF] flex items-center gap-1.5">
+                    <h4 className="text-xs font-bold tracking-wider text-[#BEC8FF] flex items-center gap-1.5">
                       <Gift className="w-4 h-4" />
-                      Configuración de Tarjeta de Sellos Digital
+                      Configuración de tarjeta de sellos digital
                     </h4>
                     <Link
                       to={`/u/${selectedBizDetail.business.id}`}
@@ -927,7 +927,7 @@ export const SuperAdminView: React.FC = () => {
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div className="rounded-2xl bg-[#1C1C22] border border-[#282830] p-4 space-y-2.5">
-                    <h4 className="text-xs font-bold uppercase tracking-wider text-[#A1A1AA]">
+                    <h4 className="text-xs font-bold tracking-wider text-[#A1A1AA]">
                       Locales ({selectedBizDetail.locals.length})
                     </h4>
                     {selectedBizDetail.locals.map((loc) => (
@@ -945,8 +945,8 @@ export const SuperAdminView: React.FC = () => {
                   </div>
 
                   <div className="rounded-2xl bg-[#1C1C22] border border-[#282830] p-4 space-y-2.5">
-                    <h4 className="text-xs font-bold uppercase tracking-wider text-[#A1A1AA]">
-                      Equipo Operativo ({selectedBizDetail.team.length})
+                    <h4 className="text-xs font-bold tracking-wider text-[#A1A1AA]">
+                      Equipo operativo ({selectedBizDetail.team.length})
                     </h4>
                     {selectedBizDetail.team.map((tm) => (
                       <div
@@ -955,7 +955,7 @@ export const SuperAdminView: React.FC = () => {
                       >
                         <div>
                           <p className="font-bold text-[#F4F4F0]">{tm.name}</p>
-                          <p className="text-[#A1A1AA] uppercase text-[10px]">{tm.role}</p>
+                          <p className="text-[#A1A1AA] text-[10px]">{tm.role}</p>
                         </div>
                         <span className="inline-flex items-center gap-1 text-[#2FB36A] font-semibold">
                           <CheckCircle2 className="w-3.5 h-3.5" />
@@ -968,9 +968,9 @@ export const SuperAdminView: React.FC = () => {
 
                 {selectedBizDetail.products.length > 0 && (
                   <div className="rounded-2xl bg-[#1C1C22] border border-[#282830] p-4 space-y-2.5">
-                    <h4 className="text-xs font-bold uppercase tracking-wider text-[#A1A1AA] flex items-center gap-1.5">
+                    <h4 className="text-xs font-bold tracking-wider text-[#A1A1AA] flex items-center gap-1.5">
                       <ShoppingBag className="w-3.5 h-3.5 text-[#BEC8FF]" />
-                      Catálogo de Productos ({selectedBizDetail.productsCount})
+                      Catálogo de productos ({selectedBizDetail.productsCount})
                     </h4>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                       {selectedBizDetail.products.slice(0, 6).map((prod) => (

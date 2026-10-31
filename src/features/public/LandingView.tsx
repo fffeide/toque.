@@ -29,7 +29,7 @@ export const LandingView: React.FC = () => {
 
         <div className="flex items-center gap-3">
           <Link
-            to="/u/BURGER01"
+            to="/u/MONROE01"
             className="hidden sm:inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-[#141414] hover:bg-[#1C1C22] border border-[#242424] text-xs font-semibold text-[#9E9EA8] hover:text-white transition-colors"
           >
             <span>Demo Hub en vivo</span>
@@ -160,11 +160,11 @@ export const LandingView: React.FC = () => {
                 </h2>
               </div>
               <Link
-                to="/u/BURGER01"
+                to="/u/MONROE01"
                 className="text-xs font-bold text-[#BEC8FF] hover:underline flex items-center gap-1"
               >
                 <Wifi className="w-3.5 h-3.5 text-[#D95B26]" />
-                <span>Probar Hub interactivo de ejemplo (La Burger) →</span>
+                <span>Probar Hub interactivo de ejemplo →</span>
               </Link>
             </div>
 

@@ -53,9 +53,9 @@ const DEFAULT_FALLBACK_AMOUNTS = [1500, 2500, 3800, 5000, 8500, 12000];
 
 const DEFAULT_FALLBACK_CARTEL: Cartel = {
   id: 'cartel-caja-1',
-  code: 'BURGER01',
+  code: 'MONROE01',
   pin: '112233',
-  businessId: 'la-burger',
+  businessId: 'musical-monroe',
   name: 'Caja Principal (Mostrador)',
   role: 'caja',
   status: 'active',
@@ -362,7 +362,7 @@ export const CashierView: React.FC = () => {
     if (!hasOwner) {
       list.unshift({
         id: 'team-owner-main',
-        businessId: business?.id || 'la-burger',
+        businessId: business?.id || 'musical-monroe',
         name: creatorName,
         email: ownerEmail,
         role: 'owner',
@@ -1338,7 +1338,7 @@ export const CashierView: React.FC = () => {
                         </span>
                       </div>
                       <p className="text-[11px] text-[#A1A1AA] mt-0.5 stat-detail">
-                        {formatDate(s.createdAt)} · {s.cartelCode || 'BURGER01'}
+                        {formatDate(s.createdAt)} · {s.cartelCode || 'MONROE01'}
                       </p>
                     </div>
 

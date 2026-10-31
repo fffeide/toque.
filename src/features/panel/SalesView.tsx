@@ -40,20 +40,20 @@ export const SalesView: React.FC = () => {
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <span className="block text-[11px] uppercase tracking-wider text-[#a1a1aa] font-semibold mb-1">
-            AUDITORÍA DE MOSTRADOR EN TIEMPO REAL
+          <span className="block text-[11px] tracking-wider text-[#a1a1aa] font-semibold mb-1">
+            Auditoría de mostrador en tiempo real
           </span>
           <h1 className="text-2xl font-bold text-[#f1f1ee] tracking-tight">
-            Ventas y Recibos Digitales
+            Ventas y recibos digitales
           </h1>
           <p className="text-sm text-[#a1a1aa] mt-0.5">
-            Historial sincronizado en vivo con la Terminal de Caja y los comprobantes emitidos.
+            Historial actualizado en vivo con la terminal de caja y los comprobantes emitidos.
           </p>
         </div>
 
         <div className="flex items-center gap-3">
           <div className="bg-[#111113] px-4 py-2.5 rounded-xl border border-[#242426]">
-            <span className="text-[11px] uppercase tracking-wider text-[#a1a1aa] block font-semibold">
+            <span className="text-[11px] tracking-wider text-[#a1a1aa] block font-semibold">
               Total cobrado ({paidSales.length})
             </span>
             <span className="text-lg font-bold font-mono text-[#34d399]">
@@ -104,14 +104,14 @@ export const SalesView: React.FC = () => {
           <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse">
               <thead>
-                <tr className="border-b border-[#242426] bg-[#141416] text-[11px] font-semibold text-[#a1a1aa] uppercase tracking-wider">
-                  <th className="py-3.5 px-4">Fecha y Hora</th>
-                  <th className="py-3.5 px-4">Detalle / Nota</th>
+                <tr className="border-b border-[#242426] bg-[#141416] text-[11px] font-semibold text-[#a1a1aa]">
+                  <th className="py-3.5 px-4">Fecha y hora</th>
+                  <th className="py-3.5 px-4">Detalle / nota</th>
                   <th className="py-3.5 px-4">Cartel</th>
-                  <th className="py-3.5 px-4">Medio de Pago</th>
+                  <th className="py-3.5 px-4">Medio de pago</th>
                   <th className="py-3.5 px-4">Estado</th>
                   <th className="py-3.5 px-4 text-right">Monto</th>
-                  <th className="py-3.5 px-4 text-right">Recibo Digital</th>
+                  <th className="py-3.5 px-4 text-right">Recibo digital</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-[#242426] text-sm">

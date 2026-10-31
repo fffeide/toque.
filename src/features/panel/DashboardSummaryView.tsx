@@ -69,7 +69,7 @@ const SETUP_TUTORIAL_STEPS = [
     description:
       'Abrí el enlace público de tu mostrador para verificar cómo tus clientes registran su tarjeta, guardan en Wallet y suman sellos.',
     actionLabel: 'Probar mi Hub ahora',
-    actionRoute: '/u/BURGER01',
+    actionRoute: '/u/MONROE01',
   },
 ];
 
@@ -114,7 +114,7 @@ export const DashboardSummaryView: React.FC = () => {
       setStampLogs(logs);
 
       setEditReward(
-        cfg.loyaltyReward || cfg.rewardText || 'Combo Burger + Bebida sin cargo'
+        cfg.loyaltyReward || cfg.rewardText || 'Encordado + calibración sin cargo'
       );
       setEditHowToEarn(cfg.howToEarn || '1 sello por visita o compra');
       setEditExpiration(cfg.expirationPolicy || 'No vencen');
@@ -138,7 +138,7 @@ export const DashboardSummaryView: React.FC = () => {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `sellos-y-premios-${business?.id || 'la-burger'}-${period}.csv`;
+      a.download = `sellos-y-premios-${business?.id || 'musical-monroe'}-${period}.csv`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
@@ -152,7 +152,7 @@ export const DashboardSummaryView: React.FC = () => {
   };
 
   const handleCopyPublicLink = async () => {
-    const code = locals[0]?.code || business?.id || 'BURGER01';
+    const code = locals[0]?.code || business?.id || 'MONROE01';
     const fullUrl = `${window.location.origin}/u/${code}`;
     try {
       await navigator.clipboard.writeText(fullUrl);
@@ -220,16 +220,16 @@ export const DashboardSummaryView: React.FC = () => {
     );
   }
 
-  const businessName = business?.name || 'La Burger';
+  const businessName = business?.name || 'Musical Monroe';
   const cardBgColor = clubConfig?.cardThemeColor || clubConfig?.brandColor || '#D95B26';
   const rewardText =
     clubConfig?.loyaltyReward ||
     clubConfig?.rewardText ||
-    'Combo Burger + Bebida sin cargo';
+    'Encordado + calibración sin cargo';
   const howToEarn = clubConfig?.howToEarn || '1 sello por visita o compra';
   const expirationPolicy = clubConfig?.expirationPolicy || 'No vencen';
   const currentStep = SETUP_TUTORIAL_STEPS[tutorialStepIndex] || SETUP_TUTORIAL_STEPS[0];
-  const primaryLocalCode = locals[0]?.code || 'BURGER01';
+  const primaryLocalCode = locals[0]?.code || 'MONROE01';
 
   return (
     <div className="space-y-6">

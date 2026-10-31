@@ -306,7 +306,7 @@ export const CartelesManagementView: React.FC = () => {
                     placeholder="Ej: CAJA02"
                     value={newCode}
                     onChange={(e) => setNewCode(e.target.value.toUpperCase())}
-                    className="w-full bg-[#161619] border border-[#28282a] rounded-xl px-3.5 py-2.5 text-sm font-mono uppercase text-[#f1f1ee] focus:outline-none focus:border-[#bec8ff]"
+                    className="w-full bg-[#161619] border border-[#28282a] rounded-xl px-3.5 py-2.5 text-sm font-mono text-[#f1f1ee] focus:outline-none focus:border-[#bec8ff]"
                   />
                 </div>
                 <div>

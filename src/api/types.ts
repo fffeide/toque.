@@ -327,6 +327,7 @@ export interface ClubMember {
   id: string;
   uuid?: string;
   accountId?: string;
+  tenantId?: string;
   businessId?: string;
   businessName?: string;
   localId?: string;
@@ -353,6 +354,7 @@ export interface ClubMember {
   targetStamps?: number;
   rewardText?: string;
   rewardValueArs?: number;
+  brandColor?: string;
   colorPreset?: 'dark' | 'blue' | 'green' | 'red' | 'purple' | 'orange';
   customColor?: string;
   logoUrl?: string;
@@ -534,9 +536,13 @@ export interface BusinessProfile {
   planSelected?: boolean;
   ownerUid?: string;
   reviewUrl?: string;
+  logoUrl?: string;
+  brandColor?: string;
+  colorPreset?: 'dark' | 'blue' | 'green' | 'red' | 'purple' | 'orange';
   cardThemeColor?: string;
   loyaltyTitle?: string;
   loyaltyReward?: string;
+  rewardValueArs?: number;
   howToEarn?: string;
   expirationPolicy?: string;
   stampsRequired?: number;
