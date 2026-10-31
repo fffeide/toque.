@@ -206,7 +206,14 @@ class HttpApi implements ToqueApi {
     return this.request(`/club/recognize${q}`);
   }
 
-  async addCardToAccount(data: { localCode: string; marketingConsent: boolean }) {
+  async addCardToAccount(data: {
+    localCode: string;
+    marketingConsent: boolean;
+    email?: string;
+    name?: string;
+    consumerId?: string;
+    barcodeToken?: string;
+  }) {
     return this.request<{
       member: ClubMember;
       account: RecognizedClientAccount;
@@ -859,6 +866,12 @@ class HttpApi implements ToqueApi {
   async deleteAccount(): Promise<{ deleted: boolean }> {
     return this.request('/account', {
       method: 'DELETE',
+    });
+  }
+
+  async cleanOrphanData(): Promise<{ cleaned: boolean; message: string }> {
+    return this.request('/debug/clean-orphans', {
+      method: 'POST',
     });
   }
 

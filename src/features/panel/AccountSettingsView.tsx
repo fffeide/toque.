@@ -43,6 +43,8 @@ export const AccountSettingsView: React.FC = () => {
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [deletingAccount, setDeletingAccount] = useState(false);
 
+  const [cleaningOrphans, setCleaningOrphans] = useState(false);
+
   const loadData = async () => {
     try {
       setLoading(true);
@@ -70,7 +72,23 @@ export const AccountSettingsView: React.FC = () => {
 
   useEffect(() => {
     loadData();
+    // Saneamiento automático en primera carga si hubiera datos mezclados de pruebas anteriores
+    api.cleanOrphanData().catch(() => {});
   }, []);
+
+  const handleCleanOrphans = async () => {
+    try {
+      setCleaningOrphans(true);
+      await api.cleanOrphanData();
+      await refreshSession();
+      await loadData();
+      showToast('Se purgaron los datos mezclados y se sincronizó tu cuenta.', 'success');
+    } catch (err: any) {
+      showToast(err?.message || 'No se pudieron purgar los datos mezclados', 'error');
+    } finally {
+      setCleaningOrphans(false);
+    }
+  };
 
   const handleSaveProfile = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -308,6 +326,32 @@ export const AccountSettingsView: React.FC = () => {
           </button>
         </div>
       </form>
+
+      {/* 3B. PURGAR DATOS MEZCLADOS */}
+      <section className="rounded-2xl bg-[#141418] border border-[#282830] p-5">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="flex items-start gap-2.5">
+            <div className="w-8 h-8 rounded-xl bg-[#D95B26]/15 text-[#D95B26] flex items-center justify-center shrink-0 mt-0.5">
+              <Sparkles className="w-4 h-4" />
+            </div>
+            <div>
+              <h2 className="text-sm font-bold text-[#F4F4F6]">Purgar datos mezclados</h2>
+              <p className="text-xs text-[#9E9EA8]">
+                Limpia datos antiguos de pruebas eliminadas y deja sincronizados solo el Hub y las tarjetas actuales de tu comercio.
+              </p>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            disabled={cleaningOrphans}
+            onClick={handleCleanOrphans}
+            className="px-4 py-2 rounded-xl bg-[#1C1C22] hover:bg-[#26262E] border border-[#282830] text-xs font-bold text-[#F4F4F6] transition-colors disabled:opacity-50 cursor-pointer shrink-0"
+          >
+            {cleaningOrphans ? 'Purgando...' : 'Purgar datos mezclados'}
+          </button>
+        </div>
+      </section>
 
       {/* 4. ELIMINAR MI CUENTA */}
       <section className="rounded-2xl bg-[#141418] border border-[#f87171]/30 p-5 space-y-4">

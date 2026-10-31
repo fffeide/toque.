@@ -125,6 +125,10 @@ export interface ToqueApi {
   addCardToAccount(data: {
     localCode: string;
     marketingConsent: boolean;
+    email?: string;
+    name?: string;
+    consumerId?: string;
+    barcodeToken?: string;
   }): Promise<{
     member: ClubMember;
     account: RecognizedClientAccount;
@@ -533,6 +537,8 @@ export interface ToqueApi {
   updateAccountEmail(newEmail: string): Promise<{ user: User; business: BusinessProfile }>;
 
   deleteAccount(): Promise<{ deleted: boolean }>;
+
+  cleanOrphanData(): Promise<{ cleaned: boolean; message: string }>;
 
   // Super Admin & Equipo Toque (toque_admins)
   getSuperAdminSummary(): Promise<SuperAdminSummary>;

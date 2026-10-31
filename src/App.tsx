@@ -178,6 +178,7 @@ export const App: React.FC = () => {
                       element={<UpcomingProductPageView product="recibo" />}
                     />
                     <Route path="/toquecitos" element={<ConsumerVaultView />} />
+                    <Route path="/mis-tarjetas" element={<ConsumerVaultView />} />
                     <Route path="/mi-toque" element={<Navigate to="/toquecitos" replace />} />
                     <Route path="/login" element={<LoginView />} />
                     <Route path="/ingresar" element={<LoginView />} />

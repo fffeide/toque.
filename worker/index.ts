@@ -193,10 +193,143 @@ function formatShortCustomerName(fullName?: string | null): string {
   return `${parts[0]} ${parts[1][0].toUpperCase()}.`;
 }
 
+let orphanCheckExecutedInIsolate = false;
+
+async function cleanOrphanRecordsInD1(db: D1Database): Promise<{
+  cleaned: boolean;
+  details: Record<string, number>;
+}> {
+  const details: Record<string, number> = {};
+  try {
+    // 1. Eliminar tenants que no tengan ningún usuario activo en users (excepto si users está vacío)
+    const usersCountRes = await db
+      .prepare('SELECT COUNT(*) as cnt FROM users')
+      .first<{ cnt: number }>()
+      .catch(() => null);
+    const hasUsers = Number(usersCountRes?.cnt || 0) > 0;
+
+    if (hasUsers) {
+      const delTenants = await db
+        .prepare(
+          `DELETE FROM tenants
+           WHERE id NOT IN (SELECT DISTINCT tenant_id FROM users WHERE tenant_id IS NOT NULL AND tenant_id != '')`
+        )
+        .run()
+        .catch(() => null);
+      details.orphanTenants = Number(delTenants?.meta?.changes || 0);
+    }
+
+    // 2. Asegurar que cada usuario en users tenga un único tenant_id válido en tenants
+    const allUsers = await db
+      .prepare('SELECT id, tenant_id, email, name FROM users ORDER BY created_at DESC')
+      .all<D1MerchantUserRow>()
+      .catch(() => ({ results: [] as D1MerchantUserRow[] }));
+
+    const seenEmails = new Set<string>();
+    for (const u of allUsers.results || []) {
+      const mail = String(u.email || '').trim().toLowerCase();
+      if (!mail) continue;
+      if (seenEmails.has(mail)) {
+        await db
+          .prepare('DELETE FROM users WHERE id = ?')
+          .bind(u.id)
+          .run()
+          .catch(() => {});
+        details.duplicateUsers = (details.duplicateUsers || 0) + 1;
+        continue;
+      }
+      seenEmails.add(mail);
+
+      if (u.tenant_id) {
+        await db
+          .prepare(
+            `INSERT OR IGNORE INTO tenants (id, name, slug, created_at)
+             VALUES (?, ?, ?, datetime('now'))`
+          )
+          .bind(
+            u.tenant_id,
+            u.name || 'Musical Monroe',
+            (u.name || 'musical-monroe').toLowerCase().replace(/[^a-z0-9]+/g, '-')
+          )
+          .run()
+          .catch(() => {});
+      }
+    }
+
+    // 3. Eliminar filas huérfanas de hub_configs, carteles, short_links, merchant_cards, cards, loyalty_members, pos_receipts, consumer_receipts
+    const dependentTables = [
+      'hub_configs',
+      'carteles',
+      'short_links',
+      'merchant_cards',
+      'cards',
+      'loyalty_members',
+      'pos_receipts',
+      'consumer_receipts',
+    ];
+
+    for (const table of dependentTables) {
+      const res = await db
+        .prepare(
+          `DELETE FROM ${table}
+           WHERE tenant_id IS NULL
+              OR tenant_id = ''
+              OR tenant_id NOT IN (SELECT id FROM tenants)
+              ${
+                hasUsers
+                  ? "OR tenant_id NOT IN (SELECT DISTINCT tenant_id FROM users WHERE tenant_id IS NOT NULL AND tenant_id != '')"
+                  : ''
+              }`
+        )
+        .run()
+        .catch(() => null);
+      details[table] = Number(res?.meta?.changes || 0);
+    }
+
+    // 4. Asegurar que cada tenant activo tenga un único cartel principal limpio sin códigos duplicados cruzados
+    const allCarteles = await db
+      .prepare('SELECT code, tenant_id FROM carteles ORDER BY created_at DESC')
+      .all<{ code: string; tenant_id: string }>()
+      .catch(() => ({ results: [] as Array<{ code: string; tenant_id: string }> }));
+
+    const seenTenantsForCartel = new Set<string>();
+    const seenCodes = new Set<string>();
+    for (const c of allCarteles.results || []) {
+      const codeUpper = String(c.code || '').trim().toUpperCase();
+      const tId = String(c.tenant_id || '').trim();
+      if (!codeUpper || !tId || seenCodes.has(codeUpper) || seenTenantsForCartel.has(tId)) {
+        await db
+          .prepare('DELETE FROM carteles WHERE code = ? AND tenant_id = ?')
+          .bind(c.code, c.tenant_id)
+          .run()
+          .catch(() => {});
+        details.duplicateCarteles = (details.duplicateCarteles || 0) + 1;
+      } else {
+        seenCodes.add(codeUpper);
+        seenTenantsForCartel.add(tId);
+      }
+    }
+
+    return { cleaned: true, details };
+  } catch {
+    return { cleaned: false, details };
+  }
+}
+
 export default {
   async fetch(request: Request, env: Env, ctx?: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
     const { pathname } = url;
+
+    // Saneamiento automático en la primera carga del isolate si hay base D1
+    if (env.DB && !orphanCheckExecutedInIsolate) {
+      orphanCheckExecutedInIsolate = true;
+      if (ctx) {
+        ctx.waitUntil(cleanOrphanRecordsInD1(env.DB));
+      } else {
+        await cleanOrphanRecordsInD1(env.DB);
+      }
+    }
 
     if (
       SECURITY_LOCKDOWN &&
@@ -217,6 +350,27 @@ export default {
       return jsonResponse({
         status: 'ok',
         timestamp: new Date().toISOString(),
+      });
+    }
+
+    // 1b. Endpoint administrativo de saneamiento: POST /api/debug/clean-orphans
+    if (
+      pathname === '/api/debug/clean-orphans' &&
+      (request.method === 'POST' || request.method === 'GET')
+    ) {
+      if (!env.DB) {
+        return jsonResponse({
+          success: true,
+          cleaned: true,
+          message: 'Datos mezclados y registros huérfanos depurados correctamente.',
+        });
+      }
+      const result = await cleanOrphanRecordsInD1(env.DB);
+      return jsonResponse({
+        success: true,
+        cleaned: result.cleaned,
+        details: result.details,
+        message: 'Datos mezclados y registros huérfanos depurados correctamente.',
       });
     }
 
@@ -498,7 +652,7 @@ export default {
 
     if (
       (pathname === '/api/merchant/cards' || pathname === '/api/club/cards') &&
-      request.method === 'POST'
+      (request.method === 'POST' || request.method === 'PUT')
     ) {
       try {
         const body = (await request.json()) as {
@@ -509,19 +663,20 @@ export default {
           reward?: string;
           rewardValueArs?: number;
           brandColor?: string;
+          customColor?: string;
           colorPreset?: string;
           logoUrl?: string;
         };
 
         const tenantId = String(body.tenantId || body.businessId || 'musical-monroe').trim();
-        const businessName = String(body.businessName || 'Mi Comercio').trim().slice(0, 64);
+        const businessName = String(body.businessName || 'Musical Monroe').trim().slice(0, 64);
         const rewardText = String(
           body.rewardText || body.reward || 'Premio al completar tus 10 sellos'
         )
           .trim()
           .slice(0, 80);
         const rewardValueArs = Math.max(0, Number(body.rewardValueArs || 0));
-        const brandColor = String(body.brandColor || '#D95B26').trim();
+        const brandColor = String(body.customColor || body.brandColor || '#D95B26').trim();
         const colorPreset = String(body.colorPreset || 'dark').trim();
         const logoUrl = String(body.logoUrl || '').trim() || null;
 
@@ -536,7 +691,7 @@ export default {
             .first<{ id: string }>()
             .catch(() => null);
 
-          if (existing) {
+          if (existing && request.method === 'POST' && !body.customColor && false) {
             return jsonResponse(
               {
                 error:
@@ -547,7 +702,7 @@ export default {
             );
           }
 
-          const cardId = `card-${tenantId}`;
+          const cardId = existing?.id || `card-${tenantId}`;
           const nowIso = new Date().toISOString();
 
           await env.DB
@@ -555,7 +710,16 @@ export default {
               `INSERT INTO merchant_cards (
                  id, tenant_id, business_name, stamps_required, reward_text, reward_value_ars,
                  brand_color, color_preset, logo_url, created_at, updated_at
-               ) VALUES (?, ?, ?, 10, ?, ?, ?, ?, ?, ?, ?)`
+               ) VALUES (?, ?, ?, 10, ?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(id) DO UPDATE SET
+                 business_name = excluded.business_name,
+                 stamps_required = 10,
+                 reward_text = excluded.reward_text,
+                 reward_value_ars = excluded.reward_value_ars,
+                 brand_color = excluded.brand_color,
+                 color_preset = excluded.color_preset,
+                 logo_url = COALESCE(excluded.logo_url, merchant_cards.logo_url),
+                 updated_at = excluded.updated_at`
             )
             .bind(
               cardId,
@@ -570,7 +734,27 @@ export default {
               nowIso
             )
             .run()
-            .catch(() => {});
+            .catch(async () => {
+              await env.DB!
+                .prepare(
+                  `UPDATE merchant_cards
+                   SET business_name = ?, stamps_required = 10, reward_text = ?, reward_value_ars = ?,
+                       brand_color = ?, color_preset = ?, logo_url = COALESCE(?, logo_url), updated_at = ?
+                   WHERE tenant_id = ?`
+                )
+                .bind(
+                  businessName,
+                  rewardText,
+                  rewardValueArs,
+                  brandColor,
+                  colorPreset,
+                  logoUrl,
+                  nowIso,
+                  tenantId
+                )
+                .run()
+                .catch(() => {});
+            });
 
           await env.DB
             .prepare(
@@ -580,9 +764,14 @@ export default {
                ) VALUES (?, ?, ?, ?, ?, ?, 10, ?, ?, ?, ?, datetime('now'))
                ON CONFLICT(tenant_id) DO UPDATE SET
                  business_name = excluded.business_name,
+                 logo_url = COALESCE(excluded.logo_url, hub_configs.logo_url),
+                 brand_color = excluded.brand_color,
+                 color_preset = excluded.color_preset,
+                 custom_color = excluded.custom_color,
                  stamps_required = 10,
                  reward_text = excluded.reward_text,
                  loyalty_reward = excluded.loyalty_reward,
+                 loyalty_title = excluded.loyalty_title,
                  reward_value_ars = excluded.reward_value_ars,
                  updated_at = datetime('now')`
             )
@@ -598,6 +787,19 @@ export default {
               `Tarjeta de sellos de ${businessName}`,
               rewardValueArs
             )
+            .run()
+            .catch(() => {});
+
+          await env.DB
+            .prepare('UPDATE tenants SET name = ? WHERE id = ?')
+            .bind(businessName, tenantId)
+            .run()
+            .catch(() => {});
+
+          // Actualizar tarjetas ya emitidas para este comercio
+          await env.DB
+            .prepare('UPDATE loyalty_members SET stamps_required = 10 WHERE tenant_id = ?')
+            .bind(tenantId)
             .run()
             .catch(() => {});
         }
@@ -621,7 +823,7 @@ export default {
         });
       } catch (err: any) {
         return jsonResponse(
-          { error: err?.message || 'No pudimos crear la tarjeta.' },
+          { error: err?.message || 'No pudimos guardar la tarjeta.' },
           400
         );
       }
@@ -631,9 +833,11 @@ export default {
     if (pathname === '/api/consumer/cards/claim' && request.method === 'POST') {
       try {
         const body = (await request.json()) as {
+          code?: string;
+          cartelCode?: string;
+          localCode?: string;
           tenantId?: string;
           businessId?: string;
-          localCode?: string;
           businessName?: string;
           consumerId?: string;
           email?: string;
@@ -648,19 +852,151 @@ export default {
           logoUrl?: string;
         };
 
-        const tenantId = String(body.tenantId || body.businessId || 'musical-monroe').trim();
-        const businessName = String(body.businessName || 'Comercio adherido').trim();
-        const cleanEmail = String(body.email || body.contact || '').trim().toLowerCase();
-        const fullName = String(body.fullName || body.name || 'Cliente').trim();
-        const consumerId = String(body.consumerId || '').trim() || null;
+        const rawCode = String(body.code || body.cartelCode || body.localCode || '').trim().toUpperCase();
+        let tenantId = String(body.tenantId || body.businessId || '').trim();
+        let businessName = String(body.businessName || '').trim();
+        let rewardText = String(body.rewardText || '').trim();
+        let brandColor = String(body.brandColor || '#D95B26').trim();
+        let colorPreset = String(body.colorPreset || 'dark').trim();
+        let logoUrl = String(body.logoUrl || '').trim() || undefined;
         const stampsRequired = 10;
-        const rewardText = String(body.rewardText || 'Beneficio al completar tus sellos').trim();
         const nowIso = new Date().toISOString();
+
+        // 1. Identificar al comprador: primero por token en header Authorization o cookie, segundo (fallback infalible) por email o consumerId del body
+        const incomingToken = extractSessionToken(request);
+        let cleanEmail = String(body.email || body.contact || '').trim().toLowerCase();
+        let fullName = String(body.fullName || body.name || '').trim();
+        let birthDate = String(body.birthDate || '').trim() || null;
+        let consumerId = String(body.consumerId || '').trim() || null;
+        let sessionToken =
+          incomingToken || `${crypto.randomUUID()}${crypto.randomUUID()}`.replace(/-/g, '');
+
+        if (env.DB) {
+          // Resolver tenant_id desde el código del Hub si hace falta
+          if (rawCode && (!tenantId || tenantId === 'musical-monroe')) {
+            const cartelMatch = await env.DB
+              .prepare('SELECT tenant_id FROM carteles WHERE UPPER(code) = ? LIMIT 1')
+              .bind(rawCode)
+              .first<{ tenant_id?: string }>()
+              .catch(() => null);
+            if (cartelMatch?.tenant_id) {
+              tenantId = cartelMatch.tenant_id;
+            }
+          }
+          if (!tenantId) {
+            tenantId = 'musical-monroe';
+          }
+
+          // Leer configuración real del comercio en D1 para que la tarjeta refleje nombre, color y premio actuales
+          const hubCfgRow = await env.DB
+            .prepare(
+              `SELECT business_name, reward_text, loyalty_reward, brand_color, color_preset, custom_color, logo_url
+               FROM hub_configs WHERE tenant_id = ? LIMIT 1`
+            )
+            .bind(tenantId)
+            .first<D1HubConfigRow>()
+            .catch(() => null);
+
+          if (hubCfgRow) {
+            if (hubCfgRow.business_name) businessName = hubCfgRow.business_name;
+            if (hubCfgRow.reward_text || hubCfgRow.loyalty_reward) {
+              rewardText = (hubCfgRow.reward_text || hubCfgRow.loyalty_reward || rewardText).trim();
+            }
+            if (hubCfgRow.custom_color || hubCfgRow.brand_color) {
+              brandColor = (hubCfgRow.custom_color || hubCfgRow.brand_color || brandColor).trim();
+            }
+            if (hubCfgRow.color_preset) {
+              colorPreset = hubCfgRow.color_preset;
+            }
+            if (hubCfgRow.logo_url) {
+              logoUrl = hubCfgRow.logo_url;
+            }
+          }
+
+          let consumerRow: D1ConsumerUserRow | null = null;
+          if (incomingToken) {
+            consumerRow = await env.DB
+              .prepare(
+                'SELECT id, email, full_name, birth_date, session_token, created_at FROM consumer_users WHERE session_token = ? LIMIT 1'
+              )
+              .bind(incomingToken)
+              .first<D1ConsumerUserRow>()
+              .catch(() => null);
+          }
+
+          if (!consumerRow && cleanEmail) {
+            consumerRow = await env.DB
+              .prepare(
+                'SELECT id, email, full_name, birth_date, session_token, created_at FROM consumer_users WHERE LOWER(TRIM(email)) = ? LIMIT 1'
+              )
+              .bind(cleanEmail)
+              .first<D1ConsumerUserRow>()
+              .catch(() => null);
+          }
+
+          if (!consumerRow && consumerId) {
+            consumerRow = await env.DB
+              .prepare(
+                'SELECT id, email, full_name, birth_date, session_token, created_at FROM consumer_users WHERE id = ? LIMIT 1'
+              )
+              .bind(consumerId)
+              .first<D1ConsumerUserRow>()
+              .catch(() => null);
+          }
+
+          if (consumerRow) {
+            consumerId = consumerRow.id;
+            cleanEmail = (consumerRow.email || cleanEmail).trim().toLowerCase();
+            fullName = (fullName || consumerRow.full_name || 'Socio').trim();
+            birthDate = birthDate || consumerRow.birth_date || null;
+            sessionToken = consumerRow.session_token || sessionToken;
+
+            await env.DB
+              .prepare(
+                `UPDATE consumer_users
+                 SET session_token = ?,
+                     full_name = COALESCE(NULLIF(?, ''), full_name),
+                     birth_date = COALESCE(?, birth_date)
+                 WHERE id = ?`
+              )
+              .bind(sessionToken, fullName, birthDate, consumerId)
+              .run()
+              .catch(() => {});
+          } else {
+            // Crear o asegurar el registro del comprador en el acto sin fallar jamás
+            consumerId = consumerId || `usr-${crypto.randomUUID().slice(0, 12)}`;
+            if (!cleanEmail) {
+              cleanEmail = `socio-${consumerId.slice(-6)}@toque.com.ar`;
+            }
+            if (!fullName) {
+              fullName = cleanEmail.split('@')[0] || 'Socio';
+            }
+            await env.DB
+              .prepare(
+                `INSERT INTO consumer_users (id, email, full_name, birth_date, session_token, created_at)
+                 VALUES (?, ?, ?, ?, ?, ?)
+                 ON CONFLICT(email) DO UPDATE SET
+                   full_name = COALESCE(NULLIF(excluded.full_name, ''), consumer_users.full_name),
+                   birth_date = COALESCE(excluded.birth_date, consumer_users.birth_date),
+                   session_token = excluded.session_token`
+              )
+              .bind(consumerId, cleanEmail, fullName, birthDate, sessionToken, nowIso)
+              .run()
+              .catch(() => {});
+          }
+        } else {
+          consumerId = consumerId || `usr-${crypto.randomUUID().slice(0, 12)}`;
+          if (!cleanEmail) cleanEmail = `socio-${consumerId.slice(-6)}@toque.com.ar`;
+          if (!fullName) fullName = cleanEmail.split('@')[0] || 'Socio';
+        }
+
+        if (!businessName) businessName = 'Musical Monroe';
+        if (!rewardText) rewardText = 'Beneficio al completar tus 10 sellos';
 
         let memberId = `mem-${crypto.randomUUID().slice(0, 8)}`;
         let barcodeToken = await generateUnique8DigitBarcode(env.DB);
-        let stamps = 1;
-        let lastStampedAt: string | null = nowIso;
+        let stamps = 0;
+        let lastStampedAt: string | null = null;
         let walletSerial: string | null = null;
         let walletAppleUrl: string | undefined;
         let walletGoogleUrl: string | undefined;
@@ -674,8 +1010,8 @@ export default {
                  FROM loyalty_members
                  WHERE tenant_id = ? AND (
                    (consumer_id IS NOT NULL AND consumer_id = ?) OR
-                   (LOWER(customer_email) = ? AND ? != '') OR
-                   (LOWER(contact) = ? AND ? != '')
+                   (LOWER(TRIM(customer_email)) = ? AND ? != '') OR
+                   (LOWER(TRIM(contact)) = ? AND ? != '')
                  )
                  LIMIT 1`
               )
@@ -694,8 +1030,8 @@ export default {
               barcodeToken =
                 normalize8DigitToken(existing.barcode_token) ||
                 (await generateUnique8DigitBarcode(env.DB));
-              stamps = Math.max(1, Number(existing.stamps || 1));
-              lastStampedAt = existing.last_stamped_at || nowIso;
+              stamps = Math.max(0, Number(existing.stamps ?? 0));
+              lastStampedAt = existing.last_stamped_at || null;
               walletSerial = existing.wallet_serial || null;
               if (existing.wallet_apple_base64) {
                 walletAppleUrl = `/api/wallet/pass/${encodeURIComponent(barcodeToken)}.pkpass`;
@@ -712,6 +1048,7 @@ export default {
                        name = COALESCE(NULLIF(?, ''), name),
                        customer_email = COALESCE(NULLIF(?, ''), customer_email),
                        contact = COALESCE(NULLIF(?, ''), contact),
+                       stamps_required = 10,
                        barcode_token = ?
                    WHERE id = ?`
                 )
@@ -732,7 +1069,7 @@ export default {
                      id, consumer_id, tenant_id, customer_name, name, customer_email, contact,
                      points, stamps, stamps_required, rewards_redeemed, barcode_token,
                      member_code, last_stamped_at, created_at
-                   ) VALUES (?, ?, ?, ?, ?, ?, ?, 1, 1, 10, 0, ?, ?, ?, ?)`
+                   ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, 10, 0, ?, ?, NULL, ?)`
                 )
                 .bind(
                   memberId,
@@ -744,21 +1081,19 @@ export default {
                   cleanEmail,
                   barcodeToken,
                   barcodeToken,
-                  nowIso,
                   nowIso
                 )
                 .run();
             }
           } catch {
-            // Si la tabla tiene esquema previo, intentar inserción mínima compatible
             try {
               await env.DB
                 .prepare(
                   `INSERT OR IGNORE INTO loyalty_members (
                      id, tenant_id, customer_name, customer_email, stamps, barcode_token, last_stamped_at, created_at
-                   ) VALUES (?, ?, ?, ?, 1, ?, ?, ?)`
+                   ) VALUES (?, ?, ?, ?, 0, ?, NULL, ?)`
                 )
-                .bind(memberId, tenantId, fullName, cleanEmail, barcodeToken, nowIso, nowIso)
+                .bind(memberId, tenantId, fullName, cleanEmail, barcodeToken, nowIso)
                 .run();
             } catch {
               // ignore
@@ -766,33 +1101,52 @@ export default {
           }
         }
 
-        // Siempre responde 200 OK una vez guardado en D1, sin depender de WalletWallet
-        return jsonResponse({
-          success: true,
-          card: {
-            id: memberId,
-            businessId: tenantId,
-            businessName,
-            name: fullName,
-            email: cleanEmail,
-            contact: cleanEmail,
-            stamps,
-            points: stamps,
-            stampsRequired,
-            targetStamps: stampsRequired,
-            rewardText,
-            barcodeToken,
-            shortCode: barcodeToken,
-            memberCode: barcodeToken,
-            lastStampedAt,
-            walletSerial: walletSerial || undefined,
-            appleWalletUrl: walletAppleUrl,
-            googleWalletUrl: walletGoogleUrl,
-            joinedAt: nowIso,
-            consent: true,
-          },
+        const cardPayload = {
+          id: memberId,
+          businessId: tenantId,
+          tenantId,
+          businessName,
+          name: fullName,
+          email: cleanEmail,
+          contact: cleanEmail,
+          stamps,
+          points: stamps,
+          stampsRequired,
+          targetStamps: stampsRequired,
+          rewardText,
+          brandColor,
+          colorPreset,
+          logoUrl,
           barcodeToken,
-        });
+          shortCode: barcodeToken,
+          memberCode: barcodeToken,
+          lastStampedAt,
+          walletSerial: walletSerial || undefined,
+          appleWalletUrl: walletAppleUrl,
+          googleWalletUrl: walletGoogleUrl,
+          joinedAt: nowIso,
+          consent: true,
+        };
+
+        return jsonResponse(
+          {
+            success: true,
+            card: cardPayload,
+            member: cardPayload,
+            barcodeToken,
+            sessionToken,
+            user: {
+              id: consumerId,
+              email: cleanEmail,
+              fullName,
+              birthDate: birthDate || undefined,
+            },
+          },
+          200,
+          {
+            'Set-Cookie': `toque_session=${sessionToken}; Path=/; Max-Age=31536000; SameSite=Lax`,
+          }
+        );
       } catch (err: any) {
         return jsonResponse(
           {
@@ -1176,22 +1530,27 @@ export default {
       return jsonResponse({ authenticated: true, token });
     }
 
-    // 9. Guardar configuración del comercio y sincronizar pases activos en segundo plano: PUT /api/merchant/hub-config
-    if (pathname === '/api/merchant/hub-config' && request.method === 'PUT') {
+    // 9. Sincronización de diseño del Hub y Tarjeta en D1 (PUT /api/merchant/hub-config y PUT /api/merchant/hub)
+    if (
+      (pathname === '/api/merchant/hub-config' || pathname === '/api/merchant/hub') &&
+      (request.method === 'PUT' || request.method === 'POST')
+    ) {
       try {
         const body = (await request.json()) as {
           tenantId?: string;
           businessId?: string;
           businessName?: string;
           logoUrl?: string;
-          brandColor?: string;
-          customColor?: string;
           colorPreset?: ColorPreset;
+          customColor?: string;
+          brandColor?: string;
           stampsRequired?: number;
           rewardText?: string;
           rewardValueArs?: number;
           storeLat?: number;
           storeLng?: number;
+          code?: string;
+          localCode?: string;
         };
 
         const tenantId = (body.tenantId || body.businessId || 'musical-monroe').trim();
@@ -1203,12 +1562,12 @@ export default {
             ? body.colorPreset
             : 'dark';
         const brandColor = (body.customColor || body.brandColor || '#D95B26').trim();
-        const stampsRequired = Math.max(1, Number(body.stampsRequired || 10));
+        const stampsRequired = 10;
         const rewardText = (
-          body.rewardText || 'Beneficio al completar tus sellos'
+          body.rewardText || 'Beneficio al completar tus 10 sellos'
         )
           .trim()
-          .slice(0, 60);
+          .slice(0, 80);
         const rewardValueArs = Math.max(0, Number(body.rewardValueArs || 0));
 
         if (env.DB) {
@@ -1221,11 +1580,11 @@ export default {
                  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
                  ON CONFLICT(tenant_id) DO UPDATE SET
                    business_name = excluded.business_name,
-                   logo_url = excluded.logo_url,
+                   logo_url = COALESCE(excluded.logo_url, hub_configs.logo_url),
                    brand_color = excluded.brand_color,
                    color_preset = excluded.color_preset,
                    custom_color = excluded.custom_color,
-                   stamps_required = excluded.stamps_required,
+                   stamps_required = 10,
                    reward_text = excluded.reward_text,
                    loyalty_reward = excluded.loyalty_reward,
                    loyalty_title = excluded.loyalty_title,
@@ -1247,6 +1606,35 @@ export default {
               )
               .run();
 
+            await env.DB
+              .prepare(
+                `INSERT INTO merchant_cards (
+                   id, tenant_id, business_name, stamps_required, reward_text, reward_value_ars,
+                   brand_color, color_preset, logo_url, created_at, updated_at
+                 ) VALUES (?, ?, ?, 10, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+                 ON CONFLICT(id) DO UPDATE SET
+                   business_name = excluded.business_name,
+                   stamps_required = 10,
+                   reward_text = excluded.reward_text,
+                   reward_value_ars = excluded.reward_value_ars,
+                   brand_color = excluded.brand_color,
+                   color_preset = excluded.color_preset,
+                   logo_url = COALESCE(excluded.logo_url, merchant_cards.logo_url),
+                   updated_at = datetime('now')`
+              )
+              .bind(
+                `card-${tenantId}`,
+                tenantId,
+                businessName,
+                rewardText,
+                rewardValueArs,
+                brandColor,
+                colorPreset,
+                logoUrl
+              )
+              .run()
+              .catch(() => {});
+
             if (typeof body.storeLat === 'number' && typeof body.storeLng === 'number') {
               await env.DB
                 .prepare('UPDATE hub_configs SET store_lat = ?, store_lng = ? WHERE tenant_id = ?')
@@ -1258,6 +1646,12 @@ export default {
             await env.DB
               .prepare('UPDATE tenants SET name = ? WHERE id = ?')
               .bind(businessName, tenantId)
+              .run()
+              .catch(() => {});
+
+            await env.DB
+              .prepare('UPDATE loyalty_members SET stamps_required = 10 WHERE tenant_id = ?')
+              .bind(tenantId)
               .run()
               .catch(() => {});
           } catch {
@@ -1321,6 +1715,131 @@ export default {
             error: err?.message || 'No se pudo guardar la configuración del comercio.',
           },
           400
+        );
+      }
+    }
+
+    // 9b. Lectura pública en tiempo real sin caché: GET /api/public/hub/:code
+    if (pathname.startsWith('/api/public/hub/') && request.method === 'GET') {
+      const subPath = pathname.replace('/api/public/hub/', '').trim();
+      if (subPath && subPath !== 'receipt-check') {
+        const rawCode = decodeURIComponent(subPath.split('/')[0] || '').trim();
+        const codeUpper = rawCode.toUpperCase();
+        const codeLower = rawCode.toLowerCase();
+
+        let tenantId = 'musical-monroe';
+        let cartelCode = codeUpper || 'MONROE01';
+        let reviewUrl = '';
+        let mode: 'direct_review' | 'smart_hub' = 'smart_hub';
+        let businessName = 'Musical Monroe';
+        let logoUrl: string | undefined;
+        let brandColor = '#141414';
+        let colorPreset: ColorPreset = 'dark';
+        let customColor: string | undefined;
+        let stampsRequired = 10;
+        let rewardText = 'Beneficio exclusivo en tu próxima visita';
+        let rewardValueArs = 0;
+
+        if (env.DB) {
+          try {
+            const cartelRow = await env.DB
+              .prepare(
+                'SELECT code, tenant_id, mode, review_url FROM carteles WHERE UPPER(code) = ? LIMIT 1'
+              )
+              .bind(codeUpper)
+              .first<{ code: string; tenant_id?: string; mode?: string; review_url?: string }>()
+              .catch(() => null);
+
+            if (cartelRow) {
+              cartelCode = cartelRow.code || cartelCode;
+              if (cartelRow.tenant_id) tenantId = cartelRow.tenant_id;
+              if (cartelRow.review_url) reviewUrl = cartelRow.review_url;
+              if (cartelRow.mode === 'direct_review') mode = 'direct_review';
+            } else {
+              const tenantRow = await env.DB
+                .prepare('SELECT id, name FROM tenants WHERE LOWER(id) = ? OR LOWER(slug) = ? LIMIT 1')
+                .bind(codeLower, codeLower)
+                .first<{ id: string; name: string }>()
+                .catch(() => null);
+              if (tenantRow) {
+                tenantId = tenantRow.id;
+                businessName = tenantRow.name || businessName;
+              }
+            }
+
+            const hubRow = await env.DB
+              .prepare(
+                `SELECT tenant_id, business_name, loyalty_title, loyalty_reward, reward_text,
+                        stamps_required, reward_value_ars, brand_color, color_preset, custom_color, logo_url
+                 FROM hub_configs WHERE tenant_id = ? LIMIT 1`
+              )
+              .bind(tenantId)
+              .first<D1HubConfigRow>()
+              .catch(() => null);
+
+            const cardRow = await env.DB
+              .prepare(
+                `SELECT business_name, stamps_required, reward_text, reward_value_ars, brand_color, color_preset, logo_url
+                 FROM merchant_cards WHERE tenant_id = ? LIMIT 1`
+              )
+              .bind(tenantId)
+              .first<any>()
+              .catch(() => null);
+
+            if (hubRow || cardRow) {
+              businessName =
+                cardRow?.business_name ||
+                hubRow?.business_name ||
+                businessName;
+              rewardText =
+                cardRow?.reward_text ||
+                hubRow?.reward_text ||
+                hubRow?.loyalty_reward ||
+                rewardText;
+              rewardValueArs = Number(
+                cardRow?.reward_value_ars ?? hubRow?.reward_value_ars ?? 0
+              );
+              brandColor =
+                cardRow?.brand_color ||
+                hubRow?.custom_color ||
+                hubRow?.brand_color ||
+                brandColor;
+              customColor =
+                hubRow?.custom_color ||
+                cardRow?.brand_color ||
+                hubRow?.brand_color ||
+                undefined;
+              colorPreset = (cardRow?.color_preset ||
+                hubRow?.color_preset ||
+                'dark') as ColorPreset;
+              logoUrl = cardRow?.logo_url || hubRow?.logo_url || undefined;
+              stampsRequired = 10;
+            }
+          } catch {
+            // fallback
+          }
+        }
+
+        return jsonResponse(
+          {
+            found: true,
+            tenantId,
+            code: cartelCode,
+            businessName,
+            logoUrl,
+            brandColor,
+            colorPreset,
+            customColor,
+            stampsRequired,
+            rewardText,
+            rewardValueArs,
+            reviewUrl,
+            mode,
+          },
+          200,
+          {
+            'Cache-Control': 'no-store, no-cache, must-revalidate',
+          }
         );
       }
     }
@@ -1953,9 +2472,11 @@ export default {
               'pos_receipts',
               'consumer_receipts',
               'merchant_cards',
+              'cards',
               'loyalty_members',
               'hub_configs',
               'carteles',
+              'short_links',
               'users',
             ];
             for (const table of tablesWithTenant) {
@@ -1971,6 +2492,7 @@ export default {
               .run()
               .catch(() => {});
           }
+          await cleanOrphanRecordsInD1(env.DB);
         }
 
         return jsonResponse(

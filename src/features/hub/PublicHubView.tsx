@@ -174,6 +174,26 @@ export const PublicHubView: React.FC = () => {
   }): Promise<{ barcodeToken?: string; stamps?: number; stampsRequired?: number; memberId?: string }> => {
     try {
       const token = getConsumerSessionToken();
+      const savedUser = getSavedConsumerUser();
+      const effectiveEmail = (
+        params.customerEmail ||
+        recognizedAccount?.email ||
+        savedUser?.email ||
+        getConsumerSessionEmail() ||
+        ''
+      )
+        .trim()
+        .toLowerCase();
+      const effectiveName = (
+        params.customerName ||
+        recognizedAccount?.name ||
+        savedUser?.fullName ||
+        effectiveEmail.split('@')[0] ||
+        'Socio'
+      ).trim();
+      const effectiveConsumerId =
+        savedUser?.id || recognizedAccount?.accountId || undefined;
+
       const res = await fetch('/api/consumer/cards/claim', {
         method: 'POST',
         headers: {
@@ -181,33 +201,36 @@ export const PublicHubView: React.FC = () => {
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
         body: JSON.stringify({
+          code: params.hubData.cartel.code,
           cartelCode: params.hubData.cartel.code,
+          localCode: params.hubData.cartel.code,
           tenantId: params.hubData.business.id,
+          businessId: params.hubData.business.id,
+          consumerId: effectiveConsumerId,
+          email: effectiveEmail,
+          fullName: effectiveName,
+          name: effectiveName,
+          birthDate: params.customerBirthDate || savedUser?.birthDate,
           businessName: params.hubData.business.name,
           rewardText:
             params.hubData.club?.config?.loyaltyReward ||
             params.hubData.club?.config?.rewardText ||
-            'Premio al completar tus sellos',
-          stampsRequired:
-            params.hubData.club?.config?.targetStamps ||
-            params.hubData.club?.config?.stampsRequired ||
-            10,
-          name: params.customerName,
-          email: params.customerEmail,
-          birthDate: params.customerBirthDate,
+            'Premio al completar tus 10 sellos',
+          stampsRequired: 10,
         }),
       });
       if (!res.ok) return {};
       const data = await res.json();
       if (data.sessionToken && data.user) {
-        saveConsumerSession(data.sessionToken, data.user);
+        saveConsumerSession(data.sessionToken, data.user.email, data.user);
       }
-      if (data.member) {
+      const cardData = data.card || data.member;
+      if (cardData || data.barcodeToken) {
         return {
-          barcodeToken: data.member.barcodeToken,
-          stamps: data.member.stamps,
-          stampsRequired: data.member.stampsRequired,
-          memberId: data.member.id,
+          barcodeToken: cardData?.barcodeToken || data.barcodeToken,
+          stamps: typeof cardData?.stamps === 'number' ? cardData.stamps : 0,
+          stampsRequired: cardData?.stampsRequired || 10,
+          memberId: cardData?.id,
         };
       }
       return {};
@@ -467,9 +490,62 @@ export const PublicHubView: React.FC = () => {
       }
     });
 
+    const handleCrossTabSync = async () => {
+      if (!active) return;
+      try {
+        const [freshHub, meRes] = await Promise.all([
+          api.getPublicHub(targetCode),
+          fetchConsumerMe().catch(() => ({ authenticated: false, user: null, cards: [], receipts: [] })),
+        ]);
+        if (!active) return;
+        setHub(freshHub);
+        const srvCard = (meRes.cards || []).find(
+          (c) => c.tenantId === freshHub.business.id || c.businessName === freshHub.business.name
+        );
+        if (freshHub.club?.member) {
+          setJoinedMember((prev) => ({
+            ...freshHub.club!.member!,
+            stamps:
+              srvCard && srvCard.stamps > (freshHub.club!.member!.stamps || 0)
+                ? srvCard.stamps
+                : freshHub.club!.member!.stamps,
+            barcodeToken:
+              prev?.barcodeToken ||
+              srvCard?.barcodeToken ||
+              freshHub.club!.member!.barcodeToken,
+            shortCode:
+              prev?.shortCode ||
+              srvCard?.barcodeToken ||
+              freshHub.club!.member!.shortCode,
+          }));
+        } else if (srvCard) {
+          setJoinedMember((prev) =>
+            prev
+              ? {
+                  ...prev,
+                  stamps: srvCard.stamps,
+                  points: srvCard.stamps,
+                  stampsRequired: 10,
+                  targetStamps: 10,
+                }
+              : prev
+          );
+        }
+      } catch {
+        // ignore
+      }
+    };
+
+    window.addEventListener('storage', handleCrossTabSync);
+    window.addEventListener('focus', handleCrossTabSync);
+    const pollInterval = setInterval(handleCrossTabSync, 2500);
+
     return () => {
       active = false;
       unsubscribe();
+      window.removeEventListener('storage', handleCrossTabSync);
+      window.removeEventListener('focus', handleCrossTabSync);
+      clearInterval(pollInterval);
     };
   }, [targetCode]);
 
@@ -507,19 +583,30 @@ export const PublicHubView: React.FC = () => {
     setFormError(null);
     try {
       setSubmitting(true);
+      const effectiveEmail =
+        recognizedAccount?.email ||
+        email.trim().toLowerCase() ||
+        loginEmail.trim().toLowerCase();
+      const effectiveName = recognizedAccount?.name || name.trim() || 'Socio';
+
       const d1Claim = await claimCardInD1({
         hubData: hub,
-        customerName: recognizedAccount?.name || name || 'Socio',
-        customerEmail: recognizedAccount?.email || email,
+        customerName: effectiveName,
+        customerEmail: effectiveEmail,
       });
 
       const res = await api.addCardToAccount({
         localCode: hub.cartel.code,
         marketingConsent,
+        email: effectiveEmail,
+        name: effectiveName,
+        barcodeToken: d1Claim.barcodeToken,
       });
 
       const mergedMember: ClubMember = {
         ...res.member,
+        stamps: d1Claim.stamps ?? res.member.stamps ?? 0,
+        stampsRequired: 10,
         barcodeToken: d1Claim.barcodeToken || res.member.barcodeToken || res.member.shortCode,
         shortCode: d1Claim.barcodeToken || res.member.shortCode || res.member.barcodeToken,
         memberCode: d1Claim.barcodeToken || res.member.memberCode || res.member.barcodeToken,
@@ -527,7 +614,7 @@ export const PublicHubView: React.FC = () => {
 
       setJoinedMember(mergedMember);
       setRecognizedAccount(res.account);
-      setNewlyStampedSlot(mergedMember.stamps || 1);
+      setNewlyStampedSlot(null);
       setStep('active');
       showToast(`¡Sumaste la tarjeta de ${hub.business.name} a tu cuenta!`, 'success');
     } catch (err: any) {
@@ -654,13 +741,15 @@ export const PublicHubView: React.FC = () => {
 
         const mergedMember: ClubMember = {
           ...reg.member,
+          stamps: d1Claim.stamps ?? reg.member.stamps ?? 0,
+          stampsRequired: 10,
           barcodeToken: d1Claim.barcodeToken || reg.member.barcodeToken || reg.member.shortCode,
           shortCode: d1Claim.barcodeToken || reg.member.shortCode || reg.member.barcodeToken,
           memberCode: d1Claim.barcodeToken || reg.member.memberCode || reg.member.barcodeToken,
         };
 
         setJoinedMember(mergedMember);
-        setNewlyStampedSlot(mergedMember.stamps || 1);
+        setNewlyStampedSlot(null);
         setStep('active');
         showToast('¡Listo! Ya tenés tu tarjeta activa.', 'success');
       } catch (err: any) {
@@ -719,15 +808,20 @@ export const PublicHubView: React.FC = () => {
         const res = await api.addCardToAccount({
           localCode: hub?.cartel.code || targetCode,
           marketingConsent,
+          email: cleanEmail,
+          name: name.trim(),
+          barcodeToken: d1Claim.barcodeToken,
         });
         const mergedMember: ClubMember = {
           ...res.member,
+          stamps: d1Claim.stamps ?? res.member.stamps ?? 0,
+          stampsRequired: 10,
           barcodeToken: d1Claim.barcodeToken || res.member.barcodeToken || res.member.shortCode,
           shortCode: d1Claim.barcodeToken || res.member.shortCode || res.member.barcodeToken,
           memberCode: d1Claim.barcodeToken || res.member.memberCode || res.member.barcodeToken,
         };
         setJoinedMember(mergedMember);
-        setNewlyStampedSlot(mergedMember.stamps || 1);
+        setNewlyStampedSlot(null);
         setStep('active');
         showToast(`¡Hola, ${mergedMember.name || 'Socio'}! Ya tenés tu tarjeta activa.`, 'success');
         return;
@@ -745,15 +839,17 @@ export const PublicHubView: React.FC = () => {
 
       const mergedMember: ClubMember = {
         ...reg.member,
+        stamps: d1Claim.stamps ?? reg.member.stamps ?? 0,
+        stampsRequired: 10,
         barcodeToken: d1Claim.barcodeToken || reg.member.barcodeToken || reg.member.shortCode,
         shortCode: d1Claim.barcodeToken || reg.member.shortCode || reg.member.barcodeToken,
         memberCode: d1Claim.barcodeToken || reg.member.memberCode || reg.member.barcodeToken,
       };
 
       setJoinedMember(mergedMember);
-      setNewlyStampedSlot(mergedMember.stamps || 1);
+      setNewlyStampedSlot(null);
       setStep('active');
-      showToast('¡Correo verificado! Ya tenés tu 1° sello cargado en la tarjeta.', 'success');
+      showToast('¡Correo verificado! Ya tenés tu tarjeta activa.', 'success');
     } catch (err: any) {
       setFormError(err?.message || 'Código inválido o vencido.');
     } finally {

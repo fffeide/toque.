@@ -178,7 +178,7 @@ export const WalletPassCard: React.FC<WalletPassCardProps> = ({
       {/* Centro (primaryFields): Sellos */}
       <div className="mb-4">
         <div className="text-xs font-medium text-white/70 mb-1">
-          Sellos: {stamps} de {stampsRequired}
+          Sellos: {stamps} / {stampsRequired}
         </div>
         <div className="text-3xl sm:text-4xl font-bold text-white tracking-tight leading-none">
           {stamps} / {stampsRequired}

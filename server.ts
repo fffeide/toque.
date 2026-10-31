@@ -325,6 +325,37 @@ async function startServer() {
       return;
     }
 
+    // 1a. Endpoint administrativo de saneamiento: POST /api/debug/clean-orphans
+    if (
+      pathname === '/api/debug/clean-orphans' &&
+      (req.method === 'POST' || req.method === 'GET')
+    ) {
+      for (const [key, cfg] of memoryMerchantHubConfigs.entries()) {
+        if (!key || !cfg || !cfg.tenantId) {
+          memoryMerchantHubConfigs.delete(key);
+        }
+      }
+      for (const [mail, list] of memoryConsumerCards.entries()) {
+        const seenTenants = new Set<string>();
+        const cleanList = (list || []).filter((c: any) => {
+          const tId = String(c?.businessId || c?.tenantId || '').trim();
+          if (!tId || seenTenants.has(tId)) return false;
+          seenTenants.add(tId);
+          return true;
+        });
+        memoryConsumerCards.set(mail, cleanList);
+      }
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(
+        JSON.stringify({
+          success: true,
+          cleaned: true,
+          message: 'Datos mezclados y registros huérfanos depurados correctamente.',
+        })
+      );
+      return;
+    }
+
     // 1b. Sesiones de comercio/admin (/api/auth/me, /api/auth/login, /api/auth/register, /api/auth/logout)
     if (pathname === '/api/auth/me' && req.method === 'GET') {
       const token = extractSessionTokenFromReq(req);
@@ -383,21 +414,82 @@ async function startServer() {
       return;
     }
 
-    // 1c. Reclamo de tarjeta del cliente en el Hub: POST /api/consumer/cards/claim (siempre devuelve 200 OK con barcode_token de 8 dígitos)
+    // 1c. Reclamo de tarjeta del cliente en el Hub: POST /api/consumer/cards/claim (siempre devuelve 200 OK con barcode_token de 8 dígitos y stamps = 0 si es nueva)
     if (pathname === '/api/consumer/cards/claim' && req.method === 'POST') {
       try {
         const raw = await readBody(req);
         const body = raw ? JSON.parse(raw) : {};
         const tenantId = String(body.tenantId || body.businessId || 'musical-monroe').trim();
-        const businessName = String(body.businessName || 'Comercio adherido').trim();
-        const cleanEmail = String(body.email || body.contact || '').trim().toLowerCase();
-        const fullName = String(body.fullName || body.name || 'Cliente').trim();
+        const liveCfg = memoryMerchantHubConfigs.get(tenantId);
+
+        const incomingToken = extractSessionTokenFromReq(req);
+        let userRecord = incomingToken ? memoryConsumerByToken.get(incomingToken) : null;
+        let cleanEmail = String(body.email || body.contact || userRecord?.email || '')
+          .trim()
+          .toLowerCase();
+        let consumerId = String(body.consumerId || userRecord?.id || '').trim();
+
+        if (!userRecord && cleanEmail) {
+          userRecord = memoryConsumerUsers.get(cleanEmail) || null;
+        }
+        if (!userRecord && consumerId) {
+          userRecord = memoryConsumerUsers.get(consumerId) || null;
+        }
+
+        const fullName = String(
+          body.fullName || body.name || userRecord?.fullName || userRecord?.displayName || cleanEmail.split('@')[0] || 'Socio'
+        ).trim();
+        const birthDate = String(body.birthDate || userRecord?.birthDate || '').trim() || undefined;
+        const sessionToken =
+          userRecord?.sessionToken ||
+          incomingToken ||
+          `${crypto.randomUUID()}${crypto.randomUUID()}`.replace(/-/g, '');
+
+        if (!consumerId) {
+          consumerId = userRecord?.id || `usr-${crypto.randomUUID().slice(0, 12)}`;
+        }
+        if (!cleanEmail) {
+          cleanEmail = `socio-${consumerId.slice(-6)}@toque.com.ar`;
+        }
+
+        const updatedUser = {
+          ...(userRecord || {}),
+          id: consumerId,
+          email: cleanEmail,
+          emailOrPhone: cleanEmail,
+          fullName,
+          displayName: fullName,
+          birthDate,
+          sessionToken,
+          ageGroup: 'adult',
+          consentSaveReceipts: true,
+          consentMarketingNetwork: true,
+          createdAt: userRecord?.createdAt || new Date().toISOString(),
+        };
+        memoryConsumerUsers.set(consumerId, updatedUser);
+        memoryConsumerUsers.set(cleanEmail, updatedUser);
+        memoryConsumerByToken.set(sessionToken, updatedUser);
+
+        const businessName = String(
+          liveCfg?.businessName || body.businessName || 'Musical Monroe'
+        ).trim();
         const stampsRequired = 10;
-        const rewardText = String(body.rewardText || 'Beneficio al completar tus sellos').trim();
+        const rewardText = String(
+          liveCfg?.rewardText || body.rewardText || 'Beneficio al completar tus 10 sellos'
+        ).trim();
+        const brandColor = String(
+          liveCfg?.brandColor || body.brandColor || '#D95B26'
+        ).trim();
+        const colorPreset = String(
+          liveCfg?.colorPreset || body.colorPreset || 'dark'
+        ).trim();
+        const logoUrl = liveCfg?.logoUrl || body.logoUrl || undefined;
         const nowIso = new Date().toISOString();
 
-        const existingList = cleanEmail ? memoryConsumerCards.get(cleanEmail) || [] : [];
-        let foundCard = existingList.find((c: any) => c.businessId === tenantId);
+        const existingList = memoryConsumerCards.get(cleanEmail) || [];
+        let foundCard = existingList.find(
+          (c: any) => c.businessId === tenantId || c.tenantId === tenantId
+        );
 
         if (!foundCard) {
           const barcodeToken =
@@ -405,33 +497,54 @@ async function startServer() {
           foundCard = {
             id: `mem-${crypto.randomUUID().slice(0, 8)}`,
             businessId: tenantId,
+            tenantId,
             businessName,
             name: fullName,
             email: cleanEmail,
             contact: cleanEmail,
-            stamps: 1,
-            points: 1,
+            stamps: 0,
+            points: 0,
             stampsRequired,
             targetStamps: stampsRequired,
             rewardText,
+            brandColor,
+            colorPreset,
+            logoUrl,
             barcodeToken,
             shortCode: barcodeToken,
             memberCode: barcodeToken,
-            lastStampedAt: nowIso,
+            lastStampedAt: null,
             joinedAt: nowIso,
             consent: true,
           };
-          if (cleanEmail) {
-            memoryConsumerCards.set(cleanEmail, [foundCard, ...existingList]);
-          }
+          memoryConsumerCards.set(cleanEmail, [foundCard, ...existingList]);
+        } else {
+          foundCard.businessName = businessName;
+          foundCard.rewardText = rewardText;
+          foundCard.brandColor = brandColor;
+          foundCard.colorPreset = colorPreset;
+          foundCard.logoUrl = logoUrl || foundCard.logoUrl;
+          foundCard.stampsRequired = 10;
+          foundCard.targetStamps = 10;
         }
 
-        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.writeHead(200, {
+          'Content-Type': 'application/json; charset=utf-8',
+          'Set-Cookie': `toque_session=${sessionToken}; Path=/; Max-Age=31536000; SameSite=Lax`,
+        });
         res.end(
           JSON.stringify({
             success: true,
             card: foundCard,
+            member: foundCard,
             barcodeToken: foundCard.barcodeToken,
+            sessionToken,
+            user: {
+              id: consumerId,
+              email: cleanEmail,
+              fullName,
+              birthDate,
+            },
           })
         );
         return;
@@ -448,6 +561,17 @@ async function startServer() {
         const tenantId = (url.searchParams.get('tenantId') || url.searchParams.get('businessId') || '').trim();
         if (tenantId) {
           memoryMerchantHubConfigs.delete(tenantId);
+          for (const [mail, cards] of memoryConsumerCards.entries()) {
+            memoryConsumerCards.set(
+              mail,
+              (cards || []).filter((c: any) => c.businessId !== tenantId && c.tenantId !== tenantId)
+            );
+          }
+          for (const [serial, pass] of memoryWalletPasses.entries()) {
+            if (pass.businessId === tenantId) {
+              memoryWalletPasses.delete(serial);
+            }
+          }
         }
         res.writeHead(200, {
           'Content-Type': 'application/json; charset=utf-8',
@@ -735,8 +859,15 @@ async function startServer() {
       return;
     }
 
-    // 4. Sincronización de diseño del Hub y actualización en segundo plano de tarjetas Wallet: PUT /api/merchant/hub-config
-    if (pathname === '/api/merchant/hub-config' && req.method === 'PUT') {
+    // 4. Sincronización de diseño del Hub y Tarjetas en tiempo real:
+    // PUT /api/merchant/hub-config, PUT /api/merchant/hub, POST/PUT /api/merchant/cards
+    if (
+      (pathname === '/api/merchant/hub-config' ||
+        pathname === '/api/merchant/hub' ||
+        pathname === '/api/merchant/cards' ||
+        pathname === '/api/club/cards') &&
+      (req.method === 'PUT' || req.method === 'POST')
+    ) {
       try {
         const raw = await readBody(req);
         const body = raw ? JSON.parse(raw) : {};
@@ -748,12 +879,12 @@ async function startServer() {
           ? body.colorPreset
           : 'dark';
         const brandColor = String(body.customColor || body.brandColor || '#D95B26').trim();
-        const stampsRequired = Math.max(1, Number(body.stampsRequired || 10));
+        const stampsRequired = 10;
         const rewardText = String(
-          body.rewardText || 'Beneficio al completar tus sellos'
+          body.rewardText || body.reward || 'Beneficio al completar tus 10 sellos'
         )
           .trim()
-          .slice(0, 60);
+          .slice(0, 80);
         const rewardValueArs = Math.max(0, Number(body.rewardValueArs || 0));
 
         const cfgRecord = {
@@ -761,6 +892,7 @@ async function startServer() {
           businessName,
           logoUrl,
           brandColor,
+          customColor: brandColor,
           colorPreset,
           stampsRequired,
           rewardText,
@@ -768,6 +900,28 @@ async function startServer() {
           updatedAt: new Date().toISOString(),
         };
         memoryMerchantHubConfigs.set(tenantId, cfgRecord);
+
+        // Actualizar también todas las tarjetas ya emitidas para este comercio en memoria
+        for (const [mail, cards] of memoryConsumerCards.entries()) {
+          const updatedCards = (cards || []).map((c: any) => {
+            if (c.businessId === tenantId || c.tenantId === tenantId) {
+              return {
+                ...c,
+                businessName,
+                rewardText,
+                rewardValueArs,
+                brandColor,
+                customColor: brandColor,
+                colorPreset,
+                logoUrl: logoUrl || c.logoUrl,
+                stampsRequired: 10,
+                targetStamps: 10,
+              };
+            }
+            return c;
+          });
+          memoryConsumerCards.set(mail, updatedCards);
+        }
 
         const apiKey = (
           process.env.WALLETWALLET_API_KEY || 'ww_live_0a1b9cf29dcd4f7ceb3a5023d0e49de2'
@@ -801,11 +955,67 @@ async function startServer() {
         }
 
         res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(JSON.stringify({ success: true, config: cfgRecord }));
+        res.end(
+          JSON.stringify({
+            success: true,
+            config: cfgRecord,
+            card: {
+              id: `card-${tenantId}`,
+              businessId: tenantId,
+              businessName,
+              targetStamps: 10,
+              stampsRequired: 10,
+              reward: rewardText,
+              rewardText,
+              rewardValueArs,
+              brandColor,
+              colorPreset,
+              logoUrl,
+              active: true,
+            },
+          })
+        );
         return;
       } catch (err: any) {
         res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
         res.end(JSON.stringify({ success: false, error: err?.message }));
+        return;
+      }
+    }
+
+    // 4b. Lectura pública en tiempo real sin caché: GET /api/public/hub/:code
+    if (pathname.startsWith('/api/public/hub/') && req.method === 'GET') {
+      const subPath = pathname.replace('/api/public/hub/', '').trim();
+      if (subPath && subPath !== 'receipt-check') {
+        const rawCode = decodeURIComponent(subPath.split('/')[0] || '').trim();
+        const codeUpper = rawCode.toUpperCase();
+        const codeLower = rawCode.toLowerCase();
+
+        let liveCfg =
+          memoryMerchantHubConfigs.get(codeLower) ||
+          memoryMerchantHubConfigs.get('musical-monroe') ||
+          Array.from(memoryMerchantHubConfigs.values())[0] ||
+          null;
+
+        res.writeHead(200, {
+          'Content-Type': 'application/json; charset=utf-8',
+          'Cache-Control': 'no-store, no-cache, must-revalidate',
+        });
+        res.end(
+          JSON.stringify({
+            found: Boolean(liveCfg),
+            tenantId: liveCfg?.tenantId || 'musical-monroe',
+            code: codeUpper || 'MONROE01',
+            businessName: liveCfg?.businessName || undefined,
+            logoUrl: liveCfg?.logoUrl || undefined,
+            brandColor: liveCfg?.brandColor || undefined,
+            colorPreset: liveCfg?.colorPreset || undefined,
+            customColor: liveCfg?.customColor || liveCfg?.brandColor || undefined,
+            stampsRequired: 10,
+            rewardText: liveCfg?.rewardText || undefined,
+            rewardValueArs: liveCfg?.rewardValueArs ?? undefined,
+          })
+        );
         return;
       }
     }
@@ -1270,12 +1480,42 @@ async function startServer() {
           }
         }
 
+        // Actualizar también la tarjeta del cliente en memoryConsumerCards por su barcodeToken de 8 dígitos
+        let resolvedNextStamps = nextStamps;
+        for (const [mail, cards] of memoryConsumerCards.entries()) {
+          const updatedCards = (cards || []).map((c: any) => {
+            const cCode = String(c.barcodeToken || c.shortCode || c.memberCode || '')
+              .replace(/[\s-]/g, '')
+              .toUpperCase();
+            if (
+              (barcodeToken && cCode === barcodeToken) ||
+              (rawToken && cCode === rawToken.replace(/[\s-]/g, '').toUpperCase()) ||
+              (body.memberId && c.id === body.memberId)
+            ) {
+              resolvedNextStamps =
+                typeof body.stamps === 'number'
+                  ? body.stamps + 1
+                  : Number(c.stamps || 0) + 1;
+              return {
+                ...c,
+                stamps: resolvedNextStamps,
+                points: resolvedNextStamps,
+                stampsRequired: 10,
+                targetStamps: 10,
+                lastStampedAt: nowIso,
+              };
+            }
+            return c;
+          });
+          memoryConsumerCards.set(mail, updatedCards);
+        }
+
         res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
         res.end(
           JSON.stringify({
             status: 'stamped',
             cooldown: false,
-            stamps: nextStamps,
+            stamps: resolvedNextStamps,
             stampsRequired,
             lastStampedAt: nowIso,
             barcodeToken,
