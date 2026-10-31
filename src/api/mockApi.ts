@@ -563,6 +563,11 @@ class MockApi implements ToqueApi {
   private reviewClicks = 0;
   private walletPassesIssuedTotal = 1;
 
+  private lastStampedByBusiness = new Map<
+    string,
+    { memberId: string; accountId?: string; email?: string; stampedAtMs: number }
+  >();
+
   constructor() {
     this.loadPersistedState();
     const bizId = this.getActiveBusinessId();
@@ -570,7 +575,8 @@ class MockApi implements ToqueApi {
       this.businessClubConfigs.set(bizId, { ...this.clubConfig });
     }
     if (!this.businessClubCards.has(bizId)) {
-      this.businessClubCards.set(bizId, [{ ...this.clubConfig }]);
+      // El comercio demo inicial tiene 1 tarjeta; los comercios nuevos nacen con 0 tarjetas ([])
+      this.businessClubCards.set(bizId, bizId === 'musical-monroe' ? [{ ...this.clubConfig }] : []);
     }
     if (!this.businessHubConfigs.has(bizId)) {
       this.businessHubConfigs.set(bizId, { ...this.hubConfig });
@@ -594,6 +600,17 @@ class MockApi implements ToqueApi {
   private loadPersistedState(): void {
     if (typeof window === 'undefined') return;
     try {
+      // Restaurar usuario comercio sincrónicamente desde localStorage si existe
+      if (!this.currentUser) {
+        const savedMerchantUser = window.localStorage.getItem('toque_merchant_user');
+        if (savedMerchantUser) {
+          const parsedUser = JSON.parse(savedMerchantUser);
+          if (parsedUser && parsedUser.email) {
+            this.currentUser = parsedUser;
+          }
+        }
+      }
+
       const clubRaw = window.sessionStorage.getItem('toque_unified_club_v2');
       if (clubRaw) {
         const parsed = JSON.parse(clubRaw);
@@ -629,7 +646,7 @@ class MockApi implements ToqueApi {
         }
       }
 
-      // Restaurar sesión activa del navegador si existe en toque_session
+      // Restaurar sesión activa del cliente si existe en toque_consumer_user / toque_session
       const persistedEmail = getConsumerSessionEmail();
       if (persistedEmail && !this.recognizedClient) {
         const existingAcc = this.clientAccountsByEmail.get(persistedEmail);
@@ -682,6 +699,9 @@ class MockApi implements ToqueApi {
         }
         if (parsed.planState) {
           this.planState = parsed.planState;
+        }
+        if (Array.isArray(parsed.businessClubCardsEntries)) {
+          this.businessClubCards = new Map(parsed.businessClubCardsEntries);
         }
         const bizId = this.businessProfile.id || 'musical-monroe';
         this.businesses.set(bizId, { ...this.businessProfile });
@@ -739,6 +759,7 @@ class MockApi implements ToqueApi {
           clubConfig: this.clubConfig,
           hubConfig: this.hubConfig,
           planState: this.planState,
+          businessClubCardsEntries: Array.from(this.businessClubCards.entries()),
         })
       );
     } catch {
@@ -772,14 +793,15 @@ class MockApi implements ToqueApi {
     const bizId = this.getActiveBusinessId();
     this.businesses.set(bizId, { ...this.businessProfile });
     this.businessClubConfigs.set(bizId, { ...this.clubConfig });
-    const existingCards = this.businessClubCards.get(bizId) || [{ ...this.clubConfig }];
-    const activeId = this.clubConfig.id || existingCards[0]?.id || 'card-default-1';
-    this.clubConfig.id = activeId;
-    const cardIdx = existingCards.findIndex((c) => c.id === activeId);
-    if (cardIdx !== -1) {
-      existingCards[cardIdx] = { ...this.clubConfig };
-    } else {
-      existingCards.unshift({ ...this.clubConfig });
+    const existingCards = this.businessClubCards.has(bizId)
+      ? [...(this.businessClubCards.get(bizId) || [])]
+      : bizId === 'musical-monroe'
+      ? [{ ...this.clubConfig }]
+      : [];
+    if (existingCards.length > 0) {
+      const activeId = this.clubConfig.id || existingCards[0]?.id || 'card-default-1';
+      this.clubConfig.id = activeId;
+      existingCards[0] = { ...this.clubConfig };
     }
     this.businessClubCards.set(bizId, existingCards);
     this.businessHubConfigs.set(bizId, { ...this.hubConfig });
@@ -1235,17 +1257,17 @@ class MockApi implements ToqueApi {
       loyaltyTitle: `Tarjeta de sellos de ${cleanBizName}`,
       brandColor: '#141418',
       cardThemeColor: '#141418',
-      targetStamps: 5,
-      stampsRequired: 5,
-      rewardText: 'Beneficio exclusivo en tu próxima visita',
-      loyaltyReward: 'Beneficio exclusivo en tu próxima visita',
+      targetStamps: 10,
+      stampsRequired: 10,
+      rewardText: 'Beneficio exclusivo al completar tus 10 sellos',
+      loyaltyReward: 'Beneficio exclusivo al completar tus 10 sellos',
       howToEarn: '1 sello por visita o compra',
       expirationPolicy: 'No vencen',
       rewards: [
         {
           id: `rew-${Date.now().toString(36)}`,
-          label: 'Beneficio exclusivo en tu próxima visita',
-          target: 5,
+          label: 'Beneficio exclusivo al completar tus 10 sellos',
+          target: 10,
         },
       ],
     };
@@ -1266,7 +1288,8 @@ class MockApi implements ToqueApi {
       },
     };
 
-    this.businessClubCards.set(bizId, [{ ...this.clubConfig }]);
+    // Cero tarjetas pre-creadas por defecto para todo comercio nuevo
+    this.businessClubCards.set(bizId, []);
     this.syncActiveBusinessStore();
 
     const user: User = {
@@ -1320,6 +1343,7 @@ class MockApi implements ToqueApi {
   }
 
   async getCurrentUser(): Promise<User | null> {
+    this.loadPersistedState();
     return this.currentUser;
   }
 
@@ -1364,6 +1388,13 @@ class MockApi implements ToqueApi {
 
   async deleteAccount(): Promise<{ deleted: boolean }> {
     const bizId = this.getActiveBusinessId();
+    try {
+      await fetch(`/api/merchant/account?tenantId=${encodeURIComponent(bizId)}`, {
+        method: 'DELETE',
+      });
+    } catch {
+      // ignore network error
+    }
     this.businesses.delete(bizId);
     this.businessClubConfigs.delete(bizId);
     this.businessClubCards.delete(bizId);
@@ -1375,6 +1406,14 @@ class MockApi implements ToqueApi {
     this.sales = this.sales.filter((s) => s.businessId !== bizId);
     this.receipts = this.receipts.filter((r) => r.businessId !== bizId);
     this.currentUser = null;
+    if (typeof window !== 'undefined') {
+      try {
+        window.sessionStorage.clear();
+        window.localStorage.clear();
+      } catch {
+        // ignore
+      }
+    }
 
     return { deleted: true };
   }
@@ -2224,6 +2263,15 @@ class MockApi implements ToqueApi {
     };
     this.toquecitos.unshift(toquecito);
 
+    // Registrar último cliente sellado en caja para vincular automáticamente el comprobante si se emite en los próximos 2 minutos
+    const stampedBizId = member.businessId || this.businessProfile.id;
+    this.lastStampedByBusiness.set(stampedBizId, {
+      memberId: member.id,
+      accountId: member.accountId || member.id,
+      email: this.memberRawEmails[member.id] || member.email,
+      stampedAtMs: Date.now(),
+    });
+
     this.persistClubData();
     await this.syncMemberPassOnServer(member);
 
@@ -2966,8 +3014,9 @@ class MockApi implements ToqueApi {
   }
 
   async listClubCards(): Promise<ClubConfig[]> {
+    this.loadPersistedState();
     const bizId = this.getActiveBusinessId();
-    const cards = this.businessClubCards.get(bizId) || [{ ...this.clubConfig }];
+    const cards = this.businessClubCards.get(bizId) ?? [];
     return cards.map((c) => ({ ...c }));
   }
 
@@ -2994,23 +3043,20 @@ class MockApi implements ToqueApi {
     primaryFields?: Array<{ label: string; value: string }>;
     secondaryFields?: Array<{ label: string; value: string }>;
   }): Promise<ClubConfig> {
+    this.loadPersistedState();
     const bizId = this.getActiveBusinessId();
-    const currentCards = this.businessClubCards.get(bizId) || [{ ...this.clubConfig }];
-    const limits = getPlanLimits(this.planState.planId);
+    const currentCards = this.businessClubCards.get(bizId) ?? [];
 
-    if (currentCards.length >= limits.maxCards) {
+    if (currentCards.length >= 1) {
       throw new Error(
-        `Tu plan actual permite hasta ${limits.maxCards} tarjeta(s). Pasate a un plan superior para crear más tarjetas.`
+        'Tenés 1 tarjeta activa en tu local. Si necesitás crear más de una tarjeta, ponete en contacto con nosotros'
       );
     }
 
     const rawTitle = (data.loyaltyTitle || data.name || data.logoText || '').trim();
-    const cleanName = rawTitle || `Tarjeta #${currentCards.length + 1}`;
-    const cleanReward = data.rewardText.trim() || 'Beneficio al completar tus sellos';
-    const targetStamps = Math.max(
-      3,
-      Math.min(20, Number(data.targetStamps ?? data.stampsRequired) || 10)
-    );
+    const cleanName = rawTitle || `Tarjeta de sellos de ${this.businessProfile.name}`;
+    const cleanReward = data.rewardText.trim() || 'Beneficio al completar tus 10 sellos';
+    const targetStamps = 10;
     const color = data.customColor || data.brandColor || '#141418';
 
     const newCard: ClubConfig = {
@@ -3053,11 +3099,25 @@ class MockApi implements ToqueApi {
       active: true,
     };
 
-    const nextCards = [...currentCards, newCard];
+    const nextCards = [newCard];
     this.businessClubCards.set(bizId, nextCards);
     this.clubConfig = { ...newCard };
     this.syncActiveBusinessStore();
     this.notifyHubListeners();
+
+    fetch('/api/merchant/cards', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        tenantId: bizId,
+        businessName: this.businessProfile.name,
+        rewardText: cleanReward,
+        brandColor: color,
+        colorPreset: newCard.colorPreset,
+        logoUrl: newCard.logoUrl,
+      }),
+    }).catch(() => {});
+
     return { ...newCard };
   }
 
@@ -3803,23 +3863,27 @@ class MockApi implements ToqueApi {
     if (cartel.activeReceiptId) {
       const found = this.receipts.find((r) => r.id === cartel.activeReceiptId);
       if (found && found.status !== 'cancelled') {
-        const expMs = new Date(found.expiresAt).getTime();
-        const withinWindow = !Number.isNaN(expMs) && Date.now() - expMs < 300000;
-        if (withinWindow) {
-          if (!found.claimedByDeviceId) {
+        const currentAccId = this.recognizedClient?.accountId;
+        // a) Ya está asignado directamente al cliente (ej. porque acaba de sumar sello en caja)
+        const isAssignedToMe =
+          Boolean(currentAccId && found.claimedByAccountId === currentAccId) ||
+          found.claimedByDeviceId === deviceToken;
+
+        if (isAssignedToMe) {
+          activeReceipt = found;
+        } else {
+          // b) Emitido hace menos de 90 segundos y claimed_by es NULL
+          const expMs = new Date(found.expiresAt).getTime();
+          const isWithin90s = !Number.isNaN(expMs) && Date.now() <= expMs;
+          const isUnclaimed = !found.claimedByDeviceId && !found.claimedByAccountId;
+          if (isWithin90s && isUnclaimed) {
             found.claimedByDeviceId = deviceToken;
             found.status = 'claimed';
             found.claimedAt = new Date().toISOString();
-            if (this.recognizedClient?.accountId) {
-              found.claimedByAccountId = this.recognizedClient.accountId;
+            if (currentAccId) {
+              found.claimedByAccountId = currentAccId;
             }
             this.persistPosData();
-          }
-          if (
-            found.claimedByDeviceId === deviceToken ||
-            (this.recognizedClient?.accountId &&
-              found.claimedByAccountId === this.recognizedClient.accountId)
-          ) {
             activeReceipt = found;
           }
         }
@@ -4283,13 +4347,26 @@ class MockApi implements ToqueApi {
     };
     this.sales.unshift(sale);
 
+    const nowMs = Date.now();
+    const recentStamp = this.lastStampedByBusiness.get(this.businessProfile.id);
+    const hasRecentStamp =
+      recentStamp && nowMs - recentStamp.stampedAtMs <= 120000; // 2 minutos
+
+    let directAccountId: string | undefined;
+    if (hasRecentStamp && recentStamp) {
+      directAccountId = recentStamp.accountId || recentStamp.memberId;
+      this.lastStampedByBusiness.delete(this.businessProfile.id);
+    }
+
     const receipt: Receipt = {
       id: receiptId,
       saleId: sale.id,
       businessId: sale.businessId,
       cartelCode: cartel.code,
-      status: 'ready',
-      expiresAt: new Date(Date.now() + 120000).toISOString(),
+      status: directAccountId ? 'claimed' : 'ready',
+      expiresAt: new Date(nowMs + 90000).toISOString(), // 90 segundos de validez
+      claimedByAccountId: directAccountId,
+      claimedAt: directAccountId ? nowIso : undefined,
       businessName: this.businessProfile.name,
       businessAddress: configuredAddress,
       businessHours: configuredHours,
@@ -4305,6 +4382,23 @@ class MockApi implements ToqueApi {
     this.receipts.unshift(receipt);
     cartel.activeReceiptId = receipt.id;
     cartel.activeReceiptExpiresAt = receipt.expiresAt;
+
+    fetch('/api/merchant/pos-sale', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        tenantId: sale.businessId,
+        localCode: cartel.code,
+        merchantName: this.businessProfile.name,
+        amountArs: sale.amount,
+        discountSavedArs: sale.discountArs || 0,
+        paymentMethod: sale.method,
+        cashReceivedArs: sale.cashTendered,
+        changeArs: sale.changeDue,
+        items: sale.items,
+        consumerId: directAccountId,
+      }),
+    }).catch(() => {});
 
     this.notifySalesListeners();
     this.notifyHubListeners(cartel.code);

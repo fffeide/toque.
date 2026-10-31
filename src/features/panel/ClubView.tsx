@@ -179,7 +179,7 @@ export const ClubView: React.FC = () => {
         api.getDashboardSummary('all').catch(() => null),
       ]);
       setConfig(cfg);
-      setCards(allCards.length > 0 ? allCards : [cfg]);
+      setCards(allCards);
       setMembers(mems);
       setLocals(locs);
       setPlanState(plan);
@@ -203,7 +203,7 @@ export const ClubView: React.FC = () => {
   }, [activeTab, loading]);
 
   const planLimits = getPlanLimits(planState?.planId || planState?.status);
-  const canCreateMoreCards = cards.length < planLimits.maxCards;
+  const canCreateMoreCards = cards.length < 1;
 
   const activeCartelCode = locals[0]?.code || 'MONROE01';
   const publicHubUrl =
@@ -340,23 +340,37 @@ export const ClubView: React.FC = () => {
 
   const handleCreateCard = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newCardTitle.trim() || !newCardReward.trim()) return;
+    if (!newCardReward.trim()) {
+      showToast('Escribí cuál es el premio al completar los 10 sellos', 'error');
+      return;
+    }
+    if (cards.length >= 1) {
+      showToast(
+        'Tenés 1 tarjeta activa en tu local. Si necesitás crear más de una tarjeta, ponete en contacto con nosotros',
+        'error'
+      );
+      return;
+    }
     try {
       setCreatingCard(true);
       const presetColorHex = PRESET_HEX_MAP[newCardPreset] || '#141418';
       const cleanOrg = business?.name || 'Mi Comercio';
-      const primary = [{ label: 'Sellos', value: `1 / ${newCardStamps}` }];
+      const resolvedTitle =
+        newCardTitle.trim() || `Tarjeta de sellos de ${cleanOrg}`;
+      const fixedStamps = 10;
+      const primary = [{ label: 'Sellos', value: `1 / ${fixedStamps}` }];
       const secondary = [
         { label: 'Premio', value: newCardReward.trim() },
         { label: 'Cliente', value: cleanOrg },
       ];
 
       const created = await api.createClubCard({
-        loyaltyTitle: newCardTitle.trim(),
-        logoText: newCardTitle.trim(),
+        loyaltyTitle: resolvedTitle,
+        logoText: resolvedTitle,
         organizationName: cleanOrg,
         rewardText: newCardReward.trim(),
-        stampsRequired: newCardStamps,
+        stampsRequired: fixedStamps,
+        targetStamps: fixedStamps,
         brandColor: presetColorHex,
         colorPreset: newCardPreset,
         barcodeFormat: 'CODE128',
@@ -371,8 +385,8 @@ export const ClubView: React.FC = () => {
           memberCode: '48291037',
           customerName: cleanOrg,
           stamps: 1,
-          stampsRequired: newCardStamps,
-          logoText: newCardTitle.trim(),
+          stampsRequired: fixedStamps,
+          logoText: resolvedTitle,
           organizationName: cleanOrg,
           rewardText: newCardReward.trim(),
           barcodeFormat: 'CODE128',
@@ -394,13 +408,13 @@ export const ClubView: React.FC = () => {
       setActiveTab('diseno');
 
       setCompletedCardResult({
-        cardTitle: created.loyaltyTitle || newCardTitle.trim(),
+        cardTitle: created.loyaltyTitle || resolvedTitle,
         hubLink: publicHubUrl,
         walletShareUrl: passRes?.shareUrl || passRes?.appleWalletUrl,
         serialNumber: passRes?.serialNumber || passRes?.passId,
       });
 
-      showToast('Tarjeta creada. Compartí el QR o el link con tus clientes.', 'success');
+      showToast('Tarjeta creada con éxito', 'success');
     } catch (err: any) {
       showToast(err?.message || 'No se pudo crear la tarjeta', 'error');
     } finally {
@@ -683,91 +697,75 @@ export const ClubView: React.FC = () => {
         </div>
       </div>
 
-      {/* Barra de Tarjetas Activas + Botón directo para ver QR / Link */}
+      {/* Barra de Tarjetas Activas (0 tarjetas por defecto, máximo 1 tarjeta por comercio) */}
       {!isCashier && (
-        <div className="rounded-2xl bg-[#141418] border border-[#282830] p-4 flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-xs font-bold text-[#9E9EA8] mr-1">Tarjetas del comercio:</span>
-            {cards.map((c, idx) => {
-              const isSelected = c.id === config?.id || (!c.id && idx === 0);
-              return (
-                <div
-                  key={c.id || idx}
-                  className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs font-bold transition-colors ${
-                    isSelected
-                      ? 'bg-[#D95B26]/15 border-[#D95B26] text-[#F4F4F6]'
-                      : 'bg-[#0C0C0E] border-[#282830] text-[#9E9EA8] hover:text-white'
-                  }`}
+        <div className="rounded-2xl bg-[#141418] border border-[#282830] p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          {cards.length === 0 ? (
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 w-full">
+              <div>
+                <p className="text-sm font-bold text-[#F4F4F6]">
+                  Todavía no creaste la tarjeta de sellos de tu local
+                </p>
+                <p className="text-xs text-[#9E9EA8] mt-0.5">
+                  Creá tu tarjeta con objetivo de 10 sellos y definí el premio para tus clientes.
+                </p>
+              </div>
+              {isOwner && (
+                <button
+                  type="button"
+                  onClick={() => setShowNewCardModal(true)}
+                  className="inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl bg-[#D95B26] hover:bg-[#e56732] text-xs font-bold text-white cursor-pointer shrink-0"
                 >
-                  <button
-                    type="button"
-                    onClick={() => c.id && handleSelectCard(c.id)}
-                    className="flex items-center gap-1.5 cursor-pointer"
-                  >
-                    <span
-                      className="w-2.5 h-2.5 rounded-full shrink-0"
-                      style={{ backgroundColor: c.cardThemeColor || c.brandColor || '#D95B26' }}
-                    />
-                    <span>{c.loyaltyTitle || `Tarjeta #${idx + 1}`}</span>
-                  </button>
-                  {isOwner && cards.length > 1 && c.id && (
-                    <button
-                      type="button"
-                      onClick={() => handleDeleteCard(c.id!)}
-                      className="text-[#9E9EA8] hover:text-[#f87171] ml-1 cursor-pointer"
-                      title="Eliminar tarjeta"
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>Crear tarjeta</span>
+                </button>
+              )}
+            </div>
+          ) : (
+            <>
+              <div className="space-y-1">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-xs font-bold text-[#9E9EA8] mr-1">Tarjeta activa:</span>
+                  {cards.slice(0, 1).map((c, idx) => (
+                    <div
+                      key={c.id || idx}
+                      className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl border bg-[#D95B26]/15 border-[#D95B26] text-xs font-bold text-[#F4F4F6]"
                     >
-                      <Trash2 className="w-3 h-3" />
-                    </button>
-                  )}
+                      <span
+                        className="w-2.5 h-2.5 rounded-full shrink-0"
+                        style={{ backgroundColor: c.cardThemeColor || c.brandColor || '#D95B26' }}
+                      />
+                      <span>{c.loyaltyTitle || `Tarjeta de ${business?.name || 'tu local'}`}</span>
+                    </div>
+                  ))}
                 </div>
-              );
-            })}
-          </div>
+                <p className="text-xs text-[#9E9EA8]">
+                  Tenés 1 tarjeta activa en tu local. Si necesitás crear más de una tarjeta, ponete en contacto con nosotros
+                </p>
+              </div>
 
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() =>
-                setCompletedCardResult({
-                  cardTitle:
-                    logoText.trim() ||
-                    config?.loyaltyTitle ||
-                    `Tarjeta de ${business?.name || 'Mi Comercio'}`,
-                  hubLink: publicHubUrl,
-                  walletShareUrl: config?.shareUrl,
-                  serialNumber: config?.walletSerial,
-                })
-              }
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#2FB36A]/15 hover:bg-[#2FB36A]/25 border border-[#2FB36A]/40 text-xs font-bold text-[#2FB36A] cursor-pointer"
-            >
-              <QrCode className="w-3.5 h-3.5" />
-              <span>Ver QR y Link</span>
-            </button>
-
-            {isOwner && (
-              <button
-                type="button"
-                onClick={() => {
-                  if (!canCreateMoreCards) {
-                    showToast(
-                      `Tu plan (${planLimits.label}) permite hasta ${planLimits.maxCards} tarjeta(s).`,
-                      'error'
-                    );
-                    return;
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={() =>
+                    setCompletedCardResult({
+                      cardTitle:
+                        logoText.trim() ||
+                        config?.loyaltyTitle ||
+                        `Tarjeta de ${business?.name || 'Mi Comercio'}`,
+                      hubLink: publicHubUrl,
+                      walletShareUrl: config?.shareUrl,
+                      serialNumber: config?.walletSerial,
+                    })
                   }
-                  setShowNewCardModal(true);
-                }}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#1C1C22] hover:bg-[#26262E] border border-[#282830] text-xs font-bold text-[#BEC8FF] cursor-pointer"
-              >
-                <Plus className="w-3.5 h-3.5" />
-                <span>
-                  Nueva tarjeta ({cards.length}/
-                  {planLimits.maxCards > 99 ? '∞' : planLimits.maxCards})
-                </span>
-              </button>
-            )}
-          </div>
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#2FB36A]/15 hover:bg-[#2FB36A]/25 border border-[#2FB36A]/40 text-xs font-bold text-[#2FB36A] cursor-pointer"
+                >
+                  <QrCode className="w-3.5 h-3.5" />
+                  <span>Ver QR y link</span>
+                </button>
+              </div>
+            </>
+          )}
         </div>
       )}
 
@@ -1028,7 +1026,7 @@ export const ClubView: React.FC = () => {
                   Datos de tu tarjeta de sellos
                 </h2>
                 <p className="text-[11px] text-[#9E9EA8]">
-                  Todo en un solo lugar. Los títulos de los campos (SELLOS, PREMIO y SOCIO) son fijos.
+                  Todo en un solo lugar. Los títulos de los campos (Sellos, Premio y Socio) son fijos.
                 </p>
               </div>
               <span className="px-2.5 py-0.5 rounded-full bg-[#2FB36A]/15 text-[#2FB36A] text-[10px] font-bold shrink-0">
@@ -1439,14 +1437,14 @@ export const ClubView: React.FC = () => {
         </div>
       )}
 
-      {/* Modal: Crear Nueva Tarjeta */}
-      {showNewCardModal && (
+      {/* Modal: Crear tarjeta (solo cuando el comercio tiene 0 tarjetas) */}
+      {showNewCardModal && cards.length === 0 && (
         <div className="fixed inset-0 z-50 bg-black/75 flex items-center justify-center p-4">
           <div className="max-w-md w-full rounded-2xl bg-[#141418] border border-[#282830] p-5 space-y-4">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <CreditCard className="w-4 h-4 text-[#D95B26]" />
-                <h3 className="text-sm font-bold text-[#F4F4F6]">Crear nueva tarjeta de sellos</h3>
+                <h3 className="text-sm font-bold text-[#F4F4F6]">Crear tarjeta de sellos</h3>
               </div>
               <button
                 type="button"
@@ -1457,66 +1455,25 @@ export const ClubView: React.FC = () => {
               </button>
             </div>
 
-            <form onSubmit={handleCreateCard} className="space-y-3.5">
-              <div>
-                <label className="block text-xs font-semibold text-[#F4F4F6] mb-1">
-                  Nombre de tarjeta
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={newCardTitle}
-                  onChange={(e) => setNewCardTitle(e.target.value)}
-                  placeholder="Título visible en la tarjeta"
-                  className="w-full px-3 py-2 rounded-xl bg-[#0C0C0E] border border-[#282830] text-xs text-[#F4F4F6]"
-                />
+            <form onSubmit={handleCreateCard} className="space-y-4">
+              <div className="p-3 rounded-xl bg-[#0C0C0E] border border-[#282830] flex items-center justify-between">
+                <span className="text-xs text-[#9E9EA8]">Objetivo de la tarjeta</span>
+                <span className="text-xs font-bold text-[#F4F4F6]">10 sellos (fijo)</span>
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-[#F4F4F6] mb-1">
-                  Premio al completar la tarjeta
+                <label className="block text-xs font-semibold text-[#F4F4F6] mb-1.5">
+                  Premio al completar los 10 sellos *
                 </label>
                 <input
                   type="text"
                   required
+                  autoFocus
                   value={newCardReward}
                   onChange={(e) => setNewCardReward(e.target.value)}
-                  placeholder="Beneficio al completar los sellos"
-                  className="w-full px-3 py-2 rounded-xl bg-[#0C0C0E] border border-[#282830] text-xs text-[#F4F4F6]"
+                  placeholder="Ej. Un café o producto sin cargo en tu próxima visita"
+                  className="w-full px-3.5 py-2.5 rounded-xl bg-[#0C0C0E] border border-[#282830] text-xs text-[#F4F4F6] focus:outline-none focus:border-[#D95B26]"
                 />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-semibold text-[#F4F4F6] mb-1">
-                    Meta de sellos
-                  </label>
-                  <input
-                    type="number"
-                    min={2}
-                    max={25}
-                    value={newCardStamps}
-                    onChange={(e) => setNewCardStamps(Number(e.target.value) || 10)}
-                    className="w-full px-3 py-2 rounded-xl bg-[#0C0C0E] border border-[#282830] text-xs text-[#F4F4F6]"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-[#F4F4F6] mb-1">
-                    Color
-                  </label>
-                  <select
-                    value={newCardPreset}
-                    onChange={(e) => setNewCardPreset(e.target.value as PresetColorKey)}
-                    className="w-full px-3 py-2 rounded-xl bg-[#0C0C0E] border border-[#282830] text-xs text-[#F4F4F6]"
-                  >
-                    <option value="dark">Oscuro</option>
-                    <option value="blue">Azul</option>
-                    <option value="green">Verde</option>
-                    <option value="red">Rojo</option>
-                    <option value="purple">Violeta</option>
-                    <option value="orange">Naranja</option>
-                  </select>
-                </div>
               </div>
 
               <div className="flex justify-end gap-2 pt-2">
@@ -1532,7 +1489,7 @@ export const ClubView: React.FC = () => {
                   disabled={creatingCard}
                   className="px-4 py-2 rounded-xl bg-[#D95B26] text-white text-xs font-bold cursor-pointer"
                 >
-                  {creatingCard ? 'Creando...' : 'Crear y ver QR / Link'}
+                  {creatingCard ? 'Creando...' : 'Crear tarjeta'}
                 </button>
               </div>
             </form>

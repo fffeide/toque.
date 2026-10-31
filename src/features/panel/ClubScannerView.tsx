@@ -112,7 +112,7 @@ export const ClubScannerView: React.FC = () => {
   };
 
   const handleDirectStampByCode = async (rawCode: string) => {
-    const clean = rawCode.trim().replace(/[^A-Za-z0-9]/g, '');
+    const clean = rawCode.replace(/[\s-]/g, '').trim();
     if (!clean) {
       showToast('Ingresá los 8 números debajo del código de barras.', 'error');
       return;
@@ -122,6 +122,64 @@ export const ClubScannerView: React.FC = () => {
       setProcessing(true);
       setErrorMessage('');
       setSuccessBanner(null);
+
+      const merchantToken = localStorage.getItem('toque_merchant_token');
+      const d1Res = await fetch('/api/merchant/stamp', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(merchantToken ? { Authorization: `Bearer ${merchantToken}` } : {}),
+        },
+        body: JSON.stringify({ code: clean }),
+      }).catch(() => null);
+
+      if (d1Res && d1Res.ok) {
+        const d1Json = await d1Res.json();
+        if (d1Json.member) {
+          const m = d1Json.member;
+          const target = m.stampsRequired || 10;
+          const current = m.stamps || 1;
+          const remaining = Math.max(0, target - current);
+          const mappedLookup: CashierMemberLookupResult = {
+            id: m.id,
+            memberId: m.id,
+            shortCode: m.barcodeToken || clean,
+            memberCode: m.barcodeToken || clean,
+            displayName: m.name || 'Cliente',
+            stamps: current,
+            targetStamps: target,
+            remainingStamps: remaining,
+            rewardReady: remaining === 0,
+            rewardPending: remaining === 0,
+            rewardText: 'Premio al completar tus sellos',
+            lastStampedAt: m.lastStampedAt || new Date().toISOString(),
+            canStampNow: false,
+            cooldownMessage: 'Podrá sumar de nuevo mañana',
+            programMode: 'per_visit',
+          };
+          setLookupResult(mappedLookup);
+          setViewState('found');
+          setQuickNumericCode('');
+          setCodeQuery(m.barcodeToken || clean);
+          setSuccessBanner({
+            title: `Sello sumado a ${m.name || 'Cliente'}`,
+            newCountText: `${current} / ${target}`,
+            subtitle:
+              remaining === 0
+                ? 'Completó la tarjeta · Premio disponible'
+                : remaining === 1
+                ? 'Le falta 1 sello para el premio'
+                : `Le faltan ${remaining} sellos para el premio`,
+          });
+          // Sync with mockApi in background if present
+          api.addStampByCashier({ memberCode: m.barcodeToken || clean }).catch(() => {});
+          return;
+        }
+      } else if (d1Res && d1Res.status === 429) {
+        const d1Err = await d1Res.json().catch(() => ({}));
+        showToast(d1Err.error || 'Podrá sumar de nuevo mañana.', 'info');
+        return;
+      }
 
       // Primero consultamos el socio y validamos la regla de 24 horas
       const memberLookup = await api.lookupMemberByCode(clean);
@@ -158,7 +216,7 @@ export const ClubScannerView: React.FC = () => {
       setSuccessBanner({
         title:
           res.stampsAdded === 1
-            ? '¡Sumaste 1 sello!'
+            ? `Sello sumado a ${refreshed.displayName}`
             : `¡Sumaste ${res.stampsAdded} sellos!`,
         newCountText: `${refreshed.stamps} / ${refreshed.targetStamps}`,
         subtitle: refreshed.rewardReady

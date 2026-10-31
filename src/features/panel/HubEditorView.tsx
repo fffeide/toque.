@@ -183,19 +183,9 @@ export const HubEditorView: React.FC = () => {
 
   const handleSave = async (markConfigured = false) => {
     if (!config) return;
-    if (markConfigured) {
-      if (!config.businessName?.trim()) {
-        showToast('Ingresá el nombre de tu comercio', 'error');
-        return;
-      }
-      if (!config.details.address?.trim()) {
-        showToast('Ingresá la dirección real de tu local antes de crear el Hub', 'error');
-        return;
-      }
-      if (!config.details.hours?.trim()) {
-        showToast('Configurá los horarios de atención antes de crear el Hub', 'error');
-        return;
-      }
+    if (!config.businessName?.trim()) {
+      showToast('Ingresá el nombre de tu comercio', 'error');
+      return;
     }
 
     setIsSaving(true);
@@ -216,7 +206,7 @@ export const HubEditorView: React.FC = () => {
         blocks: normalizeHubBlocks(updated.blocks),
       });
       showToast(
-        markConfigured ? '¡Hub creado con los datos reales de tu local!' : 'Configuración del Hub guardada',
+        markConfigured ? 'Hub activado correctamente' : 'Configuración del Hub guardada',
         'success'
       );
     } catch {
@@ -249,116 +239,160 @@ export const HubEditorView: React.FC = () => {
   const featuredProducts = config.products.filter((p) => p.featuredInHub !== false);
   const fixedHubUrl = `${window.location.origin}/u/${activeCartelCode}`;
 
-  // Paso previo obligatorio antes de crear el Hub: pedir toda la información real del comercio
+  // Paso corto y claro de activación del Hub: solo Nombre del comercio y Qué elementos mostrar son obligatorios
   if (!config.hubConfigured) {
+    const onboardingToggles: Array<{ key: HubBlockKey; title: string; subtitle: string }> = [
+      {
+        key: 'club',
+        title: 'Tarjeta de sellos',
+        subtitle: 'Tus clientes suman sellos y los guardan en su teléfono',
+      },
+      {
+        key: 'review',
+        title: 'Botón de reseñas en Google Maps',
+        subtitle: 'Acceso directo para que te dejen reseñas o ubiquen el local',
+      },
+      {
+        key: 'socials',
+        title: 'Redes sociales y contacto',
+        subtitle: 'Mostrá tus enlaces de Instagram, WhatsApp o tienda',
+      },
+    ];
+
     return (
-      <div className="max-w-3xl mx-auto space-y-6">
+      <div className="max-w-2xl mx-auto space-y-6">
         <div>
-          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#D95B26]/15 border border-[#D95B26]/30 text-[#D95B26] text-xs font-bold mb-2">
-            Configuración inicial del Hub
+          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#D95B26]/15 border border-[#D95B26]/30 text-[#D95B26] text-xs font-semibold mb-2">
+            Configuración rápida del Hub
           </span>
           <h1 className="text-2xl font-bold text-[#f1f1ee] tracking-tight">
-            Completá los datos de tu local para crear tu Hub
+            Activá el Hub de tu comercio
           </h1>
           <p className="text-xs text-[#a1a1aa] mt-1">
-            Esta información se usa en el Hub y en los comprobantes de tus clientes. Nunca mostramos datos inventados: solo se incluye lo que cargues acá.
+            Solo necesitás el nombre de tu comercio y elegir qué elementos querés mostrar. El resto de los datos son opcionales.
           </p>
         </div>
 
         <Card className="p-6 space-y-6">
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-xs font-semibold text-[#f1f1ee] mb-1.5">
-                Nombre del comercio *
-              </label>
-              <input
-                type="text"
-                value={config.businessName || ''}
-                onChange={(e) => setConfig({ ...config, businessName: e.target.value })}
-                placeholder="Ej. Musical Monroe"
-                className="w-full px-3.5 py-2.5 rounded-xl bg-[#161619] border border-[#28282a] text-sm text-[#f1f1ee] focus:outline-none focus:border-[#D95B26]"
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-semibold text-[#f1f1ee] mb-1.5">
-                WhatsApp / Teléfono de contacto (Opcional)
-              </label>
-              <input
-                type="tel"
-                value={config.socials.whatsapp || ''}
-                onChange={(e) =>
-                  setConfig({
-                    ...config,
-                    socials: { ...config.socials, whatsapp: e.target.value },
-                  })
-                }
-                placeholder="+54 9 11 ..."
-                className="w-full px-3.5 py-2.5 rounded-xl bg-[#161619] border border-[#28282a] text-sm text-[#f1f1ee] focus:outline-none focus:border-[#D95B26]"
-              />
-            </div>
-          </div>
-
-          <div className="pt-2 border-t border-[#28282a]">
-            <label className="block text-xs font-semibold text-[#f1f1ee] mb-2">
-              Dirección del local *
+          <div>
+            <label className="block text-xs font-semibold text-[#f1f1ee] mb-1.5">
+              1. Nombre del comercio *
             </label>
-            <GoogleAddressPicker
-              value={config.details.address || ''}
-              onChange={(address) =>
-                setConfig({
-                  ...config,
-                  details: { ...config.details, address },
-                })
-              }
+            <input
+              type="text"
+              value={config.businessName || ''}
+              onChange={(e) => setConfig({ ...config, businessName: e.target.value })}
+              placeholder="Ej. Musical Monroe"
+              className="w-full px-3.5 py-2.5 rounded-xl bg-[#161619] border border-[#28282a] text-sm text-[#f1f1ee] focus:outline-none focus:border-[#D95B26]"
             />
           </div>
 
-          <div className="pt-2 border-t border-[#28282a]">
-            <label className="block text-xs font-semibold text-[#f1f1ee] mb-2">
-              Horarios de atención *
+          <div className="pt-2 border-t border-[#28282a] space-y-3">
+            <label className="block text-xs font-semibold text-[#f1f1ee]">
+              2. Qué elementos mostrar en tu Hub *
             </label>
-            <BusinessHoursEditor
-              value={config.details.hours || ''}
-              onChange={(hours) =>
-                setConfig({
-                  ...config,
-                  details: { ...config.details, hours },
-                })
-              }
-            />
+            <div className="space-y-2.5">
+              {onboardingToggles.map((item) => {
+                const isEnabled = orderedBlocks.find((b) => b.key === item.key)?.enabled ?? true;
+                return (
+                  <label
+                    key={item.key}
+                    className={`flex items-center justify-between p-3.5 rounded-xl border cursor-pointer transition-colors ${
+                      isEnabled
+                        ? 'border-[#D95B26]/60 bg-[#D95B26]/10'
+                        : 'border-[#28282a] bg-[#161619]'
+                    }`}
+                  >
+                    <div>
+                      <p className="text-sm font-semibold text-[#f1f1ee]">{item.title}</p>
+                      <p className="text-xs text-[#a1a1aa]">{item.subtitle}</p>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={isEnabled}
+                      onChange={() => handleToggleBlock(item.key)}
+                      className="w-4 h-4 rounded accent-[#D95B26] cursor-pointer"
+                    />
+                  </label>
+                );
+              })}
+            </div>
           </div>
 
-          <div className="pt-2 border-t border-[#28282a] grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-xs font-semibold text-[#f1f1ee] mb-1.5">
-                Link de Google Maps (Opcional)
-              </label>
-              <input
-                type="url"
-                value={config.googleReviewUrl || ''}
-                onChange={(e) => setConfig({ ...config, googleReviewUrl: e.target.value })}
-                placeholder="https://maps.app.goo.gl/..."
-                className="w-full px-3.5 py-2.5 rounded-xl bg-[#161619] border border-[#28282a] text-sm text-[#f1f1ee] focus:outline-none focus:border-[#D95B26]"
-              />
+          <div className="pt-3 border-t border-[#28282a] space-y-4">
+            <p className="text-xs font-medium text-[#a1a1aa]">
+              Datos adicionales (100% opcionales, podés completarlos ahora o más adelante)
+            </p>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs font-semibold text-[#f1f1ee] mb-1.5">
+                  Link de Google Maps (opcional)
+                </label>
+                <input
+                  type="url"
+                  value={config.googleReviewUrl || ''}
+                  onChange={(e) => setConfig({ ...config, googleReviewUrl: e.target.value })}
+                  placeholder="https://maps.app.goo.gl/..."
+                  className="w-full px-3.5 py-2.5 rounded-xl bg-[#161619] border border-[#28282a] text-sm text-[#f1f1ee] focus:outline-none focus:border-[#D95B26]"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-[#f1f1ee] mb-1.5">
+                  Instagram (opcional)
+                </label>
+                <input
+                  type="text"
+                  value={config.socials.instagram || ''}
+                  onChange={(e) =>
+                    setConfig({
+                      ...config,
+                      socials: { ...config.socials, instagram: e.target.value },
+                    })
+                  }
+                  placeholder="@tucomercio"
+                  className="w-full px-3.5 py-2.5 rounded-xl bg-[#161619] border border-[#28282a] text-sm text-[#f1f1ee] focus:outline-none focus:border-[#D95B26]"
+                />
+              </div>
             </div>
 
-            <div>
-              <label className="block text-xs font-semibold text-[#f1f1ee] mb-1.5">
-                Instagram (Opcional)
-              </label>
-              <input
-                type="text"
-                value={config.socials.instagram || ''}
-                onChange={(e) =>
-                  setConfig({
-                    ...config,
-                    socials: { ...config.socials, instagram: e.target.value },
-                  })
-                }
-                placeholder="@tucomercio"
-                className="w-full px-3.5 py-2.5 rounded-xl bg-[#161619] border border-[#28282a] text-sm text-[#f1f1ee] focus:outline-none focus:border-[#D95B26]"
-              />
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs font-semibold text-[#f1f1ee] mb-1.5">
+                  Dirección del local (opcional)
+                </label>
+                <input
+                  type="text"
+                  value={config.details.address || ''}
+                  onChange={(e) =>
+                    setConfig({
+                      ...config,
+                      details: { ...config.details, address: e.target.value },
+                    })
+                  }
+                  placeholder="Ej. Av. Monroe 2450, CABA"
+                  className="w-full px-3.5 py-2.5 rounded-xl bg-[#161619] border border-[#28282a] text-sm text-[#f1f1ee] focus:outline-none focus:border-[#D95B26]"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-[#f1f1ee] mb-1.5">
+                  Horarios de atención (opcional)
+                </label>
+                <input
+                  type="text"
+                  value={config.details.hours || ''}
+                  onChange={(e) =>
+                    setConfig({
+                      ...config,
+                      details: { ...config.details, hours: e.target.value },
+                    })
+                  }
+                  placeholder="Ej. Lun a Sáb de 9 a 20 h"
+                  className="w-full px-3.5 py-2.5 rounded-xl bg-[#161619] border border-[#28282a] text-sm text-[#f1f1ee] focus:outline-none focus:border-[#D95B26]"
+                />
+              </div>
             </div>
           </div>
 
@@ -369,7 +403,7 @@ export const HubEditorView: React.FC = () => {
               icon={<CheckCircle2 className="w-4 h-4" />}
               onClick={() => handleSave(true)}
             >
-              Crear mi Hub con estos datos
+              Activar mi Hub
             </Button>
           </div>
         </Card>
@@ -714,19 +748,19 @@ export const HubEditorView: React.FC = () => {
             </Link>
           </Card>
 
-          {/* 5. Horarios y Dirección con Google Maps y Editor de Turnos / Cortes */}
+          {/* 5. Horarios y Dirección opcionales */}
           <Card className="p-6 space-y-6">
             <div>
-              <h2 className="font-bold text-base text-[#f1f1ee]">Datos del local</h2>
+              <h2 className="font-bold text-base text-[#f1f1ee]">Datos del local (opcional)</h2>
               <p className="text-xs text-[#a1a1aa] mt-0.5">
-                Seleccioná la ubicación exacta con Google Maps y configurá tus horarios con cortes o días específicos.
+                Agregá tu dirección y horarios de atención si querés mostrarlos en el Hub y en los comprobantes.
               </p>
             </div>
 
             <div className="space-y-6">
               <div>
                 <label className="block text-xs font-semibold text-[#f1f1ee] mb-2">
-                  Dirección del local (con buscador y mapa de Google Maps)
+                  Dirección del local (opcional)
                 </label>
                 <GoogleAddressPicker
                   value={config.details.address || ''}

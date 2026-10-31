@@ -110,13 +110,24 @@ export const AccountSettingsView: React.FC = () => {
     }
   };
 
+  const [deleteConfirmText, setDeleteConfirmText] = useState('');
+
   const handleConfirmDeleteAccount = async () => {
+    if (deleteConfirmText.trim().toLowerCase() !== 'eliminar') {
+      showToast('Escribí "eliminar" para confirmar', 'error');
+      return;
+    }
     try {
       setDeletingAccount(true);
       await api.deleteAccount();
       await logout();
+      try {
+        localStorage.clear();
+      } catch {
+        // ignore
+      }
       showToast('Cuenta eliminada correctamente', 'success');
-      navigate('/ingresar', { replace: true });
+      navigate('/', { replace: true });
     } catch (err: any) {
       showToast(err?.message || 'No se pudo eliminar la cuenta', 'error');
     } finally {
@@ -154,7 +165,7 @@ export const AccountSettingsView: React.FC = () => {
   return (
     <div className="space-y-5 max-w-3xl pb-12 text-sm">
       <div>
-        <h1 className="text-lg font-bold text-[#F4F4F6]">Mi Cuenta</h1>
+        <h1 className="text-lg font-bold text-[#F4F4F6]">Mi cuenta</h1>
         <p className="text-xs text-[#9E9EA8] mt-0.5">
           Estado de tu suscripción, cambio de correo y administración de tu cuenta.
         </p>
@@ -298,74 +309,96 @@ export const AccountSettingsView: React.FC = () => {
         </div>
       </form>
 
-      {/* 4. ELIMINAR CUENTA */}
-      <section className="rounded-2xl bg-[#141418] border border-[#f87171]/30 p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div className="flex items-start gap-2.5">
-          <div className="w-8 h-8 rounded-xl bg-[#f87171]/15 text-[#f87171] flex items-center justify-center shrink-0 mt-0.5">
-            <Trash2 className="w-4 h-4" />
+      {/* 4. ELIMINAR MI CUENTA */}
+      <section className="rounded-2xl bg-[#141418] border border-[#f87171]/30 p-5 space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="flex items-start gap-2.5">
+            <div className="w-8 h-8 rounded-xl bg-[#f87171]/15 text-[#f87171] flex items-center justify-center shrink-0 mt-0.5">
+              <Trash2 className="w-4 h-4" />
+            </div>
+            <div>
+              <h2 className="text-sm font-bold text-[#F4F4F6]">Eliminar mi cuenta</h2>
+              <p className="text-xs text-[#9E9EA8]">
+                Da de baja de forma permanente tu cuenta y los datos asociados a tu comercio.
+              </p>
+            </div>
           </div>
-          <div>
-            <h2 className="text-sm font-bold text-[#F4F4F6]">Eliminar cuenta</h2>
-            <p className="text-xs text-[#9E9EA8]">
-              Da de baja de forma permanente tu cuenta y los datos asociados a tu comercio.
-            </p>
-          </div>
+
+          {!showDeleteModal && (
+            <button
+              type="button"
+              onClick={() => {
+                setDeleteConfirmText('');
+                setShowDeleteModal(true);
+              }}
+              className="px-4 py-2 rounded-xl bg-[#f87171]/15 hover:bg-[#f87171]/25 border border-[#f87171]/40 text-xs font-bold text-[#f87171] transition-colors cursor-pointer shrink-0"
+            >
+              Eliminar mi cuenta
+            </button>
+          )}
         </div>
 
-        <button
-          type="button"
-          onClick={() => setShowDeleteModal(true)}
-          className="px-4 py-2 rounded-xl bg-[#f87171]/15 hover:bg-[#f87171]/25 border border-[#f87171]/40 text-xs font-bold text-[#f87171] transition-colors cursor-pointer shrink-0"
-        >
-          Eliminar cuenta
-        </button>
-      </section>
-
-      {/* Modal de confirmación para eliminar cuenta */}
-      {showDeleteModal && (
-        <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4">
-          <div className="max-w-md w-full rounded-2xl bg-[#141418] border border-[#282830] p-5 space-y-4 shadow-2xl">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2 text-[#f87171]">
-                <AlertTriangle className="w-4 h-4" />
-                <h3 className="text-sm font-bold text-[#F4F4F6]">
-                  ¿Eliminar cuenta definitivamente?
-                </h3>
+        {showDeleteModal && (
+          <div className="rounded-2xl bg-[#0C0C0E] border border-[#f87171]/40 p-4 space-y-3.5">
+            <div className="flex items-start justify-between gap-2">
+              <div className="flex items-start gap-2 text-[#f87171]">
+                <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+                <p className="text-xs font-bold text-[#F4F4F6] leading-relaxed">
+                  ¿Estás seguro de que querés eliminar tu cuenta y todos los datos de tu comercio? Esta acción no se puede deshacer
+                </p>
               </div>
               <button
                 type="button"
-                onClick={() => setShowDeleteModal(false)}
-                className="p-1 text-[#9E9EA8] hover:text-white cursor-pointer"
+                onClick={() => {
+                  setShowDeleteModal(false);
+                  setDeleteConfirmText('');
+                }}
+                className="p-1 text-[#9E9EA8] hover:text-white cursor-pointer shrink-0"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
-            <p className="text-xs text-[#9E9EA8] leading-relaxed">
-              Esta acción cerrará tu sesión y eliminará los datos del comercio{' '}
-              <strong className="text-[#F4F4F6]">{name || business?.name}</strong>.
-            </p>
+            <div>
+              <label className="block text-xs text-[#9E9EA8] mb-1.5">
+                Escribí <strong className="text-[#F4F4F6]">eliminar</strong> para confirmar:
+              </label>
+              <input
+                type="text"
+                autoFocus
+                value={deleteConfirmText}
+                onChange={(e) => setDeleteConfirmText(e.target.value)}
+                placeholder="eliminar"
+                className="w-full px-3 py-2 rounded-xl bg-[#141418] border border-[#282830] text-xs text-[#F4F4F6] focus:outline-none focus:border-[#f87171]"
+              />
+            </div>
 
-            <div className="flex items-center justify-end gap-2 pt-2">
+            <div className="flex items-center justify-end gap-2 pt-1">
               <button
                 type="button"
-                onClick={() => setShowDeleteModal(false)}
+                onClick={() => {
+                  setShowDeleteModal(false);
+                  setDeleteConfirmText('');
+                }}
                 className="px-3.5 py-2 rounded-xl bg-[#1C1C22] border border-[#282830] text-xs font-bold text-[#9E9EA8] hover:text-white cursor-pointer"
               >
                 Cancelar
               </button>
               <button
                 type="button"
-                disabled={deletingAccount}
+                disabled={
+                  deletingAccount ||
+                  deleteConfirmText.trim().toLowerCase() !== 'eliminar'
+                }
                 onClick={handleConfirmDeleteAccount}
-                className="px-4 py-2 rounded-xl bg-[#f87171] hover:bg-[#ef4444] text-[#0C0C0E] text-xs font-bold cursor-pointer disabled:opacity-50"
+                className="px-4 py-2 rounded-xl bg-[#ef4444] hover:bg-[#dc2626] text-white text-xs font-bold cursor-pointer disabled:opacity-50"
               >
-                {deletingAccount ? 'Eliminando...' : 'Sí, eliminar cuenta'}
+                {deletingAccount ? 'Eliminando...' : 'Sí, eliminar definitivamente'}
               </button>
             </div>
           </div>
-        </div>
-      )}
+        )}
+      </section>
     </div>
   );
 };

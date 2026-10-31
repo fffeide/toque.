@@ -325,6 +325,143 @@ async function startServer() {
       return;
     }
 
+    // 1b. Sesiones de comercio/admin (/api/auth/me, /api/auth/login, /api/auth/register, /api/auth/logout)
+    if (pathname === '/api/auth/me' && req.method === 'GET') {
+      const token = extractSessionTokenFromReq(req);
+      if (!token) {
+        res.writeHead(401, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ authenticated: false, error: 'Sesión no iniciada.' }));
+        return;
+      }
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ authenticated: true, token }));
+      return;
+    }
+
+    if (
+      (pathname === '/api/auth/login' || pathname === '/api/auth/register') &&
+      req.method === 'POST'
+    ) {
+      try {
+        const raw = await readBody(req);
+        const body = raw ? JSON.parse(raw) : {};
+        const cleanEmail = String(body.email || 'comercio@toque.com.ar').trim().toLowerCase();
+        const sessionToken = `${crypto.randomUUID()}${crypto.randomUUID()}`.replace(/-/g, '');
+        const userPayload = {
+          id: body.userId || `usr-${crypto.randomUUID().slice(0, 8)}`,
+          email: cleanEmail,
+          name: String(body.name || body.businessName || cleanEmail.split('@')[0] || 'Comercio').trim(),
+          role: String(body.role || 'BUSINESS').trim(),
+          businessId: String(body.businessId || 'musical-monroe').trim(),
+        };
+        res.writeHead(200, {
+          'Content-Type': 'application/json; charset=utf-8',
+          'Set-Cookie': `toque_merchant_session=${sessionToken}; Path=/; Max-Age=31536000; SameSite=Lax`,
+        });
+        res.end(
+          JSON.stringify({
+            authenticated: true,
+            token: sessionToken,
+            sessionToken,
+            user: userPayload,
+          })
+        );
+        return;
+      } catch (err: any) {
+        res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ error: err?.message || 'Error al iniciar sesión.' }));
+        return;
+      }
+    }
+
+    if (pathname === '/api/auth/logout' && req.method === 'POST') {
+      res.writeHead(200, {
+        'Content-Type': 'application/json; charset=utf-8',
+        'Set-Cookie': 'toque_merchant_session=; Path=/; Max-Age=0; SameSite=Lax',
+      });
+      res.end(JSON.stringify({ success: true }));
+      return;
+    }
+
+    // 1c. Reclamo de tarjeta del cliente en el Hub: POST /api/consumer/cards/claim (siempre devuelve 200 OK con barcode_token de 8 dígitos)
+    if (pathname === '/api/consumer/cards/claim' && req.method === 'POST') {
+      try {
+        const raw = await readBody(req);
+        const body = raw ? JSON.parse(raw) : {};
+        const tenantId = String(body.tenantId || body.businessId || 'musical-monroe').trim();
+        const businessName = String(body.businessName || 'Comercio adherido').trim();
+        const cleanEmail = String(body.email || body.contact || '').trim().toLowerCase();
+        const fullName = String(body.fullName || body.name || 'Cliente').trim();
+        const stampsRequired = 10;
+        const rewardText = String(body.rewardText || 'Beneficio al completar tus sellos').trim();
+        const nowIso = new Date().toISOString();
+
+        const existingList = cleanEmail ? memoryConsumerCards.get(cleanEmail) || [] : [];
+        let foundCard = existingList.find((c: any) => c.businessId === tenantId);
+
+        if (!foundCard) {
+          const barcodeToken =
+            normalize8DigitBarcode(body.barcodeToken) || generateUnique8DigitServerBarcode();
+          foundCard = {
+            id: `mem-${crypto.randomUUID().slice(0, 8)}`,
+            businessId: tenantId,
+            businessName,
+            name: fullName,
+            email: cleanEmail,
+            contact: cleanEmail,
+            stamps: 1,
+            points: 1,
+            stampsRequired,
+            targetStamps: stampsRequired,
+            rewardText,
+            barcodeToken,
+            shortCode: barcodeToken,
+            memberCode: barcodeToken,
+            lastStampedAt: nowIso,
+            joinedAt: nowIso,
+            consent: true,
+          };
+          if (cleanEmail) {
+            memoryConsumerCards.set(cleanEmail, [foundCard, ...existingList]);
+          }
+        }
+
+        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(
+          JSON.stringify({
+            success: true,
+            card: foundCard,
+            barcodeToken: foundCard.barcodeToken,
+          })
+        );
+        return;
+      } catch (err: any) {
+        res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ success: false, error: err?.message || 'Error al guardar tarjeta.' }));
+        return;
+      }
+    }
+
+    // 1d. Eliminar cuenta del comercio: DELETE /api/merchant/account
+    if (pathname === '/api/merchant/account' && req.method === 'DELETE') {
+      try {
+        const tenantId = (url.searchParams.get('tenantId') || url.searchParams.get('businessId') || '').trim();
+        if (tenantId) {
+          memoryMerchantHubConfigs.delete(tenantId);
+        }
+        res.writeHead(200, {
+          'Content-Type': 'application/json; charset=utf-8',
+          'Set-Cookie': 'toque_merchant_session=; Path=/; Max-Age=0; SameSite=Lax',
+        });
+        res.end(JSON.stringify({ success: true, deletedTenantId: tenantId || 'ok' }));
+        return;
+      } catch (err: any) {
+        res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ error: err?.message || 'No se pudo eliminar la cuenta.' }));
+        return;
+      }
+    }
+
     // 2. Endpoint público de descarga directa de Apple Wallet (.pkpass): GET /api/wallet/pass/:barcodeToken.pkpass
     if (
       pathname.startsWith('/api/wallet/pass/') &&

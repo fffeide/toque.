@@ -19,7 +19,6 @@ import { BrandLogo } from '../../components/ui/Avatar';
 import { RealQrCode } from '../../components/ui/RealQrCode';
 import { useToast } from '../../components/ui/Toast';
 import { formatCurrency, formatDate } from '../../lib/formatters';
-import { ClubScannerView } from '../panel/ClubScannerView';
 import {
   QrCode,
   Award,
@@ -136,10 +135,13 @@ export const CashierView: React.FC = () => {
   // Comprobante activo emitido
   const [activeSale, setActiveSale] = useState<Sale | null>(null);
   const [emittedReceipt, setEmittedReceipt] = useState<Receipt | null>(null);
-  const [secondsLeft, setSecondsLeft] = useState<number>(120);
+  const [secondsLeft, setSecondsLeft] = useState<number>(90);
 
-  // Modal de Sumar Sello desde Caja
-  const [showStampModal, setShowStampModal] = useState<boolean>(false);
+  // Cuadrito compacto en línea para Sumar sello desde Caja (sin modal ni textos explicativos)
+  const [showInlineStamp, setShowInlineStamp] = useState<boolean>(false);
+  const [inlineStampCode, setInlineStampCode] = useState<string>('');
+  const [inlineStampLoading, setInlineStampLoading] = useState<boolean>(false);
+  const [inlineStampNotice, setInlineStampNotice] = useState<string | null>(null);
 
   // Perfil activo en POS (en memoria de sesión)
   const [activeProfile, setActiveProfile] = useState<{
@@ -562,17 +564,34 @@ export const CashierView: React.FC = () => {
         items: scannedItems.length > 0 ? scannedItems : undefined,
       });
 
+      const merchantToken = localStorage.getItem('toque_merchant_token');
+      fetch('/api/merchant/pos-sale', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(merchantToken ? { Authorization: `Bearer ${merchantToken}` } : {}),
+        },
+        body: JSON.stringify({
+          cartelCode: selectedCartel.code,
+          amount,
+          cashTendered: effectiveTendered,
+          changeDue: effectiveChange,
+          method,
+          items: scannedItems.length > 0 ? scannedItems : undefined,
+        }),
+      }).catch(() => {});
+
       res.sale.cashierName = cleanActiveCashierName;
       setActiveSale(res.sale);
       if (res.receipt) {
-        setSecondsLeft(120);
+        setSecondsLeft(90);
         setEmittedReceipt(res.receipt);
       }
       setExpressionStr('0');
       setScannedItems([]);
       setCashTenderedInput('');
       showToast(
-        `Comprobante ${res.receipt?.id || ''} activo en ${selectedCartel.code} por 2 minutos`,
+        `Comprobante ${res.receipt?.id || ''} activo en ${selectedCartel.code}`,
         'success'
       );
     } catch (err: any) {
@@ -590,6 +609,58 @@ export const CashierView: React.FC = () => {
     showToast,
   ]);
 
+  const handleInlineStampSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const cleanCode = inlineStampCode.replace(/[\s-]/g, '').trim();
+    if (!cleanCode) return;
+
+    setInlineStampLoading(true);
+    setInlineStampNotice(null);
+    try {
+      let customerName = '';
+      const merchantToken = localStorage.getItem('toque_merchant_token');
+
+      const d1Res = await fetch('/api/merchant/stamp', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(merchantToken ? { Authorization: `Bearer ${merchantToken}` } : {}),
+        },
+        body: JSON.stringify({ code: cleanCode }),
+      }).catch(() => null);
+
+      if (d1Res && d1Res.ok) {
+        const d1Json = await d1Res.json();
+        customerName = d1Json.member?.name || 'Cliente';
+      }
+
+      try {
+        const localRes = await api.addStampByCashier({
+          memberCode: cleanCode,
+        });
+        if (localRes.cooldown && !customerName) {
+          setInlineStampNotice(localRes.message || 'Podrá sumar de nuevo mañana');
+          return;
+        }
+        if (!customerName) {
+          customerName = localRes.member?.name || 'Cliente';
+        }
+      } catch (localErr: any) {
+        if (!customerName) {
+          throw localErr;
+        }
+      }
+
+      setInlineStampCode('');
+      setInlineStampNotice(`Sello sumado a ${customerName}`);
+      showToast(`Sello sumado a ${customerName}`, 'success');
+    } catch (err: any) {
+      showToast(err?.message || 'Código no encontrado', 'error');
+    } finally {
+      setInlineStampLoading(false);
+    }
+  };
+
   // Soporte silencioso para teclado numérico físico (+, -, *, ., Enter)
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -604,7 +675,7 @@ export const CashierView: React.FC = () => {
         return;
       }
 
-      if (showCashierAccountModal || showCatalogModal || showStampModal) return;
+      if (showCashierAccountModal || showCatalogModal) return;
 
       if (/^[0-9]$/.test(e.key)) {
         e.preventDefault();
@@ -654,7 +725,6 @@ export const CashierView: React.FC = () => {
     isSubmitting,
     showCashierAccountModal,
     showCatalogModal,
-    showStampModal,
   ]);
 
   // Cajeros NO tienen contraseña; Encargados y Dueños SÍ piden contraseña
@@ -1359,29 +1429,46 @@ export const CashierView: React.FC = () => {
             )}
           </Card>
 
-          {/* 3. Sumar sello — debajo de Últimos cobros */}
-          <Card className="stat-card p-4 space-y-3">
-            <div className="flex items-center justify-between gap-3">
-              <div className="flex items-center gap-2.5">
-                <div className="w-9 h-9 rounded-xl bg-[#D95B26]/15 border border-[#D95B26]/30 text-[#D95B26] flex items-center justify-center shrink-0">
-                  <Award className="w-4 h-4" />
-                </div>
-                <div>
-                  <h2 className="font-bold text-xs text-[#F4F4F0]">Sumar sello</h2>
-                  <p className="text-[11px] text-[#A1A1AA]">
-                    Ingresá el código de la tarjeta o escaneá el QR del cliente
-                  </p>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowStampModal(true)}
-                className="px-3.5 py-2 rounded-xl bg-[#D95B26] hover:bg-[#e06530] text-white flex items-center gap-1.5 text-xs font-bold transition-colors cursor-pointer shrink-0 shadow-sm"
-              >
-                <Award className="w-3.5 h-3.5" />
-                <span>Sumar sello</span>
-              </button>
-            </div>
+          {/* 3. Sumar sello — ultra minimalista debajo de Últimos cobros */}
+          <Card className="stat-card p-3.5 space-y-2.5">
+            <button
+              type="button"
+              onClick={() => {
+                setShowInlineStamp((prev) => !prev);
+                setInlineStampNotice(null);
+              }}
+              className="w-full py-2.5 px-4 rounded-xl bg-[#D95B26] hover:bg-[#e06530] text-white flex items-center justify-center gap-2 text-xs font-bold transition-colors cursor-pointer shadow-sm"
+            >
+              <Award className="w-4 h-4" />
+              <span>Sumar sello</span>
+            </button>
+
+            {showInlineStamp && (
+              <form onSubmit={handleInlineStampSubmit} className="flex gap-2">
+                <input
+                  type="text"
+                  autoFocus
+                  inputMode="numeric"
+                  placeholder="Código de 8 dígitos"
+                  value={inlineStampCode}
+                  onChange={(e) => setInlineStampCode(e.target.value)}
+                  className="flex-1 px-3 py-2 rounded-xl bg-[#141418] border border-[#282830] text-xs font-mono text-[#F4F4F0] placeholder-[#71717A] focus:outline-none focus:border-[#D95B26]"
+                />
+                <button
+                  type="submit"
+                  disabled={inlineStampLoading || !inlineStampCode.trim()}
+                  className="px-4 py-2 rounded-xl bg-[#2FB36A] hover:bg-[#289e5c] disabled:opacity-50 text-[#07150D] text-xs font-bold transition-colors cursor-pointer shrink-0"
+                >
+                  {inlineStampLoading ? '...' : 'Sumar'}
+                </button>
+              </form>
+            )}
+
+            {inlineStampNotice && (
+              <p className="text-xs font-semibold text-[#2FB36A] text-center">
+                {inlineStampNotice}
+              </p>
+            )}
           </Card>
         </div>
       </main>
@@ -1700,32 +1787,6 @@ export const CashierView: React.FC = () => {
                 </form>
               </>
             )}
-          </div>
-        </div>
-      )}
-
-      {/* Modal: Pantalla "Sumar sello" desde la Caja */}
-      {showStampModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 overflow-y-auto">
-          <div className="w-full max-w-2xl rounded-3xl bg-[#0A0A0A] border border-[#242424] p-4 sm:p-6 space-y-4 my-auto max-h-[92vh] overflow-y-auto shadow-2xl">
-            <div className="flex items-center justify-between border-b border-[#242424] pb-3">
-              <div className="flex items-center gap-2">
-                <Award className="w-5 h-5 text-[#D95B26]" />
-                <span className="text-sm font-bold text-[#F4F4F6]">
-                  Sumar sello desde Caja
-                </span>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowStampModal(false)}
-                className="p-1.5 rounded-lg text-[#9E9EA8] hover:text-[#F4F4F6] cursor-pointer"
-                aria-label="Cerrar ventana"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <ClubScannerView />
           </div>
         </div>
       )}

@@ -14,6 +14,7 @@ import { BirthDatePicker } from '../../components/BirthDatePicker';
 import {
   fetchConsumerMe,
   getConsumerSessionEmail,
+  getSavedConsumerUser,
   clearConsumerSession,
   isIOSDevice,
   isAndroidDevice,
@@ -136,17 +137,31 @@ export const ToquecitosView: React.FC = () => {
   const [openedFullReceipt, setOpenedFullReceipt] = useState<ConsumerReceipt | null>(null);
   const [isAccountModalOpen, setIsAccountModalOpen] = useState(false);
 
-  const [account, setAccount] = useState<RecognizedClientAccount | null>(null);
+  // Inicialización síncrona desde localStorage para que NO se cierre la sesión al hacer F5
+  const [account, setAccount] = useState<RecognizedClientAccount | null>(() => {
+    const saved = getSavedConsumerUser();
+    if (saved && saved.email) {
+      return {
+        recognized: true,
+        accountExists: true,
+        accountId: saved.id,
+        name: saved.fullName,
+        email: saved.email,
+        cards: [],
+      };
+    }
+    return null;
+  });
   const [receipts, setReceipts] = useState<ConsumerReceipt[]>([]);
 
   const [authStep, setAuthStep] = useState<'enter_email' | 'enter_otp' | 'register_new'>(
     'enter_email'
   );
-  const [emailInput, setEmailInput] = useState('');
+  const [emailInput, setEmailInput] = useState(() => getSavedConsumerUser()?.email || '');
   const [otpCode, setOtpCode] = useState('');
   const [demoHintCode, setDemoHintCode] = useState<string | null>(null);
-  const [nameInput, setNameInput] = useState('');
-  const [birthDateInput, setBirthDateInput] = useState('');
+  const [nameInput, setNameInput] = useState(() => getSavedConsumerUser()?.fullName || '');
+  const [birthDateInput, setBirthDateInput] = useState(() => getSavedConsumerUser()?.birthDate || '');
   const [marketingConsentInput, setMarketingConsentInput] = useState(false);
   const [authLoading, setAuthLoading] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
@@ -162,53 +177,82 @@ export const ToquecitosView: React.FC = () => {
 
   const refreshData = async (targetEmail?: string) => {
     try {
-      const sessionEmail = targetEmail || getConsumerSessionEmail() || emailInput || undefined;
+      const savedLocal = getSavedConsumerUser();
+      const sessionEmail =
+        targetEmail || getConsumerSessionEmail() || savedLocal?.email || emailInput || undefined;
       const [recAcc, meRes] = await Promise.all([
         api.recognizeAccount(sessionEmail).catch(() => null),
         fetchConsumerMe().catch(() => ({ authenticated: false, user: null, cards: [], receipts: [] })),
       ]);
 
+      const d1MappedCards: ClubMember[] = (meRes.cards || []).map((c) => ({
+        id: c.id,
+        businessId: c.tenantId,
+        businessName: c.businessName,
+        shortCode: c.barcodeToken,
+        memberCode: c.barcodeToken,
+        barcodeToken: c.barcodeToken,
+        name: meRes.user?.fullName || savedLocal?.fullName || 'Socio',
+        email: meRes.user?.email || savedLocal?.email,
+        contact: meRes.user?.email || savedLocal?.email || '',
+        anonymous: false,
+        points: c.stamps,
+        stamps: c.stamps,
+        stampsRequired: c.stampsRequired,
+        targetStamps: c.stampsRequired,
+        rewardText: c.rewardText,
+        rewardValueArs: c.rewardValueArs,
+        colorPreset: (c.colorPreset as any) || 'dark',
+        customColor: c.brandColor,
+        logoUrl: c.logoUrl,
+        lastVisitAt: c.lastStampedAt || new Date().toISOString(),
+        lastStampedAt: c.lastStampedAt,
+        joinedAt: new Date().toISOString(),
+        consent: true,
+      }));
+
       let effectiveAcc = recAcc;
-      if (
-        (!effectiveAcc || !effectiveAcc.recognized) &&
-        meRes.authenticated &&
-        meRes.user?.email
-      ) {
-        effectiveAcc = await api.recognizeAccount(meRes.user.email).catch(() => null);
-        if (!effectiveAcc || !effectiveAcc.recognized) {
-          effectiveAcc = {
-            recognized: true,
-            accountExists: true,
-            accountId: meRes.user.id,
-            name: meRes.user.fullName,
-            email: meRes.user.email,
-            cards: (meRes.cards || []).map((c) => ({
-              id: c.id,
-              businessId: c.tenantId,
-              businessName: c.businessName,
-              shortCode: c.barcodeToken,
-              memberCode: c.barcodeToken,
-              barcodeToken: c.barcodeToken,
-              name: meRes.user!.fullName,
-              email: meRes.user!.email,
-              contact: meRes.user!.email,
-              anonymous: false,
-              points: c.stamps,
-              stamps: c.stamps,
-              stampsRequired: c.stampsRequired,
-              targetStamps: c.stampsRequired,
-              rewardText: c.rewardText,
-              rewardValueArs: c.rewardValueArs,
-              colorPreset: (c.colorPreset as any) || 'dark',
-              customColor: c.brandColor,
-              logoUrl: c.logoUrl,
-              lastVisitAt: c.lastStampedAt || new Date().toISOString(),
-              lastStampedAt: c.lastStampedAt,
-              joinedAt: new Date().toISOString(),
-              consent: true,
-            })),
-          };
+      if (effectiveAcc && effectiveAcc.recognized) {
+        // Unificar tarjetas de D1 con las tarjetas locales asegurando el barcode_token exacto de 8 dígitos
+        const mergedCards = [...(effectiveAcc.cards || [])];
+        for (const d1Card of d1MappedCards) {
+          const existingIdx = mergedCards.findIndex(
+            (mc) => mc.businessId === d1Card.businessId || mc.businessName === d1Card.businessName
+          );
+          if (existingIdx >= 0) {
+            mergedCards[existingIdx] = {
+              ...mergedCards[existingIdx],
+              barcodeToken: d1Card.barcodeToken || mergedCards[existingIdx].barcodeToken,
+              shortCode: d1Card.barcodeToken || mergedCards[existingIdx].shortCode,
+              memberCode: d1Card.barcodeToken || mergedCards[existingIdx].memberCode,
+              stamps: Math.max(mergedCards[existingIdx].stamps || 0, d1Card.stamps || 0),
+            };
+          } else {
+            mergedCards.push(d1Card);
+          }
         }
+        effectiveAcc = {
+          ...effectiveAcc,
+          cards: mergedCards,
+        };
+      } else if (meRes.authenticated && meRes.user?.email) {
+        effectiveAcc = {
+          recognized: true,
+          accountExists: true,
+          accountId: meRes.user.id,
+          name: meRes.user.fullName,
+          email: meRes.user.email,
+          cards: d1MappedCards,
+        };
+      } else if (savedLocal && savedLocal.email) {
+        effectiveAcc = {
+          recognized: true,
+          accountExists: true,
+          accountId: savedLocal.id,
+          name: savedLocal.fullName,
+          email: savedLocal.email,
+          cards: d1MappedCards,
+        };
       }
 
       if (effectiveAcc && effectiveAcc.recognized) {
@@ -227,7 +271,7 @@ export const ToquecitosView: React.FC = () => {
         setReceipts([]);
       }
     } catch {
-      // ignore
+      // Si hay error temporal de red, mantener sesión local activa
     }
   };
 

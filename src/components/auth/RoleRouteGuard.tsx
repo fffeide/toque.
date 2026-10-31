@@ -2,7 +2,6 @@ import React from 'react';
 import { Navigate, Outlet, useLocation } from 'react-router-dom';
 import { useAuth } from '../../lib/authContext';
 import { UserRole } from '../../api';
-import { Skeleton } from '../ui/Skeleton';
 
 interface RoleRouteGuardProps {
   allowedRoles: UserRole[];
@@ -21,16 +20,13 @@ export function getHomePathForRole(role?: UserRole, isSuperAdmin?: boolean, emai
 }
 
 export const RoleRouteGuard: React.FC<RoleRouteGuardProps> = ({ allowedRoles, children }) => {
-  const { user, isLoading } = useAuth();
+  const { user, isCheckingAuth } = useAuth();
   const location = useLocation();
 
-  if (isLoading) {
+  if (isCheckingAuth && !user) {
     return (
-      <div className="min-h-screen bg-[#0C0C0E] flex items-center justify-center p-6">
-        <div className="max-w-sm w-full space-y-4">
-          <Skeleton className="h-10 w-44 mx-auto rounded-xl bg-[#141418]" />
-          <Skeleton className="h-44 w-full rounded-2xl bg-[#141418]" />
-        </div>
+      <div className="min-h-screen bg-[#0A0A0A] flex items-center justify-center p-6">
+        <div className="w-6 h-6 rounded-full border-2 border-[#282830] border-t-[#D95B26] animate-spin" />
       </div>
     );
   }
@@ -45,7 +41,6 @@ export const RoleRouteGuard: React.FC<RoleRouteGuardProps> = ({ allowedRoles, ch
     user.role === 'superadmin' ||
     cleanEmail === 'fedeeeloiss@gmail.com';
 
-  // Blindaje estricto para /admin: solo fedeeeloiss@gmail.com o miembros de toque_admins
   if (location.pathname.startsWith('/admin') && !isVerifiedSuperAdmin) {
     return <Navigate to="/panel/resumen" replace />;
   }

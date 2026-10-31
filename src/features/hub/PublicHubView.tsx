@@ -17,6 +17,9 @@ import { BirthDatePicker } from '../../components/BirthDatePicker';
 import {
   fetchConsumerMe,
   getConsumerSessionEmail,
+  getConsumerSessionToken,
+  getSavedConsumerUser,
+  saveConsumerSession,
   clearConsumerSession,
   isIOSDevice,
   isAndroidDevice,
@@ -98,16 +101,33 @@ export const PublicHubView: React.FC = () => {
   const [pinnedReceipt, setPinnedReceipt] = useState<Receipt | null>(null);
   const [isReceiptExpired, setIsReceiptExpired] = useState(false);
 
+  // Inicialización síncrona desde localStorage para no perder sesión al refrescar (F5)
+  const [recognizedAccount, setRecognizedAccount] = useState<RecognizedClientAccount | null>(() => {
+    const savedUser = getSavedConsumerUser();
+    if (savedUser && savedUser.email) {
+      return {
+        recognized: true,
+        accountExists: true,
+        accountId: savedUser.id,
+        name: savedUser.fullName,
+        email: savedUser.email,
+        cards: [],
+      };
+    }
+    return null;
+  });
+
   const [step, setStep] = useState<
     'recognized_other_merchant' | 'email_login' | 'form' | 'verify_email' | 'active'
-  >('form');
-
-  const [recognizedAccount, setRecognizedAccount] = useState<RecognizedClientAccount | null>(null);
+  >(() => {
+    const savedUser = getSavedConsumerUser();
+    return savedUser && savedUser.email ? 'recognized_other_merchant' : 'form';
+  });
 
   // Datos de registro (nombre, correo y fecha de nacimiento con selector nativo de 3 columnas)
-  const [name, setName] = useState('');
-  const [email, setEmail] = useState('');
-  const [birthDate, setBirthDate] = useState<string>('');
+  const [name, setName] = useState(() => getSavedConsumerUser()?.fullName || '');
+  const [email, setEmail] = useState(() => getSavedConsumerUser()?.email || '');
+  const [birthDate, setBirthDate] = useState<string>(() => getSavedConsumerUser()?.birthDate || '');
   const [marketingConsent, setMarketingConsent] = useState(false);
   const [emailAlreadyVerifiedInLogin, setEmailAlreadyVerifiedInLogin] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -130,7 +150,7 @@ export const PublicHubView: React.FC = () => {
   const [cooldownRemainingMs, setCooldownRemainingMs] = useState<number>(0);
   const [newlyStampedSlot, setNewlyStampedSlot] = useState<number | null>(null);
 
-  // Botón "Guardar en mi billetera"
+  // Botón secundario "Agregar a la billetera del teléfono"
   const [generatingPass, setGeneratingPass] = useState(false);
   const [walletUnconfigured, setWalletUnconfigured] = useState(false);
   const [walletStatusMessage, setWalletStatusMessage] = useState<string | null>(null);
@@ -143,6 +163,57 @@ export const PublicHubView: React.FC = () => {
   const handleOpenToquecitos = () => {
     const localCodeVal = hub?.cartel.code || targetCode;
     navigate(`/toquecitos?from=${encodeURIComponent(localCodeVal)}`);
+  };
+
+  // Función auxiliar para guardar/reclamar la tarjeta en D1 (POST /api/consumer/cards/claim) desacoplado de WalletWallet
+  const claimCardInD1 = async (params: {
+    hubData: PublicHub;
+    customerName?: string;
+    customerEmail?: string;
+    customerBirthDate?: string;
+  }): Promise<{ barcodeToken?: string; stamps?: number; stampsRequired?: number; memberId?: string }> => {
+    try {
+      const token = getConsumerSessionToken();
+      const res = await fetch('/api/consumer/cards/claim', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({
+          cartelCode: params.hubData.cartel.code,
+          tenantId: params.hubData.business.id,
+          businessName: params.hubData.business.name,
+          rewardText:
+            params.hubData.club?.config?.loyaltyReward ||
+            params.hubData.club?.config?.rewardText ||
+            'Premio al completar tus sellos',
+          stampsRequired:
+            params.hubData.club?.config?.targetStamps ||
+            params.hubData.club?.config?.stampsRequired ||
+            10,
+          name: params.customerName,
+          email: params.customerEmail,
+          birthDate: params.customerBirthDate,
+        }),
+      });
+      if (!res.ok) return {};
+      const data = await res.json();
+      if (data.sessionToken && data.user) {
+        saveConsumerSession(data.sessionToken, data.user);
+      }
+      if (data.member) {
+        return {
+          barcodeToken: data.member.barcodeToken,
+          stamps: data.member.stamps,
+          stampsRequired: data.member.stampsRequired,
+          memberId: data.member.id,
+        };
+      }
+      return {};
+    } catch {
+      return {};
+    }
   };
 
   useEffect(() => {
@@ -161,12 +232,83 @@ export const PublicHubView: React.FC = () => {
 
         await api.recordHubEvent(targetCode, 'scan');
 
-        const incomingRcp = data.activeReceipt || data.receipt || null;
-        setPinnedReceipt(incomingRcp);
+        // Validar comprobante seguro (Prioridad 1: asignado a su consumer_id por sello en los últimos 2 min; Prioridad 2: < 90s y < 120m)
+        let verifiedReceipt: Receipt | null = null;
+        const candidateRcp = data.activeReceipt || data.receipt || null;
+        if (candidateRcp) {
+          const expMs = new Date(candidateRcp.expiresAt).getTime();
+          if (!Number.isNaN(expMs) && expMs > Date.now()) {
+            verifiedReceipt = candidateRcp;
+          }
+        }
+
+        // Consultar también /api/public/hub/receipt-check enviando ubicación opcional si está disponible
+        const checkServerReceipt = async (lat?: number, lng?: number) => {
+          try {
+            const token = getConsumerSessionToken();
+            const rcpRes = await fetch('/api/public/hub/receipt-check', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                ...(token ? { Authorization: `Bearer ${token}` } : {}),
+              },
+              body: JSON.stringify({
+                cartelCode: data.cartel.code,
+                tenantId: data.business.id,
+                lat,
+                lng,
+              }),
+            });
+            if (rcpRes.ok) {
+              const rcpJson = await rcpRes.json();
+              if (rcpJson.receipt && active) {
+                const srvRcp = rcpJson.receipt;
+                setPinnedReceipt({
+                  id: srvRcp.id,
+                  saleId: srvRcp.id,
+                  businessId: data.business.id,
+                  businessName: data.business.name,
+                  cartelCode: srvRcp.cartelCode || data.cartel.code,
+                  total: srvRcp.amountArs || 0,
+                  currency: 'ARS',
+                  cashTendered: srvRcp.cashTendered,
+                  changeDue: srvRcp.changeDue,
+                  method: srvRcp.method || 'cash',
+                  items: srvRcp.items || [],
+                  status: 'ready',
+                  createdAt: srvRcp.createdAt || new Date().toISOString(),
+                  expiresAt: new Date(srvRcp.expiresAt || Date.now() + 90000).toISOString(),
+                });
+              }
+            }
+          } catch {
+            // ignore
+          }
+        };
+
+        if (verifiedReceipt) {
+          setPinnedReceipt(verifiedReceipt);
+        } else {
+          setPinnedReceipt(null);
+        }
+
+        if (typeof navigator !== 'undefined' && navigator.geolocation) {
+          navigator.geolocation.getCurrentPosition(
+            (pos) => {
+              checkServerReceipt(pos.coords.latitude, pos.coords.longitude);
+            },
+            () => {
+              checkServerReceipt();
+            },
+            { timeout: 3500, maximumAge: 30000 }
+          );
+        } else {
+          checkServerReceipt();
+        }
 
         if (
           (data.config.mode === 'direct' || data.config.mode === 'direct_review') &&
-          !incomingRcp &&
+          !verifiedReceipt &&
           isConfiguredReviewUrl(data.reviewUrl)
         ) {
           window.location.href = data.reviewUrl;
@@ -196,27 +338,78 @@ export const PublicHubView: React.FC = () => {
               accountId: meRes.user.id,
               name: meRes.user.fullName,
               email: meRes.user.email,
-              cards: [],
+              cards: (meRes.cards || []).map((c) => ({
+                id: c.id,
+                businessId: c.tenantId,
+                businessName: c.businessName,
+                shortCode: c.barcodeToken,
+                memberCode: c.barcodeToken,
+                barcodeToken: c.barcodeToken,
+                name: meRes.user!.fullName,
+                email: meRes.user!.email,
+                contact: meRes.user!.email,
+                anonymous: false,
+                points: c.stamps,
+                stamps: c.stamps,
+                stampsRequired: c.stampsRequired,
+                targetStamps: c.stampsRequired,
+                rewardText: c.rewardText,
+                lastVisitAt: c.lastStampedAt || new Date().toISOString(),
+                lastStampedAt: c.lastStampedAt,
+                joinedAt: new Date().toISOString(),
+                consent: true,
+              })),
             };
           }
         }
 
+        const d1CardForBusiness = (meRes.cards || []).find(
+          (c) => c.tenantId === data.business.id || c.businessName === data.business.name
+        );
+
         const existingCardInThisBusiness =
           data.club?.member ||
           effectiveAcc?.cards?.find((c) => c.businessId === data.business.id) ||
-          null;
+          (d1CardForBusiness
+            ? {
+                id: d1CardForBusiness.id,
+                businessId: d1CardForBusiness.tenantId,
+                businessName: d1CardForBusiness.businessName,
+                shortCode: d1CardForBusiness.barcodeToken,
+                memberCode: d1CardForBusiness.barcodeToken,
+                barcodeToken: d1CardForBusiness.barcodeToken,
+                name: meRes.user?.fullName || effectiveAcc?.name || 'Socio',
+                email: meRes.user?.email || effectiveAcc?.email,
+                contact: meRes.user?.email || effectiveAcc?.email || '',
+                anonymous: false,
+                points: d1CardForBusiness.stamps,
+                stamps: d1CardForBusiness.stamps,
+                stampsRequired: d1CardForBusiness.stampsRequired,
+                targetStamps: d1CardForBusiness.stampsRequired,
+                rewardText: d1CardForBusiness.rewardText,
+                lastVisitAt: d1CardForBusiness.lastStampedAt || new Date().toISOString(),
+                lastStampedAt: d1CardForBusiness.lastStampedAt,
+                joinedAt: new Date().toISOString(),
+                consent: true,
+              }
+            : null);
 
         if (existingCardInThisBusiness) {
+          if (d1CardForBusiness?.barcodeToken) {
+            existingCardInThisBusiness.barcodeToken = d1CardForBusiness.barcodeToken;
+            existingCardInThisBusiness.shortCode = d1CardForBusiness.barcodeToken;
+            existingCardInThisBusiness.memberCode = d1CardForBusiness.barcodeToken;
+          }
           setJoinedMember(existingCardInThisBusiness);
           setStep('active');
 
-          if (incomingRcp && !processedReceiptStampsRef.current.has(incomingRcp.id)) {
-            processedReceiptStampsRef.current.add(incomingRcp.id);
+          if (verifiedReceipt && !processedReceiptStampsRef.current.has(verifiedReceipt.id)) {
+            processedReceiptStampsRef.current.add(verifiedReceipt.id);
             try {
               const stampRes = await api.claimSelfStamp({
                 localCode: data.cartel.code,
                 memberId: existingCardInThisBusiness.id,
-                receiptId: incomingRcp.id,
+                receiptId: verifiedReceipt.id,
               });
               if (active && stampRes.stampsAdded > 0) {
                 setJoinedMember(stampRes.member);
@@ -230,12 +423,24 @@ export const PublicHubView: React.FC = () => {
             }
           }
         } else if (effectiveAcc && effectiveAcc.recognized && effectiveAcc.email) {
-          // Ya tiene sesión activa en Toque -> mostrar directamente "Hola, [Nombre]" y un único botón "Guardar mi tarjeta"
           setRecognizedAccount(effectiveAcc);
           setMarketingConsent(true);
           setStep('recognized_other_merchant');
         } else {
-          setStep('form');
+          const savedLocalUser = getSavedConsumerUser();
+          if (savedLocalUser && savedLocalUser.email) {
+            setRecognizedAccount({
+              recognized: true,
+              accountExists: true,
+              accountId: savedLocalUser.id,
+              name: savedLocalUser.fullName,
+              email: savedLocalUser.email,
+              cards: [],
+            });
+            setStep('recognized_other_merchant');
+          } else {
+            setStep('form');
+          }
         }
       } catch (err: any) {
         if (active) setError(err?.message || 'El cartel consultado no existe o no está activo.');
@@ -251,7 +456,10 @@ export const PublicHubView: React.FC = () => {
       setHub(liveHub);
       const incomingRcp = liveHub.activeReceipt || liveHub.receipt || null;
       if (incomingRcp) {
-        setPinnedReceipt((prev) => prev || incomingRcp);
+        const expMs = new Date(incomingRcp.expiresAt).getTime();
+        if (!Number.isNaN(expMs) && expMs > Date.now()) {
+          setPinnedReceipt((prev) => prev || incomingRcp);
+        }
       }
       if (liveHub.club?.member) {
         setJoinedMember(liveHub.club.member);
@@ -265,7 +473,7 @@ export const PublicHubView: React.FC = () => {
     };
   }, [targetCode]);
 
-  const displayedReceipt = pinnedReceipt || hub?.activeReceipt || hub?.receipt || null;
+  const displayedReceipt = pinnedReceipt;
 
   useEffect(() => {
     if (!displayedReceipt) {
@@ -293,19 +501,33 @@ export const PublicHubView: React.FC = () => {
     window.location.href = hub.reviewUrl;
   };
 
-  // Cuenta única reconocida: vincular o abrir su tarjeta de este comercio en un solo toque
+  // Cuenta única reconocida: al tocar "Guardar tarjeta" en /hub/:code, guarda primero en D1 (200 OK siempre) con su barcode_token de 8 dígitos
   const handleAddCardForRecognizedAccount = async () => {
     if (!hub) return;
     setFormError(null);
     try {
       setSubmitting(true);
+      const d1Claim = await claimCardInD1({
+        hubData: hub,
+        customerName: recognizedAccount?.name || name || 'Socio',
+        customerEmail: recognizedAccount?.email || email,
+      });
+
       const res = await api.addCardToAccount({
         localCode: hub.cartel.code,
         marketingConsent,
       });
-      setJoinedMember(res.member);
+
+      const mergedMember: ClubMember = {
+        ...res.member,
+        barcodeToken: d1Claim.barcodeToken || res.member.barcodeToken || res.member.shortCode,
+        shortCode: d1Claim.barcodeToken || res.member.shortCode || res.member.barcodeToken,
+        memberCode: d1Claim.barcodeToken || res.member.memberCode || res.member.barcodeToken,
+      };
+
+      setJoinedMember(mergedMember);
       setRecognizedAccount(res.account);
-      setNewlyStampedSlot(res.member.stamps || 1);
+      setNewlyStampedSlot(mergedMember.stamps || 1);
       setStep('active');
       showToast(`¡Sumaste la tarjeta de ${hub.business.name} a tu cuenta!`, 'success');
     } catch (err: any) {
@@ -411,6 +633,15 @@ export const PublicHubView: React.FC = () => {
     if (emailAlreadyVerifiedInLogin) {
       try {
         setSubmitting(true);
+        const d1Claim = hub
+          ? await claimCardInD1({
+              hubData: hub,
+              customerName: cleanName,
+              customerEmail: cleanEmail,
+              customerBirthDate: birthDate,
+            })
+          : {};
+
         const reg = await api.registerMember({
           localCode: hub?.cartel.code || targetCode,
           name: cleanName,
@@ -420,8 +651,16 @@ export const PublicHubView: React.FC = () => {
           birthMonth: ageCheck.birthMonth,
           marketingConsent,
         });
-        setJoinedMember(reg.member);
-        setNewlyStampedSlot(reg.member.stamps || 1);
+
+        const mergedMember: ClubMember = {
+          ...reg.member,
+          barcodeToken: d1Claim.barcodeToken || reg.member.barcodeToken || reg.member.shortCode,
+          shortCode: d1Claim.barcodeToken || reg.member.shortCode || reg.member.barcodeToken,
+          memberCode: d1Claim.barcodeToken || reg.member.memberCode || reg.member.barcodeToken,
+        };
+
+        setJoinedMember(mergedMember);
+        setNewlyStampedSlot(mergedMember.stamps || 1);
         setStep('active');
         showToast('¡Listo! Ya tenés tu tarjeta activa.', 'success');
       } catch (err: any) {
@@ -445,7 +684,7 @@ export const PublicHubView: React.FC = () => {
     }
   };
 
-  // Confirmar código de 6 dígitos y crear la tarjeta
+  // Confirmar código de 6 dígitos y crear la tarjeta en D1 (200 OK siempre)
   const handleConfirmEmailAndRegister = async (e: React.FormEvent) => {
     e.preventDefault();
     setFormError(null);
@@ -466,16 +705,31 @@ export const PublicHubView: React.FC = () => {
     try {
       setSubmitting(true);
       const verifyRes = await api.verifyOtp(cleanEmail, cleanCode);
+      const d1Claim = hub
+        ? await claimCardInD1({
+            hubData: hub,
+            customerName: name.trim(),
+            customerEmail: cleanEmail,
+            customerBirthDate: birthDate,
+          })
+        : {};
+
       // Si el correo ya existía en otra cuenta, nunca forzar nuevo registro
       if (verifyRes.account?.accountExists) {
         const res = await api.addCardToAccount({
           localCode: hub?.cartel.code || targetCode,
           marketingConsent,
         });
-        setJoinedMember(res.member);
-        setNewlyStampedSlot(res.member.stamps || 1);
+        const mergedMember: ClubMember = {
+          ...res.member,
+          barcodeToken: d1Claim.barcodeToken || res.member.barcodeToken || res.member.shortCode,
+          shortCode: d1Claim.barcodeToken || res.member.shortCode || res.member.barcodeToken,
+          memberCode: d1Claim.barcodeToken || res.member.memberCode || res.member.barcodeToken,
+        };
+        setJoinedMember(mergedMember);
+        setNewlyStampedSlot(mergedMember.stamps || 1);
         setStep('active');
-        showToast(`¡Hola, ${res.member.name || 'Socio'}! Ya tenés tu tarjeta activa.`, 'success');
+        showToast(`¡Hola, ${mergedMember.name || 'Socio'}! Ya tenés tu tarjeta activa.`, 'success');
         return;
       }
 
@@ -489,8 +743,15 @@ export const PublicHubView: React.FC = () => {
         marketingConsent,
       });
 
-      setJoinedMember(reg.member);
-      setNewlyStampedSlot(reg.member.stamps || 1);
+      const mergedMember: ClubMember = {
+        ...reg.member,
+        barcodeToken: d1Claim.barcodeToken || reg.member.barcodeToken || reg.member.shortCode,
+        shortCode: d1Claim.barcodeToken || reg.member.shortCode || reg.member.barcodeToken,
+        memberCode: d1Claim.barcodeToken || reg.member.memberCode || reg.member.barcodeToken,
+      };
+
+      setJoinedMember(mergedMember);
+      setNewlyStampedSlot(mergedMember.stamps || 1);
       setStep('active');
       showToast('¡Correo verificado! Ya tenés tu 1° sello cargado en la tarjeta.', 'success');
     } catch (err: any) {
@@ -500,7 +761,7 @@ export const PublicHubView: React.FC = () => {
     }
   };
 
-  // Guardado directo en Apple Wallet (.pkpass) y Google Wallet (googleSaveUrl) sin pasar por shareUrl de WalletWallet
+  // Botón secundario opcional para descargar el pase en Apple/Google Wallet dentro de la tarjeta ya guardada
   const handleAddToWallet = async () => {
     if (!hub || !joinedMember || walletUnconfigured) return;
     setWalletErrorMessage(null);
@@ -522,7 +783,7 @@ export const PublicHubView: React.FC = () => {
         customerName: joinedMember.name || 'Socio',
         customerContact: joinedMember.email || joinedMember.maskedEmail || joinedMember.contact,
         stamps: joinedMember.stamps,
-        stampsRequired: hub.club?.config?.targetStamps || 5,
+        stampsRequired: hub.club?.config?.targetStamps || 10,
         rewardText:
           hub.club?.config?.loyaltyReward ||
           hub.club?.config?.rewardText ||
@@ -536,12 +797,12 @@ export const PublicHubView: React.FC = () => {
 
       if (pass.configured === false) {
         setWalletUnconfigured(true);
-        setWalletStatusMessage('Pronto vas a poder guardarla en tu billetera');
+        setWalletStatusMessage('Tu tarjeta ya está guardada en tu cuenta.');
         return;
       }
 
       if (!pass.success) {
-        setWalletErrorMessage('No pudimos crear tu tarjeta. Probá de nuevo.');
+        setWalletErrorMessage('Tu tarjeta ya está guardada en tu cuenta.');
         return;
       }
 
@@ -558,12 +819,11 @@ export const PublicHubView: React.FC = () => {
         return;
       }
 
-      // En computadora de escritorio: mostrar el pase en pantalla con el enlace de descarga como respaldo
       const fallback = googleUrl || pkpassUrl;
       setDesktopFallbackUrl(fallback);
       setWalletStatusMessage('Tu pase está listo en pantalla. También podés descargarlo debajo.');
     } catch {
-      setWalletErrorMessage('No pudimos crear tu tarjeta. Probá de nuevo.');
+      setWalletErrorMessage('Tu tarjeta ya está guardada en tu cuenta.');
     } finally {
       setGeneratingPass(false);
     }
@@ -670,7 +930,7 @@ export const PublicHubView: React.FC = () => {
             onClick={handleAddCardForRecognizedAccount}
             className="w-full py-3.5 px-5 rounded-2xl bg-[#D95B26] hover:bg-[#e36630] text-white font-bold text-xs transition-colors disabled:opacity-50 cursor-pointer shadow-lg shadow-[#D95B26]/20"
           >
-            {submitting ? 'Guardando tarjeta...' : 'Guardar mi tarjeta'}
+            {submitting ? 'Guardando tarjeta...' : 'Guardar tarjeta'}
           </button>
 
           <button
@@ -906,10 +1166,10 @@ export const PublicHubView: React.FC = () => {
                 className="w-full py-3 px-5 rounded-2xl bg-[#D95B26] hover:bg-[#e36630] text-white font-bold text-xs transition-colors disabled:opacity-50 cursor-pointer shadow-lg shadow-[#D95B26]/20"
               >
                 {submitting
-                  ? 'Enviando código...'
+                  ? 'Guardando tarjeta...'
                   : emailAlreadyVerifiedInLogin
-                  ? 'Guardar mi tarjeta'
-                  : 'Recibir código y activar tarjeta'}
+                  ? 'Guardar tarjeta'
+                  : 'Guardar tarjeta'}
               </button>
             </div>
           </form>
@@ -968,7 +1228,7 @@ export const PublicHubView: React.FC = () => {
                 disabled={submitting || emailOtpCode.length < 6}
                 className="flex-1 py-2.5 px-4 rounded-2xl bg-[#2FB36A] hover:bg-[#259858] text-[#05150c] font-bold text-xs disabled:opacity-50 cursor-pointer"
               >
-                {submitting ? 'Verificando...' : 'Confirmar y activar tarjeta'}
+                {submitting ? 'Guardando...' : 'Guardar tarjeta'}
               </button>
             </div>
           </form>
@@ -1134,7 +1394,7 @@ export const PublicHubView: React.FC = () => {
             {/* Si no hay comprobante en pantalla, mostramos el flujo de alta aquí directamente */}
             {!displayedReceipt && step !== 'active' && renderClubAuthFlow()}
 
-            {/* C. TARJETA ACTIVA DEL CLIENTE (código de barras CODE128 con los 8 números grandes debajo + "Guardar en mi billetera") */}
+            {/* C. TARJETA ACTIVA DEL CLIENTE (código de barras CODE128 con los 8 números grandes debajo + botón secundario de billetera) */}
             {step === 'active' && joinedMember && (
               <section className="rounded-3xl bg-[#141414] border border-[#242424] p-5 space-y-4">
                 <div className="flex items-center justify-between gap-2">
@@ -1188,7 +1448,7 @@ export const PublicHubView: React.FC = () => {
                   logoUrl={clubCfg?.logoUrl || business.logoUrl}
                 />
 
-                {/* Botón "Guardar en mi billetera" con descarga directa .pkpass en iOS y googleSaveUrl en Android */}
+                {/* Botón secundario opcional dentro de la tarjeta ya guardada */}
                 <div className="space-y-2">
                   <button
                     type="button"
@@ -1199,10 +1459,10 @@ export const PublicHubView: React.FC = () => {
                     <Wallet className="w-4 h-4 text-[#D95B26]" />
                     <span>
                       {walletUnconfigured
-                        ? 'Pronto vas a poder guardarla en tu billetera'
+                        ? 'Tarjeta guardada en tu cuenta'
                         : generatingPass
-                        ? 'Preparando tu tarjeta...'
-                        : 'Guardar en mi billetera'}
+                        ? 'Preparando tu pase...'
+                        : 'Agregar a la billetera del teléfono'}
                     </span>
                   </button>
 
