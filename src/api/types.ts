@@ -66,6 +66,7 @@ export interface WalletPassResponse {
   appleWalletUrl?: string;
   applePassBase64?: string;
   googleWalletUrl?: string;
+  googleSaveUrl?: string;
   qrUrl?: string;
   fallbackWebPass?: boolean;
   barcodeValue?: string;
