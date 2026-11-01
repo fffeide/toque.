@@ -629,7 +629,7 @@ async function startServer() {
       if (!foundPass?.applePassBase64) {
         try {
           const apiKey = (
-            process.env.WALLETWALLET_API_KEY || 'ww_live_0a1b9cf29dcd4f7ceb3a5023d0e49de2'
+            process.env.WALLETWALLET_API_KEY || ''
           ).trim();
           const token8 = normalize8DigitBarcode(rawToken) || generateUnique8DigitServerBarcode();
           const liveCfg = Array.from(memoryMerchantHubConfigs.values())[0];
@@ -1011,7 +1011,7 @@ async function startServer() {
         }
 
         const apiKey = (
-          process.env.WALLETWALLET_API_KEY || 'ww_live_0a1b9cf29dcd4f7ceb3a5023d0e49de2'
+          process.env.WALLETWALLET_API_KEY || ''
         ).trim();
 
         // Actualizar en segundo plano los pases emitidos de este comercio
@@ -1128,7 +1128,7 @@ async function startServer() {
     // 5. Estado de WalletWallet
     if (pathname === '/api/wallet/status' && req.method === 'GET') {
       const apiKey = (
-        process.env.WALLETWALLET_API_KEY || 'ww_live_0a1b9cf29dcd4f7ceb3a5023d0e49de2'
+        process.env.WALLETWALLET_API_KEY || ''
       ).trim();
       const hasKey = Boolean(apiKey.length > 0);
       const hasResendKey = Boolean(
@@ -1559,7 +1559,7 @@ async function startServer() {
         let walletSyncError: string | undefined;
         let notifiedDevices = 0;
         const apiKey = (
-          process.env.WALLETWALLET_API_KEY || 'ww_live_0a1b9cf29dcd4f7ceb3a5023d0e49de2'
+          process.env.WALLETWALLET_API_KEY || ''
         ).trim();
 
         if (walletSerial && apiKey) {
@@ -1723,7 +1723,7 @@ async function startServer() {
 
         const qrUrl = body.qrUrl || `/u/${code}`;
         const apiKey = (
-          process.env.WALLETWALLET_API_KEY || 'ww_live_0a1b9cf29dcd4f7ceb3a5023d0e49de2'
+          process.env.WALLETWALLET_API_KEY || ''
         ).trim();
 
         const cardInput: CardInput = {
