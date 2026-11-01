@@ -37,11 +37,5 @@ ALTER TABLE loyalty_members ADD COLUMN wallet_google_url TEXT;
 CREATE UNIQUE INDEX IF NOT EXISTS idx_loyalty_members_barcode_token_unique ON loyalty_members(barcode_token);
 CREATE INDEX IF NOT EXISTS idx_loyalty_members_consumer_id ON loyalty_members(consumer_id);
 
--- 3. Asegurar columnas de diseño y sincronización en hub_configs
-ALTER TABLE hub_configs ADD COLUMN business_name TEXT;
-ALTER TABLE hub_configs ADD COLUMN logo_url TEXT;
-ALTER TABLE hub_configs ADD COLUMN brand_color TEXT DEFAULT '#D95B26';
-ALTER TABLE hub_configs ADD COLUMN color_preset TEXT DEFAULT 'dark';
-ALTER TABLE hub_configs ADD COLUMN stamps_required INTEGER DEFAULT 10;
-ALTER TABLE hub_configs ADD COLUMN reward_text TEXT;
-ALTER TABLE hub_configs ADD COLUMN reward_value_ars INTEGER DEFAULT 0;
+-- 3. Las columnas de diseño de hub_configs ya se agregan en
+-- 0003_wallet_and_cooldown.sql. No repetir ALTER TABLE ADD COLUMN aquí.
