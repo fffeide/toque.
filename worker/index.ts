@@ -103,6 +103,7 @@ interface D1LoyaltyMemberRow {
   wallet_serial?: string | null;
   wallet_apple_base64?: string | null;
   wallet_google_url?: string | null;
+  wallet_download_token?: string | null;
   wallet_last_notification?: string | null;
   last_notified_at?: string | null;
   wallet_sync_error?: string | null;
@@ -171,6 +172,36 @@ function normalize8DigitToken(raw?: string | null): string {
   const digits = String(raw || '').replace(/\D/g, '');
   if (digits.length === 8) return digits;
   return '';
+}
+
+/** Token bearer aleatorio de 256 bits, independiente del barcode público de 8 dígitos. */
+function generateWalletDownloadToken(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(32));
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
+async function ensureWalletDownloadToken(db: D1Database, memberId: string): Promise<string> {
+  const member = await db.prepare(
+    'SELECT id, wallet_download_token FROM loyalty_members WHERE id = ? LIMIT 1'
+  ).bind(memberId).first<{ id: string; wallet_download_token?: string | null }>();
+  if (!member) throw new Error('No encontramos el socio en loyalty_members.');
+
+  const current = String(member.wallet_download_token || '').trim();
+  if (/^[a-f0-9]{64}$/i.test(current)) return current;
+
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const candidate = generateWalletDownloadToken();
+    await db.prepare(
+      `UPDATE loyalty_members SET wallet_download_token = ?
+       WHERE id = ? AND (wallet_download_token IS NULL OR wallet_download_token = '')`
+    ).bind(candidate, memberId).run();
+    const saved = await db.prepare(
+      'SELECT wallet_download_token FROM loyalty_members WHERE id = ? LIMIT 1'
+    ).bind(memberId).first<{ wallet_download_token?: string | null }>();
+    const token = String(saved?.wallet_download_token || '').trim();
+    if (/^[a-f0-9]{64}$/i.test(token)) return token;
+  }
+  throw new Error('No pudimos generar el enlace seguro para Apple Wallet.');
 }
 
 function calculateDistanceMeters(lat1: number, lng1: number, lat2: number, lng2: number): number {
@@ -1038,7 +1069,8 @@ export default {
             const existing = await env.DB
               .prepare(
                 `SELECT id, consumer_id, tenant_id, customer_name, name, stamps, barcode_token,
-                        last_stamped_at, wallet_serial, wallet_apple_base64, wallet_google_url
+                        last_stamped_at, wallet_serial, wallet_apple_base64, wallet_google_url,
+                        wallet_download_token
                  FROM loyalty_members
                  WHERE tenant_id = ? AND (
                    (consumer_id IS NOT NULL AND consumer_id = ?) OR
@@ -1066,7 +1098,8 @@ export default {
               lastStampedAt = existing.last_stamped_at || null;
               walletSerial = existing.wallet_serial || null;
               if (existing.wallet_apple_base64) {
-                walletAppleUrl = `/api/wallet/pass/${encodeURIComponent(barcodeToken)}.pkpass`;
+                const downloadToken = await ensureWalletDownloadToken(env.DB, existing.id);
+                walletAppleUrl = `/api/wallet/apple/${downloadToken}`;
               }
               if (existing.wallet_google_url) {
                 walletGoogleUrl = existing.wallet_google_url;
@@ -1081,7 +1114,8 @@ export default {
                        customer_email = COALESCE(NULLIF(?, ''), customer_email),
                        contact = COALESCE(NULLIF(?, ''), contact),
                        stamps_required = 10,
-                       barcode_token = ?
+                       barcode_token = ?,
+                       member_code = ?
                    WHERE id = ?`
                 )
                 .bind(
@@ -1090,6 +1124,7 @@ export default {
                   fullName,
                   cleanEmail,
                   cleanEmail,
+                  barcodeToken,
                   barcodeToken,
                   memberId
                 )
@@ -1155,6 +1190,7 @@ export default {
           lastStampedAt,
           walletSerial: walletSerial || undefined,
           appleWalletUrl: walletAppleUrl,
+          googleSaveUrl: walletGoogleUrl,
           googleWalletUrl: walletGoogleUrl,
           joinedAt: nowIso,
           consent: true,
@@ -1190,123 +1226,52 @@ export default {
       }
     }
 
-    // 5. Endpoint público de descarga directa de Apple Wallet (.pkpass): GET /api/wallet/pass/:barcodeToken.pkpass
-    if (
-      (pathname.startsWith('/api/wallet/pass/') || pathname.startsWith('/api/wallet/pkpass/')) &&
-      (pathname.endsWith('.pkpass') || pathname.startsWith('/api/wallet/pkpass/')) &&
-      request.method === 'GET'
-    ) {
-      const rawParam = decodeURIComponent(
-        pathname
-          .replace('/api/wallet/pass/', '')
-          .replace('/api/wallet/pkpass/', '')
-          .replace(/\.pkpass$/i, '')
-      ).trim();
-
-      let applePassBase64: string | null = null;
-      let memberRow: D1LoyaltyMemberRow | null = null;
-      let hubRow: D1HubConfigRow | null = null;
-
-      if (env.DB && rawParam) {
-        try {
-          memberRow = await env.DB
-            .prepare(
-              'SELECT * FROM loyalty_members WHERE barcode_token = ? OR id = ? OR wallet_serial = ? LIMIT 1'
-            )
-            .bind(rawParam, rawParam, rawParam)
-            .first<D1LoyaltyMemberRow>();
-
-          if (memberRow?.wallet_apple_base64) {
-            applePassBase64 = memberRow.wallet_apple_base64;
-          }
-
-          if (memberRow?.tenant_id) {
-            hubRow = await env.DB
-              .prepare(
-                'SELECT tenant_id, business_name, reward_text, loyalty_reward, brand_color, color_preset, custom_color, logo_url FROM hub_configs WHERE tenant_id = ? LIMIT 1'
-              )
-              .bind(memberRow.tenant_id)
-              .first<D1HubConfigRow>()
-              .catch(() => null);
-          }
-        } catch {
-          // ignore
-        }
+    // 5. Servir Apple Wallet desde D1 mediante token opaco aleatorio.
+    if (pathname.startsWith('/api/wallet/apple/') && request.method === 'GET') {
+      const downloadToken = pathname.slice('/api/wallet/apple/'.length).trim();
+      if (!/^[a-f0-9]{64}$/i.test(downloadToken)) {
+        return jsonResponse({ error: 'El enlace de Apple Wallet no es válido.' }, 404);
       }
-
-      // Si todavía no estaba el binario .pkpass en D1, generarlo en el acto con WalletWallet
-      if (!applePassBase64) {
-        try {
-          const token8 =
-            normalize8DigitToken(memberRow?.barcode_token || rawParam) ||
-            (await generateUnique8DigitBarcode(env.DB));
-          const businessName =
-            hubRow?.business_name ||
-            url.searchParams.get('businessName') ||
-            'Mi comercio';
-          const rewardText =
-            hubRow?.reward_text ||
-            hubRow?.loyalty_reward ||
-            url.searchParams.get('rewardText') ||
-            'Beneficio al completar tus 10 sellos';
-          const stamps = Number(memberRow?.stamps ?? url.searchParams.get('stamps') ?? 0);
-          const memberName =
-            memberRow?.customer_name ||
-            memberRow?.name ||
-            url.searchParams.get('memberName') ||
-            undefined;
-
-          const created = await createPass(env, {
-            businessName,
-            memberName,
-            stamps,
-            stampsRequired: 10,
-            rewardText,
-            barcodeToken: token8,
-            colorPreset: ((hubRow?.color_preset as ColorPreset) || 'dark') as ColorPreset,
-            color: hubRow?.custom_color || hubRow?.brand_color || undefined,
-            logoURL: hubRow?.logo_url || undefined,
-          });
-
-          if (created.applePass) {
-            applePassBase64 = created.applePass;
-            if (env.DB && memberRow) {
-              await env.DB
-                .prepare(
-                  `UPDATE loyalty_members
-                   SET wallet_serial = ?, wallet_apple_base64 = ?, wallet_google_url = COALESCE(?, wallet_google_url)
-                   WHERE id = ?`
-                )
-                .bind(
-                  created.serialNumber,
-                  created.applePass,
-                  created.googleSaveUrl || null,
-                  memberRow.id
-                )
-                .run()
-                .catch(() => {});
-            }
-          }
-        } catch {
-          // ignore
-        }
+      if (!env.DB) {
+        return jsonResponse({ error: 'La descarga de Apple Wallet no está disponible.' }, 503);
       }
-
-      if (applePassBase64) {
-        const bytes = Uint8Array.from(atob(applePassBase64), (c) => c.charCodeAt(0));
+      try {
+        const member = await env.DB.prepare(
+          'SELECT wallet_apple_base64 FROM loyalty_members WHERE wallet_download_token = ? LIMIT 1'
+        ).bind(downloadToken).first<{ wallet_apple_base64?: string | null }>();
+        if (!member?.wallet_apple_base64) {
+          return jsonResponse({ error: 'No encontramos el pase de Apple Wallet solicitado.' }, 404);
+        }
+        let bytes: Uint8Array;
+        try {
+          const binary = atob(member.wallet_apple_base64);
+          bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
+        } catch {
+          return jsonResponse({ error: 'El archivo de Apple Wallet almacenado no es válido.' }, 500);
+        }
         return new Response(bytes, {
           status: 200,
           headers: {
             'Content-Type': 'application/vnd.apple.pkpass',
-            'Content-Disposition': `inline; filename="tarjeta-${rawParam || 'toque'}.pkpass"`,
-            'Cache-Control': 'no-store, no-cache, must-revalidate',
+            'Content-Disposition': 'attachment; filename="toque.pkpass"',
+            'Cache-Control': 'private, no-store, no-cache, must-revalidate',
+            'X-Content-Type-Options': 'nosniff',
           },
         });
+      } catch {
+        return jsonResponse({ error: 'No pudimos recuperar el pase desde D1.' }, 500);
       }
+    }
 
+    // Los enlaces antiguos con barcode de 8 dígitos ya no son válidos como credencial.
+    if (
+      pathname.startsWith('/api/wallet/pass/') &&
+      pathname.toLowerCase().endsWith('.pkpass') &&
+      request.method === 'GET'
+    ) {
       return jsonResponse(
-        { error: 'No encontramos el pase para Apple Wallet solicitado.' },
-        404
+        { error: 'Este enlace de Apple Wallet venció. Volvé a abrir la tarjeta desde Toque.' },
+        410
       );
     }
 
@@ -1553,7 +1518,7 @@ export default {
               `SELECT
                  m.id, m.consumer_id, m.tenant_id, m.stamps, m.stamps_required, m.rewards_redeemed,
                  m.barcode_token, m.last_stamped_at, m.wallet_serial, m.wallet_apple_base64,
-                 m.wallet_google_url, m.created_at,
+                 m.wallet_google_url, m.wallet_download_token, m.created_at,
                  h.business_name, h.logo_url, h.brand_color, h.color_preset, h.custom_color,
                  h.stamps_required AS hub_stamps_required, h.reward_text, h.loyalty_reward, h.reward_value_ars
                FROM loyalty_members m
@@ -1574,12 +1539,22 @@ export default {
             .bind(userRow.id)
             .all<any>();
 
-          const cards = (cardsRes.results || []).map((row: any) => {
+          const cards = await Promise.all((cardsRes.results || []).map(async (row: any) => {
             const bToken = normalize8DigitToken(row.barcode_token) || row.barcode_token || '';
             const bizName = row.business_name || 'Comercio adherido';
             const reqStamps = Number(row.hub_stamps_required || row.stamps_required || 10);
             const rewText =
               row.reward_text || row.loyalty_reward || 'Beneficio al completar tus sellos';
+            let appleWalletUrl: string | undefined;
+            if (row.wallet_apple_base64) {
+              try {
+                const downloadToken = String(row.wallet_download_token || '').trim() ||
+                  await ensureWalletDownloadToken(env.DB!, String(row.id));
+                appleWalletUrl = `/api/wallet/apple/${downloadToken}`;
+              } catch {
+                appleWalletUrl = undefined;
+              }
+            }
             return {
               id: row.id,
               businessId: row.tenant_id,
@@ -1602,14 +1577,13 @@ export default {
               logoUrl: row.logo_url || undefined,
               lastStampedAt: row.last_stamped_at || undefined,
               walletSerial: row.wallet_serial || undefined,
-              appleWalletUrl: row.wallet_apple_base64
-                ? `/api/wallet/pass/${encodeURIComponent(bToken)}.pkpass`
-                : undefined,
+              appleWalletUrl,
+              googleSaveUrl: row.wallet_google_url || undefined,
               googleWalletUrl: row.wallet_google_url || undefined,
               joinedAt: row.created_at || new Date().toISOString(),
               consent: true,
             };
-          });
+          }));
 
           const receipts = (receiptsRes.results || []).map((r: any) => ({
             id: r.id,
@@ -1795,8 +1769,6 @@ export default {
                       barcodeToken: token8,
                       colorPreset,
                       notification: m.wallet_last_notification ?? ' ',
-                      color: brandColor,
-                      logoURL: logoUrl || undefined,
                     }).catch(() => {});
                   }
                 } catch {
@@ -2196,8 +2168,6 @@ export default {
               barcodeToken: finalBarcodeToken,
               colorPreset,
               notification: lastNotification,
-              color: hubRow?.custom_color || hubRow?.brand_color || body.color || undefined,
-              logoURL: hubRow?.logo_url || body.logoURL || undefined,
             };
             const upd = await updatePass(env, walletSerial, card);
             notifiedDevices = upd.notifiedDevices;
@@ -2722,9 +2692,6 @@ export default {
           barcodeToken?: string;
           barcodeValue?: string;
           colorPreset?: ColorPreset;
-          color?: string;
-          logoURL?: string;
-          logoUrl?: string;
           notification?: string;
           serialNumber?: string;
           walletSerial?: string;
@@ -2757,53 +2724,57 @@ export default {
             : 'dark';
 
         const rawToken = String(body.barcodeToken || body.barcodeValue || '').trim();
-        const barcodeToken =
-          normalize8DigitToken(rawToken) || (await generateUnique8DigitBarcode(env.DB));
+        const memberId = String(body.memberId || '').trim();
+        if (!env.DB) {
+          return jsonResponse({ success: false, error: 'La emisión de pases requiere la base D1 configurada.' }, 503);
+        }
+        const memberRow = await env.DB.prepare(
+          `SELECT id, barcode_token, wallet_download_token, wallet_apple_base64,
+                  wallet_google_url, wallet_serial
+           FROM loyalty_members
+           WHERE (id = ? AND ? != '') OR (barcode_token = ? AND ? != '')
+              OR (wallet_serial = ? AND ? != '')
+           LIMIT 1`
+        ).bind(memberId, memberId, rawToken, rawToken, existingSerial, existingSerial)
+          .first<Pick<D1LoyaltyMemberRow, 'id' | 'barcode_token' | 'wallet_download_token' |
+            'wallet_apple_base64' | 'wallet_google_url' | 'wallet_serial'>>();
+        if (!memberRow) {
+          return jsonResponse({ success: false, error: 'No encontramos al socio en loyalty_members.' }, 404);
+        }
+        let barcodeToken = normalize8DigitToken(memberRow.barcode_token);
+        if (!barcodeToken) {
+          barcodeToken = await generateUnique8DigitBarcode(env.DB);
+          await env.DB.prepare('UPDATE loyalty_members SET barcode_token = ?, member_code = ? WHERE id = ?')
+            .bind(barcodeToken, barcodeToken, memberRow.id).run();
+        }
+        const downloadToken = await ensureWalletDownloadToken(env.DB, memberRow.id);
+        const appleWalletUrl = `/api/wallet/apple/${downloadToken}`;
+        const serialToUpdate = existingSerial || String(memberRow.wallet_serial || '').trim();
 
         const card: CardInput = {
-          businessName,
-          memberName,
-          stamps,
-          stampsRequired,
-          rewardText,
-          barcodeToken,
-          colorPreset,
+          businessName, memberName, stamps, stampsRequired, rewardText, barcodeToken, colorPreset,
           notification: typeof body.notification === 'string' ? body.notification : ' ',
           locations: Array.isArray(body.locations) ? body.locations : undefined,
-          color: body.color || undefined,
-          logoURL: body.logoURL || body.logoUrl || undefined,
         };
 
-        const directAppleUrl = `/api/wallet/pass/${encodeURIComponent(barcodeToken)}.pkpass`;
-
-        if ((request.method === 'PUT' || body.isUpdate) && existingSerial && !existingSerial.startsWith('ww-')) {
+        if (serialToUpdate && !serialToUpdate.startsWith('ww-')) {
           try {
-            const upd = await updatePass(env, existingSerial, card);
-            let storedAppleBase64: string | null = null;
-            let storedGoogleUrl: string | null = null;
-
-            if (env.DB) {
-              const existingRow = await env.DB
-                .prepare(
-                  'SELECT wallet_apple_base64, wallet_google_url FROM loyalty_members WHERE id = ? OR barcode_token = ? OR wallet_serial = ? LIMIT 1'
-                )
-                .bind(body.memberId || '', barcodeToken, existingSerial)
-                .first<{ wallet_apple_base64?: string | null; wallet_google_url?: string | null }>()
-                .catch(() => null);
-              storedAppleBase64 = existingRow?.wallet_apple_base64 || null;
-              storedGoogleUrl = existingRow?.wallet_google_url || null;
-            }
-
-            if (storedAppleBase64 || storedGoogleUrl) {
+            const upd = await updatePass(env, serialToUpdate, card);
+            const existingRow = await env.DB.prepare(
+              'SELECT wallet_apple_base64, wallet_google_url FROM loyalty_members WHERE id = ? LIMIT 1'
+            ).bind(memberRow.id).first<{ wallet_apple_base64?: string | null; wallet_google_url?: string | null }>();
+            const storedAppleBase64 = existingRow?.wallet_apple_base64 || null;
+            const storedGoogleUrl = existingRow?.wallet_google_url || '';
+            if (storedAppleBase64 && storedGoogleUrl) {
               return jsonResponse({
                 success: true,
                 configured: true,
                 provider: 'api.walletwallet.dev',
-                passId: existingSerial,
-                serialNumber: existingSerial,
-                appleWalletUrl: directAppleUrl,
-                applePassBase64: storedAppleBase64 || undefined,
-                googleWalletUrl: storedGoogleUrl || '',
+                passId: serialToUpdate,
+                serialNumber: serialToUpdate,
+                appleWalletUrl: storedAppleBase64 ? appleWalletUrl : undefined,
+                googleSaveUrl: storedGoogleUrl,
+                googleWalletUrl: storedGoogleUrl,
                 unchanged: upd.unchanged,
                 notifiedDevices: upd.notifiedDevices,
                 barcodeValue: barcodeToken,
@@ -2817,25 +2788,15 @@ export default {
 
         const created = await createPass(env, card);
         const googleSaveUrl = created.googleSaveUrl || '';
-
-        if (env.DB) {
-          await env.DB
-            .prepare(
-              `UPDATE loyalty_members
-               SET wallet_serial = ?, barcode_token = ?, wallet_apple_base64 = ?, wallet_google_url = ?, wallet_sync_error = NULL
-               WHERE id = ? OR barcode_token = ?`
-            )
-            .bind(
-              created.serialNumber,
-              barcodeToken,
-              created.applePass || null,
-              googleSaveUrl || null,
-              body.memberId || '',
-              barcodeToken
-            )
-            .run()
-            .catch(() => {});
-        }
+        await env.DB.prepare(
+          `UPDATE loyalty_members
+           SET wallet_serial = ?, barcode_token = ?,
+               wallet_apple_base64 = COALESCE(?, wallet_apple_base64),
+               wallet_google_url = COALESCE(?, wallet_google_url),
+               wallet_download_token = ?, wallet_sync_error = NULL
+           WHERE id = ?`
+        ).bind(created.serialNumber, barcodeToken, created.applePass || null,
+          googleSaveUrl || null, downloadToken, memberRow.id).run();
 
         return jsonResponse({
           success: true,
@@ -2844,8 +2805,8 @@ export default {
           passId: created.serialNumber,
           serialNumber: created.serialNumber,
           shareUrl: created.shareUrl,
-          appleWalletUrl: directAppleUrl,
-          applePassBase64: created.applePass,
+          appleWalletUrl: created.applePass ? appleWalletUrl : undefined,
+          googleSaveUrl,
           googleWalletUrl: googleSaveUrl,
           barcodeValue: barcodeToken,
           validationCode: barcodeToken,
