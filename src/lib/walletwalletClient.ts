@@ -35,7 +35,6 @@ export interface CardInput {
   rewardText: string;
   /** Código numérico único de 8 dígitos para Code128 */
   barcodeToken: string;
-  barcodeFormat?: 'QR' | 'Code128' | 'CODE128';
   barcodeAltText?: string;
   colorPreset?: ColorPreset;
   notification?: string;
@@ -43,10 +42,6 @@ export interface CardInput {
   primaryFields?: CardFieldItem[];
   secondaryFields?: CardFieldItem[];
   locations?: { latitude: number; longitude: number; relevantText?: string }[];
-  color?: string;
-  logoURL?: string;
-  wideLogoURL?: string;
-  iconURL?: string;
 }
 
 export interface CreatedPass {
@@ -115,17 +110,13 @@ export function buildBody(c: CardInput): Record<string, unknown> {
   };
   if (!body.headerFields) delete body.headerFields;
   if (c.locations?.length) body.locations = c.locations.slice(0, 10);
-  if (typeof c.color === 'string' && /^#[0-9A-Fa-f]{6}$/.test(c.color.trim())) {
-    body.color = c.color.trim();
-  }
-  if (typeof c.logoURL === 'string' && /^https:\/\//i.test(c.logoURL.trim())) {
-    body.logoURL = c.logoURL.trim();
-  }
+  // En el plan gratuito no se envían `color` ni `logoURL`.
+  // colorPreset es el único selector de diseño permitido para este flujo.
   return body;
 }
 
 function headers(env: WalletEnv): Record<string, string> {
-  const apiKey = (env.WALLETWALLET_API_KEY || 'ww_live_0a1b9cf29dcd4f7ceb3a5023d0e49de2').trim();
+  const apiKey = (env.WALLETWALLET_API_KEY || '').trim();
   if (!apiKey) {
     throw new WalletError(
       503,
