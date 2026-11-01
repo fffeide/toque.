@@ -64,6 +64,7 @@ export interface WalletPassResponse {
   walletSyncError?: string;
   validationCode?: string;
   appleWalletUrl?: string;
+  applePassBase64?: string;
   googleWalletUrl?: string;
   qrUrl?: string;
   fallbackWebPass?: boolean;
@@ -247,7 +248,7 @@ export interface ClubConfig {
   headerFields?: { label: string; value: string }[];
   primaryFields?: { label: string; value: string }[];
   secondaryFields?: { label: string; value: string }[];
-  barcodeFormat?: 'QR' | 'CODE128' | 'PDF417' | 'AZTEC';
+  barcodeFormat?: 'QR' | 'CODE128' | 'Code128' | 'PDF417' | 'AZTEC' | 'Aztec';
   barcodeValue?: string;
   overrideTextUnderBarcode?: boolean;
   barcodeAltText?: string;

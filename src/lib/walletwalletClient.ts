@@ -33,9 +33,9 @@ export interface CardInput {
   stamps: number;
   stampsRequired: number;
   rewardText: string;
-  /** Código numérico único de 8 dígitos para CODE128 */
+  /** Código numérico único de 8 dígitos para Code128 */
   barcodeToken: string;
-  barcodeFormat?: 'QR' | 'CODE128';
+  barcodeFormat?: 'QR' | 'Code128' | 'CODE128';
   barcodeAltText?: string;
   colorPreset?: ColorPreset;
   notification?: string;
@@ -89,13 +89,15 @@ export function generateSecureBarcodeToken(_prefix?: string): string {
 }
 
 export function buildBody(c: CardInput): Record<string, unknown> {
+  const cleanBusinessName = (c.businessName || 'Mi comercio').trim() || 'Mi comercio';
+  const cleanRewardText = (c.rewardText || 'Beneficio al completar tus 10 sellos').trim() || 'Beneficio al completar tus 10 sellos';
   const body: Record<string, unknown> = {
     barcodeValue: c.barcodeToken,
-    barcodeFormat: 'CODE128',
+    barcodeFormat: 'Code128',
     barcodeAltText: c.barcodeToken,
-    logoText: c.businessName.slice(0, 40),
-    description: `Tarjeta de sellos de ${c.businessName}`.slice(0, 120),
-    organizationName: c.businessName.slice(0, 64),
+    logoText: (c.logoText || cleanBusinessName).slice(0, 40),
+    description: `Tarjeta de sellos de ${cleanBusinessName}`.slice(0, 120),
+    organizationName: (c.organizationName || cleanBusinessName).slice(0, 64),
     primaryFields: [
       {
         label: 'Sellos',
@@ -103,7 +105,7 @@ export function buildBody(c: CardInput): Record<string, unknown> {
         changeMessage: 'Puntos acumulados: %@',
       },
     ],
-    secondaryFields: [{ label: 'Premio', value: c.rewardText.slice(0, 60) }],
+    secondaryFields: [{ label: 'Premio', value: cleanRewardText.slice(0, 60) }],
     headerFields: c.memberName
       ? [{ label: 'Cliente', value: c.memberName.slice(0, 40) }]
       : undefined,
@@ -113,8 +115,12 @@ export function buildBody(c: CardInput): Record<string, unknown> {
   };
   if (!body.headerFields) delete body.headerFields;
   if (c.locations?.length) body.locations = c.locations.slice(0, 10);
-  if (c.color) body.color = c.color;
-  if (c.logoURL) body.logoURL = c.logoURL;
+  if (typeof c.color === 'string' && /^#[0-9A-Fa-f]{6}$/.test(c.color.trim())) {
+    body.color = c.color.trim();
+  }
+  if (typeof c.logoURL === 'string' && /^https:\/\//i.test(c.logoURL.trim())) {
+    body.logoURL = c.logoURL.trim();
+  }
   return body;
 }
 

@@ -150,12 +150,14 @@ export const PublicHubView: React.FC = () => {
   const [cooldownRemainingMs, setCooldownRemainingMs] = useState<number>(0);
   const [newlyStampedSlot, setNewlyStampedSlot] = useState<number | null>(null);
 
-  // Botón secundario "Agregar a la billetera del teléfono"
+  // Botón secundario para guardar en Apple Wallet (.pkpass) y Google Wallet
   const [generatingPass, setGeneratingPass] = useState(false);
   const [walletUnconfigured, setWalletUnconfigured] = useState(false);
   const [walletStatusMessage, setWalletStatusMessage] = useState<string | null>(null);
   const [walletErrorMessage, setWalletErrorMessage] = useState<string | null>(null);
   const [desktopFallbackUrl, setDesktopFallbackUrl] = useState<string | null>(null);
+  const [appleWalletHref, setAppleWalletHref] = useState<string | null>(null);
+  const [googleWalletHref, setGoogleWalletHref] = useState<string | null>(null);
 
   const clubSectionRef = useRef<HTMLDivElement>(null);
   const processedReceiptStampsRef = useRef<Set<string>>(new Set());
@@ -857,33 +859,43 @@ export const PublicHubView: React.FC = () => {
     }
   };
 
-  // Botón secundario opcional para descargar el pase en Apple/Google Wallet dentro de la tarjeta ya guardada
-  const handleAddToWallet = async () => {
-    if (!hub || !joinedMember || walletUnconfigured) return;
+  // Descargar / abrir pase en Apple Wallet (.pkpass) o Google Wallet
+  const handleAddToWallet = async (preferredTarget: 'auto' | 'apple' | 'google' = 'auto') => {
+    if (!hub || !joinedMember) return;
     setWalletErrorMessage(null);
     setWalletStatusMessage(null);
-    setDesktopFallbackUrl(null);
+
+    const rawCode =
+      joinedMember.barcodeToken || joinedMember.shortCode || joinedMember.memberCode || '48291037';
+    const immutableShortCode = /^\d{8}$/.test(rawCode) ? rawCode : '48291037';
+    const rewardLabel =
+      hub.club?.config?.loyaltyReward ||
+      hub.club?.config?.rewardText ||
+      'Beneficio al completar tus sellos';
+    const targetStampsCount = hub.club?.config?.targetStamps || 10;
+
+    const pkpassParams = new URLSearchParams({
+      businessName: hub.business.name || 'Comercio adherido',
+      rewardText: rewardLabel,
+      stamps: String(joinedMember.stamps ?? 0),
+      stampsRequired: String(targetStampsCount),
+      memberName: joinedMember.name || 'Socio',
+    });
+    const pkpassUrl = `/api/wallet/pass/${encodeURIComponent(immutableShortCode)}.pkpass?${pkpassParams.toString()}`;
 
     try {
       setGeneratingPass(true);
-      const rawCode =
-        joinedMember.barcodeToken || joinedMember.shortCode || joinedMember.memberCode || '48291037';
-      const immutableShortCode = /^\d{8}$/.test(rawCode) ? rawCode : '48291037';
-
       const pass = await api.createWalletPass({
         cartelCode: hub.cartel.code,
         memberId: joinedMember.id,
         memberCode: immutableShortCode,
         barcodeValue: immutableShortCode,
-        barcodeFormat: 'CODE128',
+        barcodeFormat: 'Code128',
         customerName: joinedMember.name || 'Socio',
         customerContact: joinedMember.email || joinedMember.maskedEmail || joinedMember.contact,
         stamps: joinedMember.stamps,
-        stampsRequired: hub.club?.config?.targetStamps || 10,
-        rewardText:
-          hub.club?.config?.loyaltyReward ||
-          hub.club?.config?.rewardText ||
-          'Beneficio al completar tus sellos',
+        stampsRequired: targetStampsCount,
+        rewardText: rewardLabel,
         colorPreset: hub.club?.config?.colorPreset || 'dark',
         color: hub.club?.config?.customColor,
         logoURL: hub.club?.config?.logoUrl || hub.business.logoUrl,
@@ -891,35 +903,37 @@ export const PublicHubView: React.FC = () => {
         isUpdate: Boolean(joinedMember.walletSerial),
       });
 
-      if (pass.configured === false) {
-        setWalletUnconfigured(true);
-        setWalletStatusMessage('Tu tarjeta ya está guardada en tu cuenta.');
-        return;
+      const googleUrl = pass.googleWalletUrl || pass.shareUrl || null;
+      setAppleWalletHref(pkpassUrl);
+      if (googleUrl) {
+        setGoogleWalletHref(googleUrl);
       }
 
-      if (!pass.success) {
-        setWalletErrorMessage('Tu tarjeta ya está guardada en tu cuenta.');
-        return;
-      }
-
-      const pkpassUrl = `/api/wallet/pass/${encodeURIComponent(immutableShortCode)}.pkpass`;
-      const googleUrl = pass.googleWalletUrl;
-
-      if (isIOSDevice()) {
+      if (preferredTarget === 'apple' || (preferredTarget === 'auto' && isIOSDevice())) {
         window.location.href = pkpassUrl;
+        setWalletStatusMessage('Abriendo tu pase en Apple Wallet...');
         return;
       }
 
-      if (isAndroidDevice() && googleUrl) {
+      if (
+        (preferredTarget === 'google' || (preferredTarget === 'auto' && isAndroidDevice())) &&
+        googleUrl
+      ) {
         window.location.href = googleUrl;
+        setWalletStatusMessage('Abriendo tu pase en Google Wallet...');
         return;
       }
 
       const fallback = googleUrl || pkpassUrl;
       setDesktopFallbackUrl(fallback);
-      setWalletStatusMessage('Tu pase está listo en pantalla. También podés descargarlo debajo.');
+      setWalletStatusMessage('Elegí Apple Wallet o Google Wallet debajo para guardar tu tarjeta en el teléfono.');
     } catch {
-      setWalletErrorMessage('Tu tarjeta ya está guardada en tu cuenta.');
+      setAppleWalletHref(pkpassUrl);
+      if (preferredTarget === 'apple' || isIOSDevice()) {
+        window.location.href = pkpassUrl;
+        return;
+      }
+      setWalletErrorMessage('No pudimos conectar con la billetera en este momento. Intentá de nuevo.');
     } finally {
       setGeneratingPass(false);
     }
@@ -1544,39 +1558,60 @@ export const PublicHubView: React.FC = () => {
                   logoUrl={clubCfg?.logoUrl || business.logoUrl}
                 />
 
-                {/* Botón secundario opcional dentro de la tarjeta ya guardada */}
+                {/* Botones para guardar en Apple Wallet (.pkpass) y Google Wallet */}
                 <div className="space-y-2">
-                  <button
-                    type="button"
-                    disabled={generatingPass || walletUnconfigured}
-                    onClick={handleAddToWallet}
-                    className="w-full py-3.5 px-4 rounded-2xl bg-[#1C1C22] hover:bg-[#25252d] disabled:opacity-50 disabled:cursor-not-allowed border border-[#242424] text-xs font-bold text-[#F4F4F6] flex items-center justify-center gap-2 transition-colors cursor-pointer"
-                  >
-                    <Wallet className="w-4 h-4 text-[#D95B26]" />
-                    <span>
-                      {walletUnconfigured
-                        ? 'Tarjeta guardada en tu cuenta'
-                        : generatingPass
-                        ? 'Preparando tu pase...'
-                        : 'Agregar a la billetera del teléfono'}
-                    </span>
-                  </button>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      disabled={generatingPass}
+                      onClick={() => handleAddToWallet('apple')}
+                      className="w-full py-3.5 px-4 rounded-2xl bg-[#1C1C22] hover:bg-[#25252d] disabled:opacity-50 disabled:cursor-not-allowed border border-[#242424] text-xs font-bold text-[#F4F4F6] flex items-center justify-center gap-2 transition-colors cursor-pointer"
+                    >
+                      <Wallet className="w-4 h-4 text-[#D95B26]" />
+                      <span>
+                        {generatingPass ? 'Preparando pase...' : 'Guardar en Apple Wallet'}
+                      </span>
+                    </button>
+
+                    <button
+                      type="button"
+                      disabled={generatingPass}
+                      onClick={() => handleAddToWallet('google')}
+                      className="w-full py-3.5 px-4 rounded-2xl bg-[#1C1C22] hover:bg-[#25252d] disabled:opacity-50 disabled:cursor-not-allowed border border-[#242424] text-xs font-bold text-[#F4F4F6] flex items-center justify-center gap-2 transition-colors cursor-pointer"
+                    >
+                      <Wallet className="w-4 h-4 text-[#D95B26]" />
+                      <span>
+                        {generatingPass ? 'Preparando pase...' : 'Guardar en Google Wallet'}
+                      </span>
+                    </button>
+                  </div>
 
                   {walletStatusMessage && (
                     <p className="text-xs text-center text-[#9E9EA8]">{walletStatusMessage}</p>
                   )}
 
-                  {desktopFallbackUrl && (
-                    <div className="pt-1 text-center">
-                      <a
-                        href={desktopFallbackUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#D95B26] hover:underline"
-                      >
-                        <span>Descargar archivo de billetera (.pkpass / Google Wallet)</span>
-                        <ExternalLink className="w-3.5 h-3.5" />
-                      </a>
+                  {(appleWalletHref || googleWalletHref || desktopFallbackUrl) && (
+                    <div className="pt-1 flex flex-wrap items-center justify-center gap-4 text-center">
+                      {appleWalletHref && (
+                        <a
+                          href={appleWalletHref}
+                          className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#D95B26] hover:underline"
+                        >
+                          <span>Descargar para Apple Wallet (.pkpass)</span>
+                          <ExternalLink className="w-3.5 h-3.5" />
+                        </a>
+                      )}
+                      {googleWalletHref && (
+                        <a
+                          href={googleWalletHref}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#D95B26] hover:underline"
+                        >
+                          <span>Abrir en Google Wallet</span>
+                          <ExternalLink className="w-3.5 h-3.5" />
+                        </a>
+                      )}
                     </div>
                   )}
 

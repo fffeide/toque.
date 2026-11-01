@@ -201,6 +201,38 @@ async function cleanOrphanRecordsInD1(db: D1Database): Promise<{
 }> {
   const details: Record<string, number> = {};
   try {
+    // 0. Eliminar definitivamente cualquier Hub / registro residual de "Musical Monroe" (musical-monroe, MONROE01, MONROE02)
+    await db
+      .prepare(
+        `DELETE FROM carteles WHERE UPPER(code) IN ('MONROE01', 'MONROE02') OR LOWER(tenant_id) IN ('musical-monroe', 'monroe01', 'monroe02')`
+      )
+      .run()
+      .catch(() => {});
+    await db
+      .prepare(
+        `DELETE FROM hub_configs WHERE LOWER(tenant_id) IN ('musical-monroe', 'monroe01', 'monroe02') OR LOWER(TRIM(business_name)) = 'musical monroe'`
+      )
+      .run()
+      .catch(() => {});
+    await db
+      .prepare(
+        `DELETE FROM merchant_cards WHERE LOWER(tenant_id) IN ('musical-monroe', 'monroe01', 'monroe02') OR LOWER(TRIM(business_name)) = 'musical monroe'`
+      )
+      .run()
+      .catch(() => {});
+    await db
+      .prepare(
+        `DELETE FROM loyalty_members WHERE LOWER(tenant_id) IN ('musical-monroe', 'monroe01', 'monroe02')`
+      )
+      .run()
+      .catch(() => {});
+    await db
+      .prepare(
+        `DELETE FROM tenants WHERE LOWER(id) IN ('musical-monroe', 'monroe01', 'monroe02') OR LOWER(TRIM(name)) = 'musical monroe'`
+      )
+      .run()
+      .catch(() => {});
+
     // 1. Eliminar tenants que no tengan ningún usuario activo en users (excepto si users está vacío)
     const usersCountRes = await db
       .prepare('SELECT COUNT(*) as cnt FROM users')
@@ -240,7 +272,7 @@ async function cleanOrphanRecordsInD1(db: D1Database): Promise<{
       }
       seenEmails.add(mail);
 
-      if (u.tenant_id) {
+      if (u.tenant_id && u.tenant_id.toLowerCase() !== 'musical-monroe') {
         await db
           .prepare(
             `INSERT OR IGNORE INTO tenants (id, name, slug, created_at)
@@ -248,8 +280,8 @@ async function cleanOrphanRecordsInD1(db: D1Database): Promise<{
           )
           .bind(
             u.tenant_id,
-            u.name || 'Musical Monroe',
-            (u.name || 'musical-monroe').toLowerCase().replace(/[^a-z0-9]+/g, '-')
+            u.name || 'Mi comercio',
+            (u.name || 'mi-comercio').toLowerCase().replace(/[^a-z0-9]+/g, '-')
           )
           .run()
           .catch(() => {});
@@ -1160,36 +1192,116 @@ export default {
 
     // 5. Endpoint público de descarga directa de Apple Wallet (.pkpass): GET /api/wallet/pass/:barcodeToken.pkpass
     if (
-      pathname.startsWith('/api/wallet/pass/') &&
-      pathname.endsWith('.pkpass') &&
+      (pathname.startsWith('/api/wallet/pass/') || pathname.startsWith('/api/wallet/pkpass/')) &&
+      (pathname.endsWith('.pkpass') || pathname.startsWith('/api/wallet/pkpass/')) &&
       request.method === 'GET'
     ) {
       const rawParam = decodeURIComponent(
-        pathname.replace('/api/wallet/pass/', '').replace(/\.pkpass$/i, '')
+        pathname
+          .replace('/api/wallet/pass/', '')
+          .replace('/api/wallet/pkpass/', '')
+          .replace(/\.pkpass$/i, '')
       ).trim();
+
+      let applePassBase64: string | null = null;
+      let memberRow: D1LoyaltyMemberRow | null = null;
+      let hubRow: D1HubConfigRow | null = null;
 
       if (env.DB && rawParam) {
         try {
-          const row = await env.DB
+          memberRow = await env.DB
             .prepare(
-              'SELECT wallet_apple_base64, wallet_serial FROM loyalty_members WHERE barcode_token = ? OR id = ? OR wallet_serial = ? LIMIT 1'
+              'SELECT * FROM loyalty_members WHERE barcode_token = ? OR id = ? OR wallet_serial = ? LIMIT 1'
             )
             .bind(rawParam, rawParam, rawParam)
-            .first<{ wallet_apple_base64?: string | null; wallet_serial?: string | null }>();
+            .first<D1LoyaltyMemberRow>();
 
-          if (row?.wallet_apple_base64) {
-            const bytes = Uint8Array.from(atob(row.wallet_apple_base64), (c) => c.charCodeAt(0));
-            return new Response(bytes, {
-              status: 200,
-              headers: {
-                'Content-Type': 'application/vnd.apple.pkpass',
-                'Content-Disposition': 'inline; filename="tarjeta.pkpass"',
-              },
-            });
+          if (memberRow?.wallet_apple_base64) {
+            applePassBase64 = memberRow.wallet_apple_base64;
+          }
+
+          if (memberRow?.tenant_id) {
+            hubRow = await env.DB
+              .prepare(
+                'SELECT tenant_id, business_name, reward_text, loyalty_reward, brand_color, color_preset, custom_color, logo_url FROM hub_configs WHERE tenant_id = ? LIMIT 1'
+              )
+              .bind(memberRow.tenant_id)
+              .first<D1HubConfigRow>()
+              .catch(() => null);
           }
         } catch {
           // ignore
         }
+      }
+
+      // Si todavía no estaba el binario .pkpass en D1, generarlo en el acto con WalletWallet
+      if (!applePassBase64) {
+        try {
+          const token8 =
+            normalize8DigitToken(memberRow?.barcode_token || rawParam) ||
+            (await generateUnique8DigitBarcode(env.DB));
+          const businessName =
+            hubRow?.business_name ||
+            url.searchParams.get('businessName') ||
+            'Mi comercio';
+          const rewardText =
+            hubRow?.reward_text ||
+            hubRow?.loyalty_reward ||
+            url.searchParams.get('rewardText') ||
+            'Beneficio al completar tus 10 sellos';
+          const stamps = Number(memberRow?.stamps ?? url.searchParams.get('stamps') ?? 0);
+          const memberName =
+            memberRow?.customer_name ||
+            memberRow?.name ||
+            url.searchParams.get('memberName') ||
+            undefined;
+
+          const created = await createPass(env, {
+            businessName,
+            memberName,
+            stamps,
+            stampsRequired: 10,
+            rewardText,
+            barcodeToken: token8,
+            colorPreset: ((hubRow?.color_preset as ColorPreset) || 'dark') as ColorPreset,
+            color: hubRow?.custom_color || hubRow?.brand_color || undefined,
+            logoURL: hubRow?.logo_url || undefined,
+          });
+
+          if (created.applePass) {
+            applePassBase64 = created.applePass;
+            if (env.DB && memberRow) {
+              await env.DB
+                .prepare(
+                  `UPDATE loyalty_members
+                   SET wallet_serial = ?, wallet_apple_base64 = ?, wallet_google_url = COALESCE(?, wallet_google_url)
+                   WHERE id = ?`
+                )
+                .bind(
+                  created.serialNumber,
+                  created.applePass,
+                  created.googleSaveUrl || null,
+                  memberRow.id
+                )
+                .run()
+                .catch(() => {});
+            }
+          }
+        } catch {
+          // ignore
+        }
+      }
+
+      if (applePassBase64) {
+        const bytes = Uint8Array.from(atob(applePassBase64), (c) => c.charCodeAt(0));
+        return new Response(bytes, {
+          status: 200,
+          headers: {
+            'Content-Type': 'application/vnd.apple.pkpass',
+            'Content-Disposition': `inline; filename="tarjeta-${rawParam || 'toque'}.pkpass"`,
+            'Cache-Control': 'no-store, no-cache, must-revalidate',
+          },
+        });
       }
 
       return jsonResponse(
@@ -1727,17 +1839,35 @@ export default {
         const codeUpper = rawCode.toUpperCase();
         const codeLower = rawCode.toLowerCase();
 
-        let tenantId = 'musical-monroe';
-        let cartelCode = codeUpper || 'MONROE01';
+        if (
+          codeLower === 'musical-monroe' ||
+          codeUpper === 'MONROE01' ||
+          codeUpper === 'MONROE02'
+        ) {
+          return jsonResponse(
+            {
+              found: false,
+              deleted: true,
+              error: 'El Hub de Musical Monroe fue eliminado.',
+            },
+            404,
+            {
+              'Cache-Control': 'no-store, no-cache, must-revalidate',
+            }
+          );
+        }
+
+        let tenantId = codeLower || 'comercio-activo';
+        let cartelCode = codeUpper || 'LOCAL01';
         let reviewUrl = '';
         let mode: 'direct_review' | 'smart_hub' = 'smart_hub';
-        let businessName = 'Musical Monroe';
+        let businessName = 'Mi comercio';
         let logoUrl: string | undefined;
         let brandColor = '#141414';
         let colorPreset: ColorPreset = 'dark';
         let customColor: string | undefined;
         let stampsRequired = 10;
-        let rewardText = 'Beneficio exclusivo en tu próxima visita';
+        let rewardText = 'Beneficio exclusivo al completar tus 10 sellos';
         let rewardValueArs = 0;
 
         if (env.DB) {
@@ -2610,14 +2740,14 @@ export default {
         ).trim();
 
         const businessName = String(
-          body.businessName || body.title || body.logoText || 'Musical Monroe'
+          body.businessName || body.title || body.logoText || 'Mi comercio'
         ).slice(0, 64);
         const memberName = String(body.memberName || body.customerName || '').trim() || undefined;
-        const stamps = typeof body.stamps === 'number' ? body.stamps : 1;
+        const stamps = typeof body.stamps === 'number' ? body.stamps : 0;
         const stampsRequired =
           typeof body.stampsRequired === 'number' ? body.stampsRequired : 10;
         const rewardText = String(
-          body.rewardText || body.reward || 'Beneficio al completar tus sellos'
+          body.rewardText || body.reward || 'Beneficio al completar tus 10 sellos'
         ).slice(0, 60);
 
         const validPresets: ColorPreset[] = ['dark', 'blue', 'green', 'red', 'purple', 'orange'];
@@ -2644,65 +2774,78 @@ export default {
           logoURL: body.logoURL || body.logoUrl || undefined,
         };
 
-        if ((request.method === 'PUT' || body.isUpdate) && existingSerial) {
-          const upd = await updatePass(env, existingSerial, card);
-          const directAppleUrl = `/api/wallet/pass/${encodeURIComponent(barcodeToken)}.pkpass`;
+        const directAppleUrl = `/api/wallet/pass/${encodeURIComponent(barcodeToken)}.pkpass`;
 
-          if (env.DB && body.memberId) {
-            ctx?.waitUntil(
-              env.DB
+        if ((request.method === 'PUT' || body.isUpdate) && existingSerial && !existingSerial.startsWith('ww-')) {
+          try {
+            const upd = await updatePass(env, existingSerial, card);
+            let storedAppleBase64: string | null = null;
+            let storedGoogleUrl: string | null = null;
+
+            if (env.DB) {
+              const existingRow = await env.DB
                 .prepare(
-                  'UPDATE loyalty_members SET wallet_serial = ?, barcode_token = ?, wallet_sync_error = NULL WHERE id = ?'
+                  'SELECT wallet_apple_base64, wallet_google_url FROM loyalty_members WHERE id = ? OR barcode_token = ? OR wallet_serial = ? LIMIT 1'
                 )
-                .bind(existingSerial, barcodeToken, body.memberId)
-                .run()
-                .catch(() => {})
-            );
-          }
+                .bind(body.memberId || '', barcodeToken, existingSerial)
+                .first<{ wallet_apple_base64?: string | null; wallet_google_url?: string | null }>()
+                .catch(() => null);
+              storedAppleBase64 = existingRow?.wallet_apple_base64 || null;
+              storedGoogleUrl = existingRow?.wallet_google_url || null;
+            }
 
-          return jsonResponse({
-            success: true,
-            provider: 'api.walletwallet.dev',
-            passId: existingSerial,
-            serialNumber: existingSerial,
-            appleWalletUrl: directAppleUrl,
-            unchanged: upd.unchanged,
-            notifiedDevices: upd.notifiedDevices,
-            barcodeValue: barcodeToken,
-            validationCode: barcodeToken,
-          });
+            if (storedAppleBase64 || storedGoogleUrl) {
+              return jsonResponse({
+                success: true,
+                configured: true,
+                provider: 'api.walletwallet.dev',
+                passId: existingSerial,
+                serialNumber: existingSerial,
+                appleWalletUrl: directAppleUrl,
+                applePassBase64: storedAppleBase64 || undefined,
+                googleWalletUrl: storedGoogleUrl || '',
+                unchanged: upd.unchanged,
+                notifiedDevices: upd.notifiedDevices,
+                barcodeValue: barcodeToken,
+                validationCode: barcodeToken,
+              });
+            }
+          } catch {
+            // Si el pase previo no existía o no tenía archivos, creamos uno nuevo debajo
+          }
         }
 
         const created = await createPass(env, card);
-        const directAppleUrl = `/api/wallet/pass/${encodeURIComponent(barcodeToken)}.pkpass`;
         const googleSaveUrl = created.googleSaveUrl || '';
 
-        if (env.DB && body.memberId) {
-          ctx?.waitUntil(
-            env.DB
-              .prepare(
-                `UPDATE loyalty_members
-                 SET wallet_serial = ?, barcode_token = ?, wallet_apple_base64 = ?, wallet_google_url = ?, wallet_sync_error = NULL
-                 WHERE id = ?`
-              )
-              .bind(
-                created.serialNumber,
-                barcodeToken,
-                created.applePass || null,
-                googleSaveUrl || null,
-                body.memberId
-              )
-              .run()
-              .catch(() => {})
-          );
+        if (env.DB) {
+          await env.DB
+            .prepare(
+              `UPDATE loyalty_members
+               SET wallet_serial = ?, barcode_token = ?, wallet_apple_base64 = ?, wallet_google_url = ?, wallet_sync_error = NULL
+               WHERE id = ? OR barcode_token = ?`
+            )
+            .bind(
+              created.serialNumber,
+              barcodeToken,
+              created.applePass || null,
+              googleSaveUrl || null,
+              body.memberId || '',
+              barcodeToken
+            )
+            .run()
+            .catch(() => {});
         }
 
         return jsonResponse({
           success: true,
+          configured: true,
           provider: 'api.walletwallet.dev',
           passId: created.serialNumber,
           serialNumber: created.serialNumber,
+          shareUrl: created.shareUrl,
           appleWalletUrl: directAppleUrl,
+          applePassBase64: created.applePass,
           googleWalletUrl: googleSaveUrl,
           barcodeValue: barcodeToken,
           validationCode: barcodeToken,

@@ -423,7 +423,7 @@ export interface ToqueApi {
     logoText?: string;
     organizationName?: string;
     rewardText?: string;
-    barcodeFormat?: 'QR' | 'CODE128' | 'PDF417' | 'AZTEC';
+    barcodeFormat?: 'QR' | 'CODE128' | 'Code128' | 'PDF417' | 'AZTEC' | 'Aztec';
     barcodeValue?: string;
     barcodeAltText?: string;
     colorPreset?: 'dark' | 'blue' | 'green' | 'red' | 'purple' | 'orange';

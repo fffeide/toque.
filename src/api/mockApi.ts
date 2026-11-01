@@ -179,20 +179,20 @@ class MockApi implements ToqueApi {
     );
   }
 
-  // Comercio por defecto: Musical Monroe
+  // Comercio activo por defecto (sin el Hub eliminado de Musical Monroe)
   private businessProfile: BusinessProfile = {
-    id: 'musical-monroe',
-    name: 'Musical Monroe',
-    ownerName: 'Encargado general',
+    id: 'comercio-activo',
+    name: 'Mi comercio',
+    ownerName: 'Titular',
     email: 'nombre@comercio.com',
     ownerRole: 'Dueño/a',
     teamSize: '2 a 5',
-    category: 'Instrumentos y audio',
+    category: 'Comercio',
     planSelected: true,
-    reviewUrl: 'https://maps.google.com',
+    reviewUrl: '',
     cardThemeColor: '#141414',
-    loyaltyTitle: 'Tarjeta de sellos de Musical Monroe',
-    loyaltyReward: 'Beneficio exclusivo en tu próxima visita',
+    loyaltyTitle: 'Tarjeta de sellos',
+    loyaltyReward: 'Beneficio exclusivo al completar tus 10 sellos',
     howToEarn: '1 sello por visita o compra (máximo 1 por día)',
     expirationPolicy: 'No vencen',
     stampsRequired: 10,
@@ -204,26 +204,26 @@ class MockApi implements ToqueApi {
     createdAt: new Date().toISOString(),
     scansCount: 0,
     reviewClicksCount: 0,
-    walletPassesIssued: 1,
+    walletPassesIssued: 0,
   };
 
   // Lista real de todos los comercios registrados en la plataforma
   private businesses: Map<string, BusinessProfile> = new Map([
     [
-      'musical-monroe',
+      'comercio-activo',
       {
-        id: 'musical-monroe',
-        name: 'Musical Monroe',
-        ownerName: 'Encargado general',
+        id: 'comercio-activo',
+        name: 'Mi comercio',
+        ownerName: 'Titular',
         email: 'nombre@comercio.com',
         ownerRole: 'Dueño/a',
         teamSize: '2 a 5',
-        category: 'Instrumentos y audio',
+        category: 'Comercio',
         planSelected: true,
-        reviewUrl: 'https://maps.google.com',
+        reviewUrl: '',
         cardThemeColor: '#141414',
-        loyaltyTitle: 'Tarjeta de sellos de Musical Monroe',
-        loyaltyReward: 'Beneficio exclusivo en tu próxima visita',
+        loyaltyTitle: 'Tarjeta de sellos',
+        loyaltyReward: 'Beneficio exclusivo al completar tus 10 sellos',
         howToEarn: '1 sello por visita o compra (máximo 1 por día)',
         expirationPolicy: 'No vencen',
         stampsRequired: 10,
@@ -235,7 +235,7 @@ class MockApi implements ToqueApi {
         createdAt: new Date().toISOString(),
         scansCount: 0,
         reviewClicksCount: 0,
-        walletPassesIssued: 1,
+        walletPassesIssued: 0,
       },
     ],
   ]);
@@ -248,14 +248,14 @@ class MockApi implements ToqueApi {
   // Locales del comercio
   private locals: ClubLocal[] = [
     {
-      id: 'local-monroe-1',
-      businessId: 'musical-monroe',
-      code: 'MONROE01',
-      name: 'Sucursal central',
-      address: 'Av. Monroe 2450, CABA',
-      visitsCount: 4,
-      newMembersCount: 1,
-      returningCount: 3,
+      id: 'local-default-1',
+      businessId: 'comercio-activo',
+      code: 'LOCAL01',
+      name: 'Sucursal principal',
+      address: '',
+      visitsCount: 0,
+      newMembersCount: 0,
+      returningCount: 0,
       rewardsRedeemedCount: 0,
       createdAt: new Date().toISOString(),
     },
@@ -264,38 +264,14 @@ class MockApi implements ToqueApi {
   // Equipo del comercio
   private teamMembers: TeamMember[] = [
     {
-      id: 'team-monroe-owner',
-      businessId: 'musical-monroe',
-      name: 'Encargado general',
+      id: 'team-default-owner',
+      businessId: 'comercio-activo',
+      name: 'Titular',
       email: 'nombre@comercio.com',
       role: 'owner',
-      assignedCartelId: 'cartel-monroe-01',
-      assignedCartelCode: 'MONROE01',
-      assignedLocalIds: ['local-monroe-1'],
-      status: 'active',
-      addedAt: new Date().toISOString(),
-    },
-    {
-      id: 'team-monroe-manager',
-      businessId: 'musical-monroe',
-      name: 'Lucía Gómez',
-      email: 'encargado@comercio.com',
-      role: 'manager',
-      assignedCartelId: 'cartel-monroe-01',
-      assignedCartelCode: 'MONROE01',
-      assignedLocalIds: ['local-monroe-1'],
-      status: 'active',
-      addedAt: new Date().toISOString(),
-    },
-    {
-      id: 'team-monroe-cashier',
-      businessId: 'musical-monroe',
-      name: 'Mateo Díaz',
-      email: 'cajero@comercio.com',
-      role: 'cashier',
-      assignedCartelId: 'cartel-monroe-01',
-      assignedCartelCode: 'MONROE01',
-      assignedLocalIds: ['local-monroe-1'],
+      assignedCartelId: 'cartel-default-01',
+      assignedCartelCode: 'LOCAL01',
+      assignedLocalIds: ['local-default-1'],
       status: 'active',
       addedAt: new Date().toISOString(),
     },
@@ -304,21 +280,21 @@ class MockApi implements ToqueApi {
   // Configuración de Tarjeta de Sellos por defecto
   private clubConfig: ClubConfig = {
     id: 'card-default-1',
-    name: 'Tarjeta de sellos de Musical Monroe',
-    clubName: 'Tarjeta de sellos de Musical Monroe',
-    loyaltyTitle: 'Tarjeta de sellos de Musical Monroe',
+    name: 'Tarjeta de sellos',
+    clubName: 'Tarjeta de sellos',
+    loyaltyTitle: 'Tarjeta de sellos',
     brandColor: '#141414',
     cardThemeColor: '#141414',
     colorPreset: 'dark',
     logoUrl: '',
     targetStamps: 10,
     stampsRequired: 10,
-    rewardText: 'Beneficio exclusivo en tu próxima visita',
-    loyaltyReward: 'Beneficio exclusivo en tu próxima visita',
+    rewardText: 'Beneficio exclusivo al completar tus 10 sellos',
+    loyaltyReward: 'Beneficio exclusivo al completar tus 10 sellos',
     rewardValueArs: 12500,
     howToEarn: '1 sello por visita o compra (máximo 1 por día)',
     expirationPolicy: 'No vencen',
-    welcomeBenefitText: 'Beneficio exclusivo en tu próxima visita',
+    welcomeBenefitText: 'Beneficio exclusivo al completar tus 10 sellos',
     pointsPerVisit: 1,
     enabled: true,
     mode: 'per_visit',
@@ -334,113 +310,22 @@ class MockApi implements ToqueApi {
     },
     rewards: [
       {
-        id: 'rew-monroe-1',
-        label: 'Beneficio exclusivo en tu próxima visita',
+        id: 'rew-default-1',
+        label: 'Beneficio exclusivo al completar tus 10 sellos',
         target: 10,
       },
     ],
     active: true,
   };
 
-  // Socios del Club en memoria (incluye a Daniel R. con código numérico de 8 dígitos 48291037 y 4 / 5 sellos)
-  private clubMembers: ClubMember[] = [
-    {
-      id: 'member-daniel-r',
-      accountId: 'acc-daniel-r',
-      businessId: 'musical-monroe',
-      businessName: 'Musical Monroe',
-      localId: 'local-monroe-1',
-      localCode: 'MONROE01',
-      localName: 'Sucursal central',
-      shortCode: '48291037',
-      memberCode: '48291037',
-      barcodeToken: '48291037',
-      name: 'Daniel Rojas',
-      email: 'daniel@ejemplo.com',
-      contact: 'd***@ejemplo.com',
-      maskedEmail: 'd***@ejemplo.com',
-      birthDay: 14,
-      birthMonth: 8,
-      anonymous: false,
-      marketingConsent: true,
-      points: 4,
-      stamps: 4,
-      stampsRequired: 5,
-      targetStamps: 5,
-      rewardText: 'Beneficio exclusivo en tu próxima visita',
-      rewardValueArs: 12500,
-      colorPreset: 'dark',
-      rewardsRedeemed: 0,
-      joinedAt: new Date(Date.now() - 12 * 86400000).toISOString(),
-      lastVisitAt: new Date(Date.now() - 2 * 86400000).toISOString(),
-      lastStampedAt: new Date(Date.now() - 2 * 86400000).toISOString(),
-      consent: true,
-      stampHistory: [
-        {
-          id: 'st-dan-4',
-          memberId: 'member-daniel-r',
-          localId: 'local-monroe-1',
-          localName: 'Sucursal central',
-          count: 1,
-          source: 'cashier',
-          actorName: 'Caja mostrador',
-          createdAt: new Date(Date.now() - 2 * 86400000).toISOString(),
-        },
-        {
-          id: 'st-dan-3',
-          memberId: 'member-daniel-r',
-          localId: 'local-monroe-1',
-          localName: 'Sucursal central',
-          count: 1,
-          source: 'cashier',
-          actorName: 'Caja mostrador',
-          createdAt: new Date(Date.now() - 5 * 86400000).toISOString(),
-        },
-        {
-          id: 'st-dan-2',
-          memberId: 'member-daniel-r',
-          localId: 'local-monroe-1',
-          localName: 'Sucursal central',
-          count: 1,
-          source: 'cashier',
-          actorName: 'Caja mostrador',
-          createdAt: new Date(Date.now() - 8 * 86400000).toISOString(),
-        },
-        {
-          id: 'st-dan-1',
-          memberId: 'member-daniel-r',
-          localId: 'local-monroe-1',
-          localName: 'Sucursal central',
-          count: 1,
-          source: 'self',
-          actorName: 'Alta en el club (+1 sello)',
-          createdAt: new Date(Date.now() - 12 * 86400000).toISOString(),
-        },
-      ],
-    },
-  ];
+  // Socios del Club en memoria
+  private clubMembers: ClubMember[] = [];
 
   // Mapa interno de emails reales para búsqueda y reconocimiento de cuenta
-  private memberRawEmails: Record<string, string> = {
-    'member-daniel-r': 'daniel@ejemplo.com',
-  };
+  private memberRawEmails: Record<string, string> = {};
 
   // Historial de sellos y premios (stamp_logs)
-  private stampLogs: StampLogEntry[] = [
-    {
-      id: 'log-dan-4',
-      businessId: 'musical-monroe',
-      memberId: 'member-daniel-r',
-      memberCode: '48291037',
-      memberName: 'Daniel Rojas',
-      memberEmail: 'd***@ejemplo.com',
-      action: 'stamp_added',
-      stampsDelta: 1,
-      localName: 'Sucursal central',
-      staffEmail: 'cajero@comercio.com',
-      createdAt: new Date(Date.now() - 2 * 86400000).toISOString(),
-    },
-  ];
+  private stampLogs: StampLogEntry[] = [];
 
   // Toquecitos guardados por cuenta
   private toquecitos: ToquecitoItem[] = [];
@@ -457,7 +342,7 @@ class MockApi implements ToqueApi {
     {
       id: 'tpl-birthday',
       type: 'birthday',
-      title: '¡Feliz cumpleaños de parte de Musical Monroe!',
+      title: '¡Feliz cumpleaños!',
       message:
         'Hoy es tu día. Pasá por el local esta semana y tenés un beneficio especial presentando tu tarjeta de sellos.',
       active: true,
@@ -467,7 +352,7 @@ class MockApi implements ToqueApi {
     {
       id: 'tpl-nearby',
       type: 'nearby',
-      title: 'Estás cerca de Musical Monroe',
+      title: 'Estás cerca de nuestro local',
       message: 'Mostrá tu tarjeta en mostrador y sumá tu sello en tu visita.',
       active: true,
       scheduleInfo:
@@ -499,13 +384,13 @@ class MockApi implements ToqueApi {
   // Lista de espera en memoria
   private waitlistEntries: WaitlistEntry[] = [];
 
-  // Cartel activo vinculado por defecto: MONROE01
+  // Cartel activo vinculado por defecto
   private carteles: Cartel[] = [
     {
-      id: 'cartel-monroe-01',
-      code: 'MONROE01',
+      id: 'cartel-default-01',
+      code: 'LOCAL01',
       pin: '102030',
-      businessId: 'musical-monroe',
+      businessId: 'comercio-activo',
       name: 'Mostrador principal',
       role: 'caja',
       status: 'active',
@@ -562,7 +447,7 @@ class MockApi implements ToqueApi {
     connected: false,
   };
   private reviewClicks = 0;
-  private walletPassesIssuedTotal = 1;
+  private walletPassesIssuedTotal = 0;
 
   private lastStampedByBusiness = new Map<
     string,
@@ -576,8 +461,7 @@ class MockApi implements ToqueApi {
       this.businessClubConfigs.set(bizId, { ...this.clubConfig });
     }
     if (!this.businessClubCards.has(bizId)) {
-      // El comercio demo inicial tiene 1 tarjeta; los comercios nuevos nacen con 0 tarjetas ([])
-      this.businessClubCards.set(bizId, bizId === 'musical-monroe' ? [{ ...this.clubConfig }] : []);
+      this.businessClubCards.set(bizId, [{ ...this.clubConfig }]);
     }
     if (!this.businessHubConfigs.has(bizId)) {
       this.businessHubConfigs.set(bizId, { ...this.hubConfig });
@@ -624,22 +508,34 @@ class MockApi implements ToqueApi {
           this.clientAccountsByEmail = new Map(parsed.clientAccountsEntries);
         }
         if (Array.isArray(parsed.clubMembers)) {
-          this.clubMembers = parsed.clubMembers.map((m: ClubMember) => {
-            const rawCode = m.barcodeToken || m.shortCode || m.memberCode || '';
-            const clean8 = /^\d{8}$/.test(rawCode) ? rawCode : m.id === 'member-daniel-r' ? '48291037' : generateShortCode();
-            return {
-              ...m,
-              shortCode: clean8,
-              memberCode: clean8,
-              barcodeToken: clean8,
-            };
-          });
+          this.clubMembers = parsed.clubMembers
+            .filter(
+              (m: ClubMember) =>
+                m.businessId?.toLowerCase() !== 'musical-monroe' &&
+                m.businessName?.trim().toLowerCase() !== 'musical monroe' &&
+                m.localCode?.toUpperCase() !== 'MONROE01' &&
+                m.localCode?.toUpperCase() !== 'MONROE02'
+            )
+            .map((m: ClubMember) => {
+              const rawCode = m.barcodeToken || m.shortCode || m.memberCode || '';
+              const clean8 = /^\d{8}$/.test(rawCode) ? rawCode : generateShortCode();
+              return {
+                ...m,
+                shortCode: clean8,
+                memberCode: clean8,
+                barcodeToken: clean8,
+              };
+            });
         }
         if (parsed.memberRawEmails && typeof parsed.memberRawEmails === 'object') {
           this.memberRawEmails = parsed.memberRawEmails;
         }
         if (Array.isArray(parsed.toquecitos)) {
-          this.toquecitos = parsed.toquecitos;
+          this.toquecitos = parsed.toquecitos.filter(
+            (t: ToquecitoItem) =>
+              t.businessId?.toLowerCase() !== 'musical-monroe' &&
+              t.businessName?.trim().toLowerCase() !== 'musical monroe'
+          );
         }
         if (Array.isArray(parsed.consumerUsersEntries)) {
           this.consumerUsers = new Map(parsed.consumerUsersEntries);
@@ -679,13 +575,27 @@ class MockApi implements ToqueApi {
       if (posRaw) {
         const parsed = JSON.parse(posRaw);
         if (Array.isArray(parsed.sales)) {
-          this.sales = parsed.sales;
+          this.sales = parsed.sales.filter(
+            (s: Sale) => s.businessId?.toLowerCase() !== 'musical-monroe'
+          );
         }
         if (Array.isArray(parsed.receipts)) {
-          this.receipts = parsed.receipts;
+          this.receipts = parsed.receipts.filter(
+            (r: Receipt) =>
+              r.businessId?.toLowerCase() !== 'musical-monroe' &&
+              r.businessName?.trim().toLowerCase() !== 'musical monroe'
+          );
         }
         if (Array.isArray(parsed.carteles)) {
-          this.carteles = parsed.carteles;
+          const filteredCarteles = parsed.carteles.filter(
+            (c: Cartel) =>
+              c.businessId?.toLowerCase() !== 'musical-monroe' &&
+              c.code?.toUpperCase() !== 'MONROE01' &&
+              c.code?.toUpperCase() !== 'MONROE02'
+          );
+          if (filteredCarteles.length > 0) {
+            this.carteles = filteredCarteles;
+          }
         }
       }
 
@@ -694,25 +604,37 @@ class MockApi implements ToqueApi {
         window.sessionStorage.getItem('toque_unified_biz_v2');
       if (bizRaw) {
         const parsed = JSON.parse(bizRaw);
-        if (parsed.businessProfile) {
-          this.businessProfile = parsed.businessProfile;
+        const isMonroe =
+          parsed.businessProfile?.id?.toLowerCase() === 'musical-monroe' ||
+          parsed.businessProfile?.name?.trim().toLowerCase() === 'musical monroe';
+        if (!isMonroe) {
+          if (parsed.businessProfile) {
+            this.businessProfile = parsed.businessProfile;
+          }
+          if (parsed.clubConfig) {
+            this.clubConfig = parsed.clubConfig;
+          }
+          if (parsed.hubConfig) {
+            this.hubConfig = parsed.hubConfig;
+          }
+          if (parsed.planState) {
+            this.planState = parsed.planState;
+          }
+          if (Array.isArray(parsed.businessClubCardsEntries)) {
+            this.businessClubCards = new Map(
+              parsed.businessClubCardsEntries.filter(
+                ([k]: [string, any]) => k.toLowerCase() !== 'musical-monroe'
+              )
+            );
+          }
+          const bizId = this.businessProfile.id || 'comercio-activo';
+          this.businesses.set(bizId, { ...this.businessProfile });
+          this.businessClubConfigs.set(bizId, { ...this.clubConfig });
+          this.businessHubConfigs.set(bizId, { ...this.hubConfig });
+        } else {
+          window.localStorage.removeItem('toque_unified_biz_v2');
+          window.sessionStorage.removeItem('toque_unified_biz_v2');
         }
-        if (parsed.clubConfig) {
-          this.clubConfig = parsed.clubConfig;
-        }
-        if (parsed.hubConfig) {
-          this.hubConfig = parsed.hubConfig;
-        }
-        if (parsed.planState) {
-          this.planState = parsed.planState;
-        }
-        if (Array.isArray(parsed.businessClubCardsEntries)) {
-          this.businessClubCards = new Map(parsed.businessClubCardsEntries);
-        }
-        const bizId = this.businessProfile.id || 'musical-monroe';
-        this.businesses.set(bizId, { ...this.businessProfile });
-        this.businessClubConfigs.set(bizId, { ...this.clubConfig });
-        this.businessHubConfigs.set(bizId, { ...this.hubConfig });
       }
     } catch {
       // Ignore storage read errors
@@ -4077,12 +3999,21 @@ class MockApi implements ToqueApi {
 
   async getPublicHub(code: string): Promise<PublicHub> {
     this.loadPersistedState();
+    const rawClean = (code || '').trim();
+    if (
+      rawClean.toLowerCase() === 'musical-monroe' ||
+      rawClean.toUpperCase() === 'MONROE01' ||
+      rawClean.toUpperCase() === 'MONROE02'
+    ) {
+      throw new Error('El Hub de Musical Monroe fue eliminado.');
+    }
+
     await this.getPlanState();
     const { business, cartel, clubCfg, hubCfg } = this.resolveCartelAndBusiness(code);
 
     // Sincronización en tiempo real desde D1 / servidor sin caché (GET /api/public/hub/:code)
     try {
-      const liveRes = await fetch(`/api/public/hub/${encodeURIComponent(code || 'MONROE01')}`, {
+      const liveRes = await fetch(`/api/public/hub/${encodeURIComponent(code || 'LOCAL01')}`, {
         method: 'GET',
         cache: 'no-store',
         headers: {
@@ -4090,6 +4021,9 @@ class MockApi implements ToqueApi {
           Pragma: 'no-cache',
         },
       });
+      if (liveRes.status === 404) {
+        throw new Error('Este cartel o Hub ya no está activo.');
+      }
       if (liveRes.ok) {
         const liveData = await liveRes.json();
         if (liveData && liveData.found) {
