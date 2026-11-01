@@ -859,81 +859,49 @@ export const PublicHubView: React.FC = () => {
     }
   };
 
-  // Descargar / abrir pase en Apple Wallet (.pkpass) o Google Wallet
+  // Emitir el pase y abrir el archivo nativo devuelto por el Worker.
   const handleAddToWallet = async (preferredTarget: 'auto' | 'apple' | 'google' = 'auto') => {
     if (!hub || !joinedMember) return;
     setWalletErrorMessage(null);
     setWalletStatusMessage(null);
-
-    const rawCode =
-      joinedMember.barcodeToken || joinedMember.shortCode || joinedMember.memberCode || '48291037';
-    const immutableShortCode = /^\d{8}$/.test(rawCode) ? rawCode : '48291037';
-    const rewardLabel =
-      hub.club?.config?.loyaltyReward ||
-      hub.club?.config?.rewardText ||
-      'Beneficio al completar tus sellos';
+    const rawCode = joinedMember.barcodeToken || joinedMember.shortCode || joinedMember.memberCode || '';
+    if (!/^\\d{8}$/.test(rawCode)) {
+      setWalletErrorMessage('Esta tarjeta todavía no tiene un código de socio válido. Actualizá la tarjeta e intentá de nuevo.');
+      return;
+    }
+    const rewardLabel = hub.club?.config?.loyaltyReward || hub.club?.config?.rewardText || 'Beneficio al completar tus sellos';
     const targetStampsCount = hub.club?.config?.targetStamps || 10;
-
-    const pkpassParams = new URLSearchParams({
-      businessName: hub.business.name || 'Comercio adherido',
-      rewardText: rewardLabel,
-      stamps: String(joinedMember.stamps ?? 0),
-      stampsRequired: String(targetStampsCount),
-      memberName: joinedMember.name || 'Socio',
-    });
-    const pkpassUrl = `/api/wallet/pass/${encodeURIComponent(immutableShortCode)}.pkpass?${pkpassParams.toString()}`;
-
     try {
       setGeneratingPass(true);
       const pass = await api.createWalletPass({
-        cartelCode: hub.cartel.code,
-        memberId: joinedMember.id,
-        memberCode: immutableShortCode,
-        barcodeValue: immutableShortCode,
-        barcodeFormat: 'Code128',
-        customerName: joinedMember.name || 'Socio',
+        cartelCode: hub.cartel.code, memberId: joinedMember.id, memberCode: rawCode,
+        barcodeValue: rawCode, barcodeFormat: 'Code128', customerName: joinedMember.name || 'Socio',
         customerContact: joinedMember.email || joinedMember.maskedEmail || joinedMember.contact,
-        stamps: joinedMember.stamps,
-        stampsRequired: targetStampsCount,
-        rewardText: rewardLabel,
+        stamps: joinedMember.stamps, stampsRequired: targetStampsCount, rewardText: rewardLabel,
         colorPreset: hub.club?.config?.colorPreset || 'dark',
-        color: hub.club?.config?.customColor,
-        logoURL: hub.club?.config?.logoUrl || hub.business.logoUrl,
-        serialNumber: joinedMember.walletSerial,
-        isUpdate: Boolean(joinedMember.walletSerial),
+        serialNumber: joinedMember.walletSerial, isUpdate: Boolean(joinedMember.walletSerial),
       });
-
-      const googleUrl = pass.googleWalletUrl || pass.shareUrl || null;
-      setAppleWalletHref(pkpassUrl);
-      if (googleUrl) {
-        setGoogleWalletHref(googleUrl);
-      }
-
-      if (preferredTarget === 'apple' || (preferredTarget === 'auto' && isIOSDevice())) {
-        window.location.href = pkpassUrl;
+      const appleUrl = pass.appleWalletUrl || joinedMember.appleWalletUrl || null;
+      const googleUrl = pass.googleSaveUrl || pass.googleWalletUrl || joinedMember.googleWalletUrl || null;
+      setAppleWalletHref(appleUrl || '');
+      setGoogleWalletHref(googleUrl || '');
+      if (isIOSDevice()) {
+        if (!appleUrl) throw new Error('WalletWallet no devolvió el archivo de Apple Wallet.');
         setWalletStatusMessage('Abriendo tu pase en Apple Wallet...');
+        window.location.assign(appleUrl);
         return;
       }
-
-      if (
-        (preferredTarget === 'google' || (preferredTarget === 'auto' && isAndroidDevice())) &&
-        googleUrl
-      ) {
-        window.location.href = googleUrl;
+      if (isAndroidDevice()) {
+        if (!googleUrl) throw new Error('WalletWallet no devolvió el enlace de Google Wallet.');
         setWalletStatusMessage('Abriendo tu pase en Google Wallet...');
+        window.location.assign(googleUrl);
         return;
       }
-
-      const fallback = googleUrl || pkpassUrl;
-      setDesktopFallbackUrl(fallback);
-      setWalletStatusMessage('Elegí Apple Wallet o Google Wallet debajo para guardar tu tarjeta en el teléfono.');
-    } catch {
-      setAppleWalletHref(pkpassUrl);
-      if (preferredTarget === 'apple' || isIOSDevice()) {
-        window.location.href = pkpassUrl;
-        return;
-      }
-      setWalletErrorMessage('No pudimos conectar con la billetera en este momento. Intentá de nuevo.');
+      const fallback = preferredTarget === 'apple' ? appleUrl : googleUrl || appleUrl;
+      setDesktopFallbackUrl(fallback || '');
+      setWalletStatusMessage('Elegí Apple Wallet o Google Wallet debajo para guardar tu tarjeta.');
+    } catch (err: any) {
+      setWalletErrorMessage(err?.message || 'No pudimos conectar con la billetera. Intentá de nuevo.');
     } finally {
       setGeneratingPass(false);
     }
