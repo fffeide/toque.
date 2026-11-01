@@ -58,6 +58,19 @@ function isConfiguredReviewUrl(url?: string): boolean {
   return true;
 }
 
+function sanitizeExternalNavigationUrl(url?: string | null): string | null {
+  if (!url) return null;
+  const trimmed = url.trim();
+  if (!trimmed) return null;
+  try {
+    const parsed = new URL(trimmed, window.location.origin);
+    if (parsed.protocol !== 'https:') return null;
+    return parsed.toString();
+  } catch {
+    return null;
+  }
+}
+
 function isAtLeast18(birthDateStr: string): {
   valid: boolean;
   isAdult: boolean;
@@ -895,8 +908,12 @@ export const PublicHubView: React.FC = () => {
         colorPreset: hub.club?.config?.colorPreset || 'dark',
         serialNumber: joinedMember.walletSerial, isUpdate: Boolean(joinedMember.walletSerial),
       });
-      const appleUrl = pass.appleWalletUrl || joinedMember.appleWalletUrl || null;
-      const googleUrl = pass.googleSaveUrl || pass.googleWalletUrl || joinedMember.googleWalletUrl || null;
+      const appleUrl = sanitizeExternalNavigationUrl(
+        pass.appleWalletUrl || joinedMember.appleWalletUrl || null
+      );
+      const googleUrl = sanitizeExternalNavigationUrl(
+        pass.googleSaveUrl || pass.googleWalletUrl || joinedMember.googleWalletUrl || null
+      );
       setAppleWalletHref(appleUrl || '');
       setGoogleWalletHref(googleUrl || '');
       if (isIOSDevice()) {
