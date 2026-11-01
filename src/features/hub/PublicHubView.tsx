@@ -173,7 +173,10 @@ export const PublicHubView: React.FC = () => {
     customerName?: string;
     customerEmail?: string;
     customerBirthDate?: string;
-  }): Promise<{ barcodeToken?: string; stamps?: number; stampsRequired?: number; memberId?: string }> => {
+  }): Promise<{
+    barcodeToken?: string; stamps?: number; stampsRequired?: number; memberId?: string;
+    walletSerial?: string; appleWalletUrl?: string; googleWalletUrl?: string;
+  }> => {
     try {
       const token = getConsumerSessionToken();
       const savedUser = getSavedConsumerUser();
@@ -233,6 +236,9 @@ export const PublicHubView: React.FC = () => {
           stamps: typeof cardData?.stamps === 'number' ? cardData.stamps : 0,
           stampsRequired: cardData?.stampsRequired || 10,
           memberId: cardData?.id,
+          walletSerial: cardData?.walletSerial,
+          appleWalletUrl: cardData?.appleWalletUrl,
+          googleWalletUrl: cardData?.googleWalletUrl,
         };
       }
       return {};
@@ -607,6 +613,10 @@ export const PublicHubView: React.FC = () => {
 
       const mergedMember: ClubMember = {
         ...res.member,
+        id: d1Claim.memberId || res.member.id,
+        walletSerial: d1Claim.walletSerial || res.member.walletSerial,
+        appleWalletUrl: d1Claim.appleWalletUrl || res.member.appleWalletUrl,
+        googleWalletUrl: d1Claim.googleWalletUrl || res.member.googleWalletUrl,
         stamps: d1Claim.stamps ?? res.member.stamps ?? 0,
         stampsRequired: 10,
         barcodeToken: d1Claim.barcodeToken || res.member.barcodeToken || res.member.shortCode,
@@ -841,6 +851,10 @@ export const PublicHubView: React.FC = () => {
 
       const mergedMember: ClubMember = {
         ...reg.member,
+        id: d1Claim.memberId || reg.member.id,
+        walletSerial: d1Claim.walletSerial || reg.member.walletSerial,
+        appleWalletUrl: d1Claim.appleWalletUrl || reg.member.appleWalletUrl,
+        googleWalletUrl: d1Claim.googleWalletUrl || reg.member.googleWalletUrl,
         stamps: d1Claim.stamps ?? reg.member.stamps ?? 0,
         stampsRequired: 10,
         barcodeToken: d1Claim.barcodeToken || reg.member.barcodeToken || reg.member.shortCode,
