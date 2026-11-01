@@ -78,8 +78,8 @@ CREATE TABLE IF NOT EXISTS partner_referrals (
 CREATE INDEX IF NOT EXISTS idx_partner_referrals_code ON partner_referrals(partner_code);
 
 -- 6. Configuración inicial lista para producción: "Musical Monroe" (MONROE01)
-INSERT OR IGNORE INTO tenants (id, slug, name, owner_email, created_at)
-VALUES ('musical-monroe', 'musical-monroe', 'Musical Monroe', 'hola@musicalmonroe.com.ar', datetime('now'));
+INSERT OR IGNORE INTO tenants (id, slug, name, owner_name, email, created_at)
+VALUES ('musical-monroe', 'musical-monroe', 'Musical Monroe', 'Musical Monroe', 'hola@musicalmonroe.com.ar', datetime('now'));
 
 INSERT OR IGNORE INTO carteles (id, code, tenant_id, name, role, status, mode, tile_color, claim_status, created_at)
 VALUES ('cartel-monroe-01', 'MONROE01', 'musical-monroe', 'Mostrador Musical Monroe', 'caja', 'active', 'smart_hub', 'black', 'claimed', datetime('now'));

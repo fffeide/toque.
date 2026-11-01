@@ -23,13 +23,11 @@ export interface CardInput {
   stamps: number;
   stampsRequired: number;
   rewardText: string;
-  /** Código numérico único de 8 dígitos para el código de barras CODE128 */
+  /** Código numérico único de 8 dígitos guardado en loyalty_members.barcode_token. */
   barcodeToken: string;
   colorPreset?: ColorPreset;
   notification?: string;
   locations?: { latitude: number; longitude: number; relevantText?: string }[];
-  color?: string;
-  logoURL?: string;
 }
 
 export interface CreatedPass {
@@ -74,7 +72,8 @@ export function generateBarcodeToken(): string {
 export function buildBody(c: CardInput): Record<string, unknown> {
   const body: Record<string, unknown> = {
     barcodeValue: c.barcodeToken,
-    barcodeFormat: 'CODE128',
+    // WalletWallet valida el enum con esta capitalización exacta.
+    barcodeFormat: 'Code128',
     barcodeAltText: c.barcodeToken,
     logoText: c.businessName.slice(0, 40),
     description: `Tarjeta de sellos de ${c.businessName}`.slice(0, 120),
@@ -96,13 +95,13 @@ export function buildBody(c: CardInput): Record<string, unknown> {
   };
   if (!body.headerFields) delete body.headerFields;
   if (c.locations?.length) body.locations = c.locations.slice(0, 10);
-  if (c.color) body.color = c.color;
-  if (c.logoURL) body.logoURL = c.logoURL;
+  // En cuentas gratuitas no enviar `color` ni `logoURL`.
+  // El diseño se controla únicamente con colorPreset.
   return body;
 }
 
 function headers(env: Env): Record<string, string> {
-  const apiKey = (env.WALLETWALLET_API_KEY || 'ww_live_0a1b9cf29dcd4f7ceb3a5023d0e49de2').trim();
+  const apiKey = (env.WALLETWALLET_API_KEY || '').trim();
   if (!apiKey) {
     throw new WalletError(
       503,

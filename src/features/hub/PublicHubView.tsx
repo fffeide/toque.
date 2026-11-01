@@ -58,6 +58,19 @@ function isConfiguredReviewUrl(url?: string): boolean {
   return true;
 }
 
+function sanitizeExternalNavigationUrl(url?: string | null): string | null {
+  if (!url) return null;
+  const trimmed = url.trim();
+  if (!trimmed) return null;
+  try {
+    const parsed = new URL(trimmed, window.location.origin);
+    if (parsed.protocol !== 'https:') return null;
+    return parsed.toString();
+  } catch {
+    return null;
+  }
+}
+
 function isAtLeast18(birthDateStr: string): {
   valid: boolean;
   isAdult: boolean;
@@ -173,7 +186,10 @@ export const PublicHubView: React.FC = () => {
     customerName?: string;
     customerEmail?: string;
     customerBirthDate?: string;
-  }): Promise<{ barcodeToken?: string; stamps?: number; stampsRequired?: number; memberId?: string }> => {
+  }): Promise<{
+    barcodeToken?: string; stamps?: number; stampsRequired?: number; memberId?: string;
+    walletSerial?: string; appleWalletUrl?: string; googleWalletUrl?: string;
+  }> => {
     try {
       const token = getConsumerSessionToken();
       const savedUser = getSavedConsumerUser();
@@ -233,6 +249,9 @@ export const PublicHubView: React.FC = () => {
           stamps: typeof cardData?.stamps === 'number' ? cardData.stamps : 0,
           stampsRequired: cardData?.stampsRequired || 10,
           memberId: cardData?.id,
+          walletSerial: cardData?.walletSerial,
+          appleWalletUrl: cardData?.appleWalletUrl,
+          googleWalletUrl: cardData?.googleWalletUrl,
         };
       }
       return {};
@@ -607,6 +626,10 @@ export const PublicHubView: React.FC = () => {
 
       const mergedMember: ClubMember = {
         ...res.member,
+        id: d1Claim.memberId || res.member.id,
+        walletSerial: d1Claim.walletSerial || res.member.walletSerial,
+        appleWalletUrl: d1Claim.appleWalletUrl || res.member.appleWalletUrl,
+        googleWalletUrl: d1Claim.googleWalletUrl || res.member.googleWalletUrl,
         stamps: d1Claim.stamps ?? res.member.stamps ?? 0,
         stampsRequired: 10,
         barcodeToken: d1Claim.barcodeToken || res.member.barcodeToken || res.member.shortCode,
@@ -841,6 +864,10 @@ export const PublicHubView: React.FC = () => {
 
       const mergedMember: ClubMember = {
         ...reg.member,
+        id: d1Claim.memberId || reg.member.id,
+        walletSerial: d1Claim.walletSerial || reg.member.walletSerial,
+        appleWalletUrl: d1Claim.appleWalletUrl || reg.member.appleWalletUrl,
+        googleWalletUrl: d1Claim.googleWalletUrl || reg.member.googleWalletUrl,
         stamps: d1Claim.stamps ?? reg.member.stamps ?? 0,
         stampsRequired: 10,
         barcodeToken: d1Claim.barcodeToken || reg.member.barcodeToken || reg.member.shortCode,
@@ -859,81 +886,53 @@ export const PublicHubView: React.FC = () => {
     }
   };
 
-  // Descargar / abrir pase en Apple Wallet (.pkpass) o Google Wallet
+  // Emitir el pase y abrir el archivo nativo devuelto por el Worker.
   const handleAddToWallet = async (preferredTarget: 'auto' | 'apple' | 'google' = 'auto') => {
     if (!hub || !joinedMember) return;
     setWalletErrorMessage(null);
     setWalletStatusMessage(null);
-
-    const rawCode =
-      joinedMember.barcodeToken || joinedMember.shortCode || joinedMember.memberCode || '48291037';
-    const immutableShortCode = /^\d{8}$/.test(rawCode) ? rawCode : '48291037';
-    const rewardLabel =
-      hub.club?.config?.loyaltyReward ||
-      hub.club?.config?.rewardText ||
-      'Beneficio al completar tus sellos';
+    const rawCode = joinedMember.barcodeToken || joinedMember.shortCode || joinedMember.memberCode || '';
+    if (!/^\\d{8}$/.test(rawCode)) {
+      setWalletErrorMessage('Esta tarjeta todavía no tiene un código de socio válido. Actualizá la tarjeta e intentá de nuevo.');
+      return;
+    }
+    const rewardLabel = hub.club?.config?.loyaltyReward || hub.club?.config?.rewardText || 'Beneficio al completar tus sellos';
     const targetStampsCount = hub.club?.config?.targetStamps || 10;
-
-    const pkpassParams = new URLSearchParams({
-      businessName: hub.business.name || 'Comercio adherido',
-      rewardText: rewardLabel,
-      stamps: String(joinedMember.stamps ?? 0),
-      stampsRequired: String(targetStampsCount),
-      memberName: joinedMember.name || 'Socio',
-    });
-    const pkpassUrl = `/api/wallet/pass/${encodeURIComponent(immutableShortCode)}.pkpass?${pkpassParams.toString()}`;
-
     try {
       setGeneratingPass(true);
       const pass = await api.createWalletPass({
-        cartelCode: hub.cartel.code,
-        memberId: joinedMember.id,
-        memberCode: immutableShortCode,
-        barcodeValue: immutableShortCode,
-        barcodeFormat: 'Code128',
-        customerName: joinedMember.name || 'Socio',
+        cartelCode: hub.cartel.code, memberId: joinedMember.id, memberCode: rawCode,
+        barcodeValue: rawCode, barcodeFormat: 'Code128', customerName: joinedMember.name || 'Socio',
         customerContact: joinedMember.email || joinedMember.maskedEmail || joinedMember.contact,
-        stamps: joinedMember.stamps,
-        stampsRequired: targetStampsCount,
-        rewardText: rewardLabel,
+        stamps: joinedMember.stamps, stampsRequired: targetStampsCount, rewardText: rewardLabel,
         colorPreset: hub.club?.config?.colorPreset || 'dark',
-        color: hub.club?.config?.customColor,
-        logoURL: hub.club?.config?.logoUrl || hub.business.logoUrl,
-        serialNumber: joinedMember.walletSerial,
-        isUpdate: Boolean(joinedMember.walletSerial),
+        serialNumber: joinedMember.walletSerial, isUpdate: Boolean(joinedMember.walletSerial),
       });
-
-      const googleUrl = pass.googleWalletUrl || pass.shareUrl || null;
-      setAppleWalletHref(pkpassUrl);
-      if (googleUrl) {
-        setGoogleWalletHref(googleUrl);
-      }
-
-      if (preferredTarget === 'apple' || (preferredTarget === 'auto' && isIOSDevice())) {
-        window.location.href = pkpassUrl;
+      const appleUrl = sanitizeExternalNavigationUrl(
+        pass.appleWalletUrl || joinedMember.appleWalletUrl || null
+      );
+      const googleUrl = sanitizeExternalNavigationUrl(
+        pass.googleSaveUrl || pass.googleWalletUrl || joinedMember.googleWalletUrl || null
+      );
+      setAppleWalletHref(appleUrl || '');
+      setGoogleWalletHref(googleUrl || '');
+      if (isIOSDevice()) {
+        if (!appleUrl) throw new Error('WalletWallet no devolvió el archivo de Apple Wallet.');
         setWalletStatusMessage('Abriendo tu pase en Apple Wallet...');
+        window.location.assign(appleUrl);
         return;
       }
-
-      if (
-        (preferredTarget === 'google' || (preferredTarget === 'auto' && isAndroidDevice())) &&
-        googleUrl
-      ) {
-        window.location.href = googleUrl;
+      if (isAndroidDevice()) {
+        if (!googleUrl) throw new Error('WalletWallet no devolvió el enlace de Google Wallet.');
         setWalletStatusMessage('Abriendo tu pase en Google Wallet...');
+        window.location.assign(googleUrl);
         return;
       }
-
-      const fallback = googleUrl || pkpassUrl;
-      setDesktopFallbackUrl(fallback);
-      setWalletStatusMessage('Elegí Apple Wallet o Google Wallet debajo para guardar tu tarjeta en el teléfono.');
-    } catch {
-      setAppleWalletHref(pkpassUrl);
-      if (preferredTarget === 'apple' || isIOSDevice()) {
-        window.location.href = pkpassUrl;
-        return;
-      }
-      setWalletErrorMessage('No pudimos conectar con la billetera en este momento. Intentá de nuevo.');
+      const fallback = preferredTarget === 'apple' ? appleUrl : googleUrl || appleUrl;
+      setDesktopFallbackUrl(fallback || '');
+      setWalletStatusMessage('Elegí Apple Wallet o Google Wallet debajo para guardar tu tarjeta.');
+    } catch (err: any) {
+      setWalletErrorMessage(err?.message || 'No pudimos conectar con la billetera. Intentá de nuevo.');
     } finally {
       setGeneratingPass(false);
     }

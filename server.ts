@@ -629,7 +629,7 @@ async function startServer() {
       if (!foundPass?.applePassBase64) {
         try {
           const apiKey = (
-            process.env.WALLETWALLET_API_KEY || 'ww_live_0a1b9cf29dcd4f7ceb3a5023d0e49de2'
+            process.env.WALLETWALLET_API_KEY || ''
           ).trim();
           const token8 = normalize8DigitBarcode(rawToken) || generateUnique8DigitServerBarcode();
           const liveCfg = Array.from(memoryMerchantHubConfigs.values())[0];
@@ -657,8 +657,6 @@ async function startServer() {
               rewardText,
               barcodeToken: token8,
               colorPreset: (foundPass?.colorPreset || liveCfg?.colorPreset || 'dark') as ColorPreset,
-              color: foundPass?.brandColor || liveCfg?.brandColor || undefined,
-              logoURL: foundPass?.logoUrl || liveCfg?.logoUrl || undefined,
             }
           );
 
@@ -1011,7 +1009,7 @@ async function startServer() {
         }
 
         const apiKey = (
-          process.env.WALLETWALLET_API_KEY || 'ww_live_0a1b9cf29dcd4f7ceb3a5023d0e49de2'
+          process.env.WALLETWALLET_API_KEY || ''
         ).trim();
 
         // Actualizar en segundo plano los pases emitidos de este comercio
@@ -1033,8 +1031,6 @@ async function startServer() {
                   rewardText,
                   barcodeToken: p.barcodeToken,
                   colorPreset,
-                  color: brandColor,
-                  logoURL: logoUrl,
                 }).catch(() => {});
               }
             }
@@ -1128,7 +1124,7 @@ async function startServer() {
     // 5. Estado de WalletWallet
     if (pathname === '/api/wallet/status' && req.method === 'GET') {
       const apiKey = (
-        process.env.WALLETWALLET_API_KEY || 'ww_live_0a1b9cf29dcd4f7ceb3a5023d0e49de2'
+        process.env.WALLETWALLET_API_KEY || ''
       ).trim();
       const hasKey = Boolean(apiKey.length > 0);
       const hasResendKey = Boolean(
@@ -1559,7 +1555,7 @@ async function startServer() {
         let walletSyncError: string | undefined;
         let notifiedDevices = 0;
         const apiKey = (
-          process.env.WALLETWALLET_API_KEY || 'ww_live_0a1b9cf29dcd4f7ceb3a5023d0e49de2'
+          process.env.WALLETWALLET_API_KEY || ''
         ).trim();
 
         if (walletSerial && apiKey) {
@@ -1573,8 +1569,6 @@ async function startServer() {
               barcodeToken,
               colorPreset,
               notification: lastNotification,
-              color: body.color || undefined,
-              logoURL: body.logoURL || undefined,
             });
             notifiedDevices = upd.notifiedDevices;
           } catch (err: any) {
@@ -1723,7 +1717,7 @@ async function startServer() {
 
         const qrUrl = body.qrUrl || `/u/${code}`;
         const apiKey = (
-          process.env.WALLETWALLET_API_KEY || 'ww_live_0a1b9cf29dcd4f7ceb3a5023d0e49de2'
+          process.env.WALLETWALLET_API_KEY || ''
         ).trim();
 
         const cardInput: CardInput = {
@@ -1740,8 +1734,6 @@ async function startServer() {
           colorPreset,
           notification: typeof body.notification === 'string' ? body.notification : ' ',
           locations: Array.isArray(body.locations) ? body.locations : undefined,
-          color: body.color || undefined,
-          logoURL: body.logoURL || body.logoUrl || undefined,
         };
 
         let walletSyncError: string | undefined;

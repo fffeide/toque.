@@ -555,68 +555,48 @@ export const ToquecitosView: React.FC = () => {
     setWalletError(null);
     setWalletStatusMessage(null);
     setWalletLoadingId(card.id);
-
-    const rawCode = card.barcodeToken || card.shortCode || card.memberCode || '48291037';
-    const immutableShortCode = /^\d{8}$/.test(rawCode) ? rawCode : '48291037';
+    const rawCode = card.barcodeToken || card.shortCode || card.memberCode || '';
+    if (!/^\\d{8}$/.test(rawCode)) {
+      setWalletError('Esta tarjeta no tiene un código de socio válido. Actualizá tus tarjetas e intentá de nuevo.');
+      setWalletLoadingId(null);
+      return;
+    }
     const targetStampsCount = card.targetStamps || card.stampsRequired || 10;
     const rewardLabel = card.rewardText || 'Beneficio al completar tus sellos';
-
-    const pkpassParams = new URLSearchParams({
-      businessName: card.businessName || 'Comercio adherido',
-      rewardText: rewardLabel,
-      stamps: String(card.stamps ?? 0),
-      stampsRequired: String(targetStampsCount),
-      memberName: card.name || 'Socio',
-    });
-    const pkpassUrl = `/api/wallet/pass/${encodeURIComponent(immutableShortCode)}.pkpass?${pkpassParams.toString()}`;
-
     try {
       const passRes = await api.createWalletPass({
         cartelCode: card.localCode || 'TOQUE01',
         memberId: card.id,
-        memberCode: immutableShortCode,
-        barcodeValue: immutableShortCode,
+        memberCode: rawCode,
+        barcodeValue: rawCode,
         barcodeFormat: 'Code128',
         customerName: card.name,
         stamps: card.stamps,
         stampsRequired: targetStampsCount,
         rewardText: rewardLabel,
         colorPreset: card.colorPreset || 'dark',
-        color: card.customColor,
-        logoURL: card.logoUrl,
       });
-
-      const googleUrl = passRes.googleWalletUrl || passRes.shareUrl || null;
-      setAppleWalletHref(pkpassUrl);
-      if (googleUrl) {
-        setGoogleWalletHref(googleUrl);
-      }
-
-      if (preferredTarget === 'apple' || (preferredTarget === 'auto' && isIOSDevice())) {
-        window.location.href = pkpassUrl;
+      const appleUrl = passRes.appleWalletUrl || card.appleWalletUrl || null;
+      const googleUrl = passRes.googleSaveUrl || passRes.googleWalletUrl || card.googleWalletUrl || null;
+      setAppleWalletHref(appleUrl || '');
+      setGoogleWalletHref(googleUrl || '');
+      if (isIOSDevice()) {
+        if (!appleUrl) throw new Error('WalletWallet no devolvió el archivo de Apple Wallet.');
         setWalletStatusMessage('Abriendo tu pase en Apple Wallet...');
+        window.location.assign(appleUrl);
         return;
       }
-
-      if (
-        (preferredTarget === 'google' || (preferredTarget === 'auto' && isAndroidDevice())) &&
-        googleUrl
-      ) {
-        window.location.href = googleUrl;
+      if (isAndroidDevice()) {
+        if (!googleUrl) throw new Error('WalletWallet no devolvió el enlace de Google Wallet.');
         setWalletStatusMessage('Abriendo tu pase en Google Wallet...');
+        window.location.assign(googleUrl);
         return;
       }
-
-      const fallback = googleUrl || pkpassUrl;
-      setDesktopFallbackUrl(fallback);
+      const fallback = preferredTarget === 'apple' ? appleUrl : googleUrl || appleUrl;
+      setDesktopFallbackUrl(fallback || '');
       setWalletStatusMessage('Elegí Apple Wallet o Google Wallet debajo para guardar tu tarjeta.');
-    } catch {
-      setAppleWalletHref(pkpassUrl);
-      if (preferredTarget === 'apple' || isIOSDevice()) {
-        window.location.href = pkpassUrl;
-        return;
-      }
-      setWalletError('No pudimos conectar con la billetera en este momento. Probá de nuevo.');
+    } catch (err: any) {
+      setWalletError(err?.message || 'No pudimos conectar con la billetera. Probá de nuevo.');
     } finally {
       setWalletLoadingId(null);
     }

@@ -397,7 +397,7 @@ class HttpApi implements ToqueApi {
     expirationPolicy?: string;
     logoText?: string;
     organizationName?: string;
-    barcodeFormat?: 'QR' | 'CODE128' | 'PDF417' | 'AZTEC';
+    barcodeFormat?: 'QR' | 'Code128' | 'PDF417' | 'AZTEC';
     barcodeValue?: string;
     barcodeAltText?: string;
     colorPreset?: 'dark' | 'blue' | 'green' | 'red' | 'purple' | 'orange';

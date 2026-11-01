@@ -201,27 +201,26 @@ export function triggerDirectWalletSave(params: {
   appleWalletUrl?: string;
   onDesktopFallback?: (pkpassUrl: string) => void;
 }): void {
-  const cleanBarcode = (params.barcodeToken || '48291037').trim();
-  const pkpassUrl = `/api/wallet/pass/${encodeURIComponent(cleanBarcode)}.pkpass`;
+  const pkpassUrl = params.appleWalletUrl || '';
 
   if (isIOSDevice()) {
-    window.location.href = pkpassUrl;
+    if (pkpassUrl) window.location.assign(pkpassUrl);
     return;
   }
 
   if (isAndroidDevice() && params.googleWalletUrl) {
-    window.location.href = params.googleWalletUrl;
+    window.location.assign(params.googleWalletUrl);
     return;
   }
 
-  if (params.googleWalletUrl && !isIOSDevice()) {
-    window.location.href = params.googleWalletUrl;
+  if (params.googleWalletUrl) {
+    window.location.assign(params.googleWalletUrl);
     return;
   }
 
-  if (params.onDesktopFallback) {
+  if (pkpassUrl && params.onDesktopFallback) {
     params.onDesktopFallback(pkpassUrl);
-  } else {
-    window.location.href = pkpassUrl;
+  } else if (pkpassUrl) {
+    window.location.assign(pkpassUrl);
   }
 }

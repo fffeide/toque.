@@ -3,8 +3,9 @@
 CREATE TABLE IF NOT EXISTS tenants (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
-  owner_name TEXT NOT NULL,
-  email TEXT NOT NULL UNIQUE,
+  slug TEXT UNIQUE,
+  owner_name TEXT,
+  email TEXT UNIQUE,
   review_url TEXT,
   plan TEXT DEFAULT 'beta_30d',
   is_associated_with_manufacturer INTEGER DEFAULT 0,
