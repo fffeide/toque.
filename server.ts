@@ -657,8 +657,6 @@ async function startServer() {
               rewardText,
               barcodeToken: token8,
               colorPreset: (foundPass?.colorPreset || liveCfg?.colorPreset || 'dark') as ColorPreset,
-              color: foundPass?.brandColor || liveCfg?.brandColor || undefined,
-              logoURL: foundPass?.logoUrl || liveCfg?.logoUrl || undefined,
             }
           );
 
@@ -1033,8 +1031,6 @@ async function startServer() {
                   rewardText,
                   barcodeToken: p.barcodeToken,
                   colorPreset,
-                  color: brandColor,
-                  logoURL: logoUrl,
                 }).catch(() => {});
               }
             }
@@ -1573,8 +1569,6 @@ async function startServer() {
               barcodeToken,
               colorPreset,
               notification: lastNotification,
-              color: body.color || undefined,
-              logoURL: body.logoURL || undefined,
             });
             notifiedDevices = upd.notifiedDevices;
           } catch (err: any) {
@@ -1740,8 +1734,6 @@ async function startServer() {
           colorPreset,
           notification: typeof body.notification === 'string' ? body.notification : ' ',
           locations: Array.isArray(body.locations) ? body.locations : undefined,
-          color: body.color || undefined,
-          logoURL: body.logoURL || body.logoUrl || undefined,
         };
 
         let walletSyncError: string | undefined;
