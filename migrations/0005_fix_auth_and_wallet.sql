@@ -1,5 +1,5 @@
 -- ============================================================
--- TOQUE D1 MIGRATION 0004: AUTH UNIFICATION, DIRECT WALLET & CODE128
+-- TOQUE D1 MIGRATION 0005: AUTH UNIFICATION, DIRECT WALLET & CODE128
 -- ============================================================
 
 -- 1. Asegurar tabla consumer_users con sesión persistente única
