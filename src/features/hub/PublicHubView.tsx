@@ -193,74 +193,34 @@ export const PublicHubView: React.FC = () => {
     barcodeToken?: string; stamps?: number; stampsRequired?: number; memberId?: string;
     walletSerial?: string; appleWalletUrl?: string; googleWalletUrl?: string;
   }> => {
-    try {
-      const token = getConsumerSessionToken();
-      const savedUser = getSavedConsumerUser();
-      const effectiveEmail = (
-        params.customerEmail ||
-        recognizedAccount?.email ||
-        savedUser?.email ||
-        getConsumerSessionEmail() ||
-        ''
-      )
-        .trim()
-        .toLowerCase();
-      const effectiveName = (
-        params.customerName ||
-        recognizedAccount?.name ||
-        savedUser?.fullName ||
-        effectiveEmail.split('@')[0] ||
-        'Socio'
-      ).trim();
-      const effectiveConsumerId =
-        savedUser?.id || recognizedAccount?.accountId || undefined;
+    const response = await fetch('/api/consumer/cards/claim', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      // La sesión se valida en el Worker mediante la cookie HttpOnly.
+      // No se aceptan email, consumerId ni datos de identidad del navegador.
+      body: JSON.stringify({ code: params.hubData.cartel.code }),
+    });
 
-      const res = await fetch('/api/consumer/cards/claim', {
-        method: 'POST',
-        credentials: 'include',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          code: params.hubData.cartel.code,
-          cartelCode: params.hubData.cartel.code,
-          localCode: params.hubData.cartel.code,
-          tenantId: params.hubData.business.id,
-          businessId: params.hubData.business.id,
-          consumerId: effectiveConsumerId,
-          email: effectiveEmail,
-          fullName: effectiveName,
-          name: effectiveName,
-          birthDate: params.customerBirthDate || savedUser?.birthDate,
-          businessName: params.hubData.business.name,
-          rewardText:
-            params.hubData.club?.config?.loyaltyReward ||
-            params.hubData.club?.config?.rewardText ||
-            'Premio al completar tus 10 sellos',
-          stampsRequired: 10,
-        }),
-      });
-      if (!res.ok) return {};
-      const data = await res.json();
-      if (data.sessionToken && data.user) {
-        saveConsumerSession(data.sessionToken, data.user.email, data.user);
-      }
-      const cardData = data.card || data.member;
-      if (cardData || data.barcodeToken) {
-        return {
-          barcodeToken: cardData?.barcodeToken || data.barcodeToken,
-          stamps: typeof cardData?.stamps === 'number' ? cardData.stamps : 0,
-          stampsRequired: cardData?.stampsRequired || 10,
-          memberId: cardData?.id,
-          walletSerial: cardData?.walletSerial,
-          appleWalletUrl: cardData?.appleWalletUrl,
-          googleWalletUrl: cardData?.googleWalletUrl,
-        };
-      }
-      return {};
-    } catch {
-      return {};
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(data?.error || 'No pudimos guardar la tarjeta en tu cuenta.');
     }
+
+    const cardData = data.card || data.member;
+    if (!cardData?.id || !cardData?.barcodeToken) {
+      throw new Error('El servidor no confirmó que la tarjeta quedó guardada.');
+    }
+
+    return {
+      barcodeToken: cardData.barcodeToken,
+      stamps: typeof cardData.stamps === 'number' ? cardData.stamps : 0,
+      stampsRequired: cardData.stampsRequired || 10,
+      memberId: cardData.id,
+      walletSerial: cardData.walletSerial,
+      appleWalletUrl: cardData.appleWalletUrl,
+      googleWalletUrl: cardData.googleWalletUrl || cardData.googleSaveUrl,
+    };
   };
 
   useEffect(() => {
