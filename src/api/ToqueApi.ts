@@ -415,7 +415,18 @@ export interface ToqueApi {
     consent: boolean;
   }): Promise<{ member: ClubMember; pointsAwarded: number; walletPass?: WalletPassResponse }>;
 
-  getWalletStatus(): Promise<{ configured: boolean; emailConfigured?: boolean; provider: string; passesIssuedCount?: number }>;
+  getWalletStatus(): Promise<{
+    configured: boolean;
+    emailConfigured?: boolean;
+    provider: string;
+    passesIssuedCount?: number;
+    count?: number;
+    limit?: number;
+    remaining?: number;
+    plan?: string;
+    error?: string;
+    code?: string;
+  }>;
 
   createWalletPass(data: {
     cartelCode?: string;
