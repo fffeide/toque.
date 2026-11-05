@@ -146,7 +146,7 @@ class HttpApi implements ToqueApi {
       recognized: accountExists,
       accountExists,
       accountId: response.user.id,
-      name: response.user.name,
+      name: (response.user as any).name || (response.user as any).fullName,
       email: response.user.email,
     } : { recognized: false, accountExists });
     return { ...response, account };
