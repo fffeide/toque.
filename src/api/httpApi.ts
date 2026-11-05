@@ -194,15 +194,49 @@ class HttpApi implements ToqueApi {
     birthMonth?: number;
     adult?: boolean;
     marketingConsent: boolean;
-  }) {
-    return this.request<{
-      member: ClubMember;
-      account: RecognizedClientAccount;
-      requiresOtp: boolean;
-    }>('/club/register-member', {
+  }): Promise<{ member: ClubMember; account: RecognizedClientAccount; requiresOtp: boolean }> {
+    const localCode = String(data.localCode || '').trim();
+    if (!localCode) throw new Error('No encontramos el código del comercio.');
+
+    // El Worker crea la cuenta de consumidor usando el OTP ya verificado
+    // y establece la cookie HttpOnly de sesión.
+    const registration = await this.request<{
+      user: { id: string; email: string; fullName: string; birthDate?: string };
+    }>('/consumer/register', {
       method: 'POST',
-      body: JSON.stringify(data),
+      body: JSON.stringify({
+        email: data.email,
+        fullName: data.name,
+        birthDate: data.birthDate,
+      }),
     });
+
+    // La tarjeta se crea en D1 bajo la identidad validada por la cookie,
+    // nunca usando el email/consumerId enviado libremente por el navegador.
+    const claimed = await this.request<{
+      card?: ClubMember;
+      member?: ClubMember;
+      user?: { id: string; email: string; fullName: string; birthDate?: string };
+    }>('/consumer/cards/claim', {
+      method: 'POST',
+      body: JSON.stringify({ code: localCode }),
+    });
+    const member = claimed.card || claimed.member;
+    if (!member) throw new Error('La cuenta se creó, pero no pudimos guardar la tarjeta.');
+
+    const user = claimed.user || registration.user;
+    return {
+      member,
+      account: {
+        recognized: true,
+        accountExists: true,
+        accountId: user.id,
+        name: user.fullName,
+        email: user.email,
+        cards: [member],
+      },
+      requiresOtp: false,
+    };
   }
 
   async createAnonymousCard(localCode: string) {
@@ -212,9 +246,24 @@ class HttpApi implements ToqueApi {
     });
   }
 
-  async recognizeAccount(email?: string): Promise<RecognizedClientAccount> {
-    const q = email ? `?email=${encodeURIComponent(email)}` : '';
-    return this.request(`/club/recognize${q}`);
+  async recognizeAccount(_email?: string): Promise<RecognizedClientAccount> {
+    // La identidad se obtiene exclusivamente de la cookie HttpOnly.
+    const session = await this.request<{
+      authenticated: boolean;
+      user: { id: string; email: string; fullName: string; birthDate?: string } | null;
+      cards: ClubMember[];
+    }>('/consumer/me');
+    if (!session.authenticated || !session.user) {
+      return { recognized: false, accountExists: false, cards: [] };
+    }
+    return {
+      recognized: true,
+      accountExists: true,
+      accountId: session.user.id,
+      name: session.user.fullName,
+      email: session.user.email,
+      cards: session.cards || [],
+    };
   }
 
   async addCardToAccount(data: {
@@ -224,14 +273,30 @@ class HttpApi implements ToqueApi {
     name?: string;
     consumerId?: string;
     barcodeToken?: string;
-  }) {
-    return this.request<{
-      member: ClubMember;
-      account: RecognizedClientAccount;
-    }>('/club/add-card', {
+  }): Promise<{ member: ClubMember; account: RecognizedClientAccount }> {
+    const claimed = await this.request<{
+      card?: ClubMember;
+      member?: ClubMember;
+      user?: { id: string; email: string; fullName: string };
+    }>('/consumer/cards/claim', {
       method: 'POST',
-      body: JSON.stringify(data),
+      body: JSON.stringify({ code: data.localCode }),
     });
+    const member = claimed.card || claimed.member;
+    if (!member || !claimed.user) {
+      throw new Error('No pudimos asociar la tarjeta a tu cuenta.');
+    }
+    return {
+      member,
+      account: {
+        recognized: true,
+        accountExists: true,
+        accountId: claimed.user.id,
+        name: claimed.user.fullName,
+        email: claimed.user.email,
+        cards: [member],
+      },
+    };
   }
 
   // Sellos, Canje y Toquecitos
