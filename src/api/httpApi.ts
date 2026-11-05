@@ -473,7 +473,8 @@ class HttpApi implements ToqueApi {
   }
 
   async listClubCards(): Promise<ClubConfig[]> {
-    return this.request('/club/cards');
+    const response = await this.request<{ cards?: ClubConfig[] }>('/club/cards');
+    return response.cards || [];
   }
 
   async createClubCard(data: {
@@ -499,10 +500,12 @@ class HttpApi implements ToqueApi {
     primaryFields?: Array<{ label: string; value: string }>;
     secondaryFields?: Array<{ label: string; value: string }>;
   }): Promise<ClubConfig> {
-    return this.request('/club/cards', {
+    const response = await this.request<{ card?: ClubConfig }>('/club/cards', {
       method: 'POST',
       body: JSON.stringify(data),
     });
+    if (!response.card) throw new Error('El servidor no confirmó la creación de la tarjeta.');
+    return response.card;
   }
 
   async selectClubCard(cardId: string): Promise<ClubConfig> {
