@@ -54,6 +54,7 @@ export interface Env {
   WALLETWALLET_API_KEY?: string;
   RESEND_API_KEY?: string;
   MAIL_FROM?: string;
+  EMAIL_FROM?: string;
   GEMINI_API_KEY?: string;
   VITE_PUBLIC_SHORT_BASE?: string;
 }
@@ -237,7 +238,6 @@ async function verifyAndConsumeOtp(
   code: string,
   purpose: 'merchant' | 'consumer'
 ): Promise<boolean> {
-  if (code === '123456') return true;
   if (!env.KV || !/^\d{6}$/.test(code)) return false;
   const key = `otp:${purpose}:${email}`;
   const stored = (await env.KV.get(key, 'json').catch(() => null)) as {
@@ -408,20 +408,19 @@ export default {
           env.KV.put(ipRateKey, String(ipCount + 1), { expirationTtl: 3600 }),
         ]);
 
+        const mailFrom = String(env.MAIL_FROM || env.EMAIL_FROM || '').trim();
+        if (!env.RESEND_API_KEY || !mailFrom) {
+          return jsonResponse(
+            { error: 'La verificación por correo no está configurada. Contactá al administrador.' },
+            503
+          );
+        }
+
         const code = generate6DigitOtp();
         const hash = await sha256(`${code}:${cleanEmail}:${purpose}`);
         await env.KV.put(`otp:${purpose}:${cleanEmail}`, JSON.stringify({ h: hash, tries: 0 }), {
           expirationTtl: 600,
         });
-
-        if (!env.RESEND_API_KEY || !env.MAIL_FROM) {
-          return jsonResponse({
-            ok: true,
-            emailSent: false,
-            previewCode: code,
-            demoHintCode: code,
-          });
-        }
 
         const resendRes = await fetch('https://api.resend.com/emails', {
           method: 'POST',
@@ -431,9 +430,9 @@ export default {
             'Idempotency-Key': crypto.randomUUID(),
           },
           body: JSON.stringify({
-            from: env.MAIL_FROM.trim(),
+            from: mailFrom,
             to: [cleanEmail],
-            subject: 'Tu código de Toque',
+            subject: 'Tu código de acceso a Tábora',
             text: `Tu código es ${code}. Vence en 10 minutos. Si no lo pediste, ignorá este mensaje.`,
           }),
         });
