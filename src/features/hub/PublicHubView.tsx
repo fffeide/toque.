@@ -821,7 +821,7 @@ export const PublicHubView: React.FC = () => {
 
     try {
       setSubmitting(true);
-      const verifyRes = await api.verifyOtp(cleanEmail, cleanCode);
+      const verifyRes = await api.verifyOtp(cleanEmail, cleanCode, { purpose: 'consumer' });
 
       // Si el correo ya existía en otra cuenta, nunca forzar nuevo registro
       if (verifyRes.account?.accountExists) {
