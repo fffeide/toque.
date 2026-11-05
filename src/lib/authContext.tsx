@@ -77,7 +77,6 @@ function persistMerchantSession(nextToken: string | null, nextUser: User | null)
     } else {
       localStorage.removeItem(MERCHANT_TOKEN_KEY);
       localStorage.removeItem(MERCHANT_USER_KEY);
-      document.cookie = 'toque_merchant_session=; path=/; max-age=0; SameSite=Lax';
     }
   } catch {
     // ignore storage error
@@ -144,14 +143,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
       }
 
-      const u = await api.getCurrentUser();
-      const effectiveUser = u || savedUser;
+      const authenticatedUser = await api.getCurrentUser();
 
-      if (effectiveUser) {
-        const effectiveToken = savedToken || `sess-${effectiveUser.id}`;
+      if (authenticatedUser) {
+        const effectiveToken = savedToken || `sess-${authenticatedUser.id}`;
         setToken(effectiveToken);
-        setUser(effectiveUser);
-        persistMerchantSession(effectiveToken, effectiveUser);
+        setUser(authenticatedUser);
+        persistMerchantSession(effectiveToken, authenticatedUser);
         try {
           const b = await api.getBusinessProfile();
           setBusiness(b);
@@ -159,9 +157,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           // ignore
         }
       } else {
+        // No conservar una identidad local si el servidor no reconoce la sesión.
         setToken(null);
         setUser(null);
         setBusiness(null);
+        persistMerchantSession(null, null);
       }
     } catch {
       if (savedUser) {
@@ -250,10 +250,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const logout = async () => {
     try {
-      await fetch('/api/auth/logout', {
-        method: 'POST',
-        credentials: 'include',
-      }).catch(() => {});
       await api.logout();
     } finally {
       setToken(null);
