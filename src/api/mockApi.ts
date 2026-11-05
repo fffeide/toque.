@@ -856,6 +856,7 @@ class MockApi implements ToqueApi {
       businessEmail?: string;
       teamSize?: string;
       category?: string;
+      purpose?: 'merchant' | 'consumer';
     }
   ): Promise<{
     verified: boolean;
