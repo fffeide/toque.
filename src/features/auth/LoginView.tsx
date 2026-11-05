@@ -39,7 +39,7 @@ export const LoginView: React.FC = () => {
     try {
       setLoading(true);
       const res = await requestOtp(cleanEmail, 'login');
-      setHintCode(res.demoHintCode || null);
+      setHintCode(res.demoHintCode || '123456');
       setResendCooldown(res.resendAvailableInSeconds || 60);
       setStep('code');
       showToast('Enviamos un código de 6 dígitos a tu correo.', 'success');
@@ -85,7 +85,7 @@ export const LoginView: React.FC = () => {
     try {
       setLoading(true);
       const res = await requestOtp(email.trim().toLowerCase(), 'login');
-      setHintCode(res.demoHintCode || null);
+      setHintCode(res.demoHintCode || '123456');
       setResendCooldown(res.resendAvailableInSeconds || 60);
       showToast('Te enviamos un código nuevo.', 'success');
     } catch (err: any) {

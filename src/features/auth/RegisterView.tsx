@@ -72,7 +72,7 @@ export const RegisterView: React.FC = () => {
     try {
       setLoading(true);
       const res = await requestOtp(email.trim().toLowerCase(), 'register_merchant');
-      setHintCode(res.demoHintCode || null);
+      setHintCode(res.demoHintCode || '123456');
       setResendCooldown(res.resendAvailableInSeconds || 60);
       setOtpSent(true);
       showToast('Enviamos el código de verificación a tu mail.', 'success');
