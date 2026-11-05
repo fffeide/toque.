@@ -50,6 +50,9 @@ import {
   RestaurantTable,
   OrderSlip,
   OrderStatus,
+  OrderType,
+  WaiterCall,
+  TableReservation,
   MenuBranding,
   PublicMenuData,
 } from './types';
@@ -1027,11 +1030,54 @@ class HttpApi implements ToqueApi {
   }
 
   async createOrder(data: {
-    tableCode: string;
+    tableCode?: string;
+    tableLabel?: string;
+    orderType?: OrderType;
+    customerName?: string;
+    customerPhone?: string;
+    customerAddress?: string;
+    paymentMethod?: string;
     items: Array<{ itemId: string; qty: number; note?: string }>;
     note?: string;
   }): Promise<OrderSlip> {
-    return this.request('/public/orders', {
+    return this.request('/pedidos', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  // Toque Carta — Llamar al mozo
+  async callWaiter(data: {
+    tableCode?: string;
+    tableLabel: string;
+  }): Promise<WaiterCall> {
+    return this.request('/mozo', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async listWaiterCalls(): Promise<WaiterCall[]> {
+    return this.request('/mozo');
+  }
+
+  async dismissWaiterCall(id: string): Promise<void> {
+    await this.request(`/mozo/${encodeURIComponent(id)}/dismiss`, {
+      method: 'POST',
+    });
+  }
+
+  // Toque Carta — Reservas
+  async createReservation(data: {
+    customerName: string;
+    customerPhone: string;
+    customerEmail?: string;
+    peopleCount: number;
+    reservationDate: string;
+    reservationTime: string;
+    note?: string;
+  }): Promise<TableReservation> {
+    return this.request('/reservas', {
       method: 'POST',
       body: JSON.stringify(data),
     });

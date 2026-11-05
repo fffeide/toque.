@@ -2999,6 +2999,385 @@ export default {
       }
     }
 
+    // ==========================================
+    // Toque Carta — Endpoints Públicos y de Comercio en Worker
+    // ==========================================
+
+    // 1. Obtener menú público por mesa o slug: GET /api/public/menu/:tableCode
+    if (pathname.startsWith('/api/public/menu/') && request.method === 'GET') {
+      const tableCode = decodeURIComponent(pathname.replace('/api/public/menu/', '').trim()).toUpperCase();
+      let tenantId = 'comercio-activo';
+      let tableLabel = 'Mesa';
+      let businessName = 'Mi comercio';
+
+      if (env.DB) {
+        try {
+          const tableRow = await env.DB
+            .prepare('SELECT id, tenant_id, label, code, active FROM dining_tables WHERE UPPER(code) = ? LIMIT 1')
+            .bind(tableCode)
+            .first<any>()
+            .catch(() => null);
+
+          if (tableRow) {
+            tenantId = tableRow.tenant_id;
+            tableLabel = tableRow.label;
+          }
+
+          // Consultar categorías e items de D1
+          const categoriesRes = await env.DB
+            .prepare('SELECT id, tenant_id, name, sort FROM menu_categories WHERE tenant_id = ? ORDER BY sort ASC')
+            .bind(tenantId)
+            .all<any>()
+            .catch(() => ({ results: [] }));
+
+          const itemsRes = await env.DB
+            .prepare('SELECT id, tenant_id, category_id, name, description, price, available, sort FROM menu_items WHERE tenant_id = ? AND available = 1 ORDER BY sort ASC')
+            .bind(tenantId)
+            .all<any>()
+            .catch(() => ({ results: [] }));
+
+          const bizRow = await env.DB
+            .prepare('SELECT name FROM tenants WHERE id = ? LIMIT 1')
+            .bind(tenantId)
+            .first<any>()
+            .catch(() => null);
+
+          if (bizRow?.name) businessName = bizRow.name;
+
+          return jsonResponse({
+            tenantId,
+            businessName,
+            tableCode,
+            tableLabel,
+            categories: (categoriesRes.results || []).map((c: any) => ({
+              id: c.id,
+              tenantId: c.tenant_id,
+              name: c.name,
+              sortOrder: c.sort,
+              active: true,
+            })),
+            items: (itemsRes.results || []).map((i: any) => ({
+              id: i.id,
+              tenantId: i.tenant_id,
+              categoryId: i.category_id,
+              name: i.name,
+              description: i.description || '',
+              price: Number(i.price) || 0,
+              available: Boolean(i.available),
+            })),
+          });
+        } catch {
+          // fallback
+        }
+      }
+
+      // Fallback si no hay D1 o mesa en desarrollo
+      return jsonResponse({
+        tenantId,
+        businessName,
+        tableCode,
+        tableLabel,
+        categories: [
+          { id: 'cat-cafeteria', tenantId, name: 'Cafetería', sortOrder: 1, active: true },
+          { id: 'cat-pasteleria', tenantId, name: 'Pastelería', sortOrder: 2, active: true },
+          { id: 'cat-almuerzos', tenantId, name: 'Almuerzos', sortOrder: 3, active: true },
+        ],
+        items: [
+          { id: 'item-1', tenantId, categoryId: 'cat-cafeteria', name: 'Café Flat White', description: 'Doble shot de espresso con leche texturizada sedosa', price: 3400, available: true },
+          { id: 'item-2', tenantId, categoryId: 'cat-cafeteria', name: 'Espresso Doble', description: 'Granos de especialidad tostados en origen', price: 2800, available: true },
+          { id: 'item-3', tenantId, categoryId: 'cat-pasteleria', name: 'Medialuna rellena de jamón y queso', description: 'Horneada en el día con manteca pura', price: 2900, available: true },
+          { id: 'item-4', tenantId, categoryId: 'cat-pasteleria', name: 'Cookie con chips de chocolate', description: 'Masa tierna con chocolate belga semi amargo', price: 2500, available: false },
+          { id: 'item-5', tenantId, categoryId: 'cat-almuerzos', name: 'Tostón de palta y huevo poché', description: 'Pan de masa madre, palta fresca, semillas y oliva', price: 5900, available: true },
+        ],
+      });
+    }
+
+    // 2. Crear pedido (comanda autoritativa): POST /api/pedidos o POST /api/public/orders
+    if ((pathname === '/api/pedidos' || pathname === '/api/public/orders') && request.method === 'POST') {
+      try {
+        const body = (await request.json().catch(() => ({}))) as any;
+        const items = Array.isArray(body.items) ? body.items : [];
+        if (items.length === 0) {
+          return jsonResponse({ error: 'El pedido no contiene platos.' }, 400);
+        }
+        if (items.length > 30) {
+          return jsonResponse({ error: 'El pedido supera el máximo permitido de 30 platos.' }, 400);
+        }
+
+        let tenantId = 'comercio-activo';
+        let tableLabel = body.tableLabel || 'Mesa';
+        let tableId = body.tableCode || 'MESA-01';
+
+        // Buscar mesa si vino tableCode
+        if (env.DB && body.tableCode) {
+          const tbl = await env.DB
+            .prepare('SELECT id, tenant_id, label FROM dining_tables WHERE UPPER(code) = ? LIMIT 1')
+            .bind(String(body.tableCode).toUpperCase())
+            .first<any>()
+            .catch(() => null);
+          if (tbl) {
+            tenantId = tbl.tenant_id;
+            tableLabel = tbl.label;
+            tableId = tbl.id;
+          }
+        }
+
+        const slipItems: any[] = [];
+        let totalArs = 0;
+
+        // SEGURIDAD CRÍTICA: El total se recalcula siempre en el backend consultando D1
+        for (const it of items) {
+          if (!it?.itemId) continue;
+          const qty = Math.min(20, Math.max(1, Math.round(Number(it.qty) || 1)));
+          let unitPrice = 0;
+          let dishName = 'Plato';
+
+          if (env.DB) {
+            const dishRow = await env.DB
+              .prepare('SELECT name, price, available FROM menu_items WHERE id = ? LIMIT 1')
+              .bind(it.itemId)
+              .first<any>()
+              .catch(() => null);
+
+            if (dishRow) {
+              if (dishRow.available === 0) {
+                return jsonResponse({ error: `El plato "${dishRow.name}" ya no está disponible.` }, 400);
+              }
+              unitPrice = Number(dishRow.price) || 0;
+              dishName = dishRow.name;
+            }
+          }
+
+          if (unitPrice === 0) {
+            unitPrice = Math.max(0, Math.round(Number(it.unitPrice) || 2000));
+            dishName = it.name || 'Plato';
+          }
+
+          const subtotal = unitPrice * qty;
+          totalArs += subtotal;
+          slipItems.push({
+            itemId: it.itemId,
+            name: dishName,
+            qty,
+            unitPrice,
+            subtotal,
+            note: it.note ? String(it.note).slice(0, 150).trim() : undefined,
+          });
+        }
+
+        if (slipItems.length === 0) {
+          return jsonResponse({ error: 'No se pudieron procesar los platos solicitados.' }, 400);
+        }
+
+        const orderId = `ord-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+        const orderType = body.orderType || (body.tableCode ? 'mesa' : 'delivery');
+        const now = new Date().toISOString();
+
+        if (env.DB) {
+          await env.DB
+            .prepare(
+              `INSERT INTO orders (id, tenant_id, table_id, status, note, total, order_type, customer_name, customer_phone, customer_address, payment_method, created_at, updated_at)
+               VALUES (?, ?, ?, 'nuevo', ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+            )
+            .bind(
+              orderId,
+              tenantId,
+              tableId,
+              body.note ? String(body.note).slice(0, 300) : '',
+              totalArs,
+              orderType,
+              body.customerName ? String(body.customerName).slice(0, 100) : null,
+              body.customerPhone ? String(body.customerPhone).slice(0, 50) : null,
+              body.customerAddress ? String(body.customerAddress).slice(0, 200) : null,
+              body.paymentMethod || 'efectivo',
+              now,
+              now
+            )
+            .run()
+            .catch(() => {});
+
+          for (const item of slipItems) {
+            const itemId = `oi-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+            await env.DB
+              .prepare(
+                `INSERT INTO order_items (id, order_id, item_id, name, price, qty, note)
+                 VALUES (?, ?, ?, ?, ?, ?, ?)`
+              )
+              .bind(
+                itemId,
+                orderId,
+                item.itemId,
+                item.name,
+                item.unitPrice,
+                item.qty,
+                item.note || ''
+              )
+              .run()
+              .catch(() => {});
+          }
+        }
+
+        return jsonResponse({
+          id: orderId,
+          tenantId,
+          tableCode: body.tableCode || 'PEDIDO',
+          tableLabel: body.tableLabel || tableLabel,
+          orderType,
+          customerName: body.customerName,
+          customerPhone: body.customerPhone,
+          customerAddress: body.customerAddress,
+          paymentMethod: body.paymentMethod || 'efectivo',
+          items: slipItems,
+          totalArs,
+          status: 'nuevo',
+          note: body.note,
+          createdAt: now,
+          updatedAt: now,
+          area: orderType === 'mesa' ? 'salon' : 'cocina',
+        });
+      } catch {
+        return jsonResponse({ error: 'No pudimos registrar tu pedido.' }, 500);
+      }
+    }
+
+    // 3. Llamar al mozo: POST /api/mozo
+    if (pathname === '/api/mozo' && request.method === 'POST') {
+      try {
+        const body = (await request.json().catch(() => ({}))) as any;
+        const tableLabel = (body.tableLabel || 'Mesa').trim();
+        const callId = `call-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+        const now = new Date().toISOString();
+        let tenantId = 'comercio-activo';
+
+        if (env.DB) {
+          if (body.tableCode) {
+            const tbl = await env.DB
+              .prepare('SELECT tenant_id FROM dining_tables WHERE UPPER(code) = ? LIMIT 1')
+              .bind(String(body.tableCode).toUpperCase())
+              .first<any>()
+              .catch(() => null);
+            if (tbl?.tenant_id) tenantId = tbl.tenant_id;
+          }
+
+          await env.DB
+            .prepare(
+              `INSERT INTO waiter_calls (id, tenant_id, table_label, table_code, status, created_at)
+               VALUES (?, ?, ?, ?, 'pendiente', ?)`
+            )
+            .bind(callId, tenantId, tableLabel, body.tableCode || null, now)
+            .run()
+            .catch(() => {});
+        }
+
+        return jsonResponse({
+          id: callId,
+          tenantId,
+          tableLabel,
+          tableCode: body.tableCode,
+          status: 'pendiente',
+          createdAt: now,
+        });
+      } catch {
+        return jsonResponse({ error: 'No pudimos notificar al mozo.' }, 500);
+      }
+    }
+
+    // 4. Listar llamadas al mozo: GET /api/mozo
+    if (pathname === '/api/mozo' && request.method === 'GET') {
+      let tenantId = 'comercio-activo';
+      const merchantSession = await getMerchantSession(request, env);
+      if (merchantSession) tenantId = merchantSession.tenantId;
+
+      if (env.DB) {
+        const callsRes = await env.DB
+          .prepare(
+            `SELECT id, tenant_id, table_label, table_code, status, created_at, attended_at
+             FROM waiter_calls
+             WHERE tenant_id = ? AND status = 'pendiente'
+             ORDER BY created_at DESC
+             LIMIT 20`
+          )
+          .bind(tenantId)
+          .all<any>()
+          .catch(() => ({ results: [] }));
+
+        return jsonResponse((callsRes.results || []).map((c: any) => ({
+          id: c.id,
+          tenantId: c.tenant_id,
+          tableLabel: c.table_label,
+          tableCode: c.table_code || undefined,
+          status: c.status,
+          createdAt: c.created_at,
+          attendedAt: c.attended_at || undefined,
+        })));
+      }
+
+      return jsonResponse([]);
+    }
+
+    // 5. Atender llamada al mozo: POST /api/mozo/:id/dismiss
+    if (pathname.startsWith('/api/mozo/') && pathname.endsWith('/dismiss') && request.method === 'POST') {
+      const callId = pathname.replace('/api/mozo/', '').replace('/dismiss', '').trim();
+      if (env.DB && callId) {
+        await env.DB
+          .prepare(`UPDATE waiter_calls SET status = 'atendido', attended_at = ? WHERE id = ?`)
+          .bind(new Date().toISOString(), callId)
+          .run()
+          .catch(() => {});
+      }
+      return jsonResponse({ success: true, callId });
+    }
+
+    // 6. Reservas de mesas: POST /api/reservas
+    if (pathname === '/api/reservas' && request.method === 'POST') {
+      try {
+        const body = (await request.json().catch(() => ({}))) as any;
+        if (!body.customerName || !body.customerPhone || !body.reservationDate || !body.reservationTime) {
+          return jsonResponse({ error: 'Completá nombre, teléfono, fecha y hora de la reserva.' }, 400);
+        }
+
+        const resId = `res-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+        const tenantId = body.tenantId || 'comercio-activo';
+        const now = new Date().toISOString();
+
+        if (env.DB) {
+          await env.DB
+            .prepare(
+              `INSERT INTO table_reservations (id, tenant_id, customer_name, customer_phone, customer_email, people_count, reservation_date, reservation_time, note, status, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pendiente', ?)`
+            )
+            .bind(
+              resId,
+              tenantId,
+              String(body.customerName).slice(0, 100),
+              String(body.customerPhone).slice(0, 50),
+              body.customerEmail ? String(body.customerEmail).slice(0, 100) : null,
+              Math.max(1, Math.round(Number(body.peopleCount) || 2)),
+              String(body.reservationDate).slice(0, 20),
+              String(body.reservationTime).slice(0, 10),
+              body.note ? String(body.note).slice(0, 300) : '',
+              now
+            )
+            .run()
+            .catch(() => {});
+        }
+
+        return jsonResponse({
+          id: resId,
+          tenantId,
+          customerName: body.customerName,
+          customerPhone: body.customerPhone,
+          peopleCount: body.peopleCount || 2,
+          reservationDate: body.reservationDate,
+          reservationTime: body.reservationTime,
+          status: 'pendiente',
+          createdAt: now,
+        });
+      } catch {
+        return jsonResponse({ error: 'No pudimos registrar tu reserva.' }, 500);
+      }
+    }
+
     if (pathname.startsWith('/api/')) {
       return jsonResponse({ error: 'Ruta no encontrada.' }, 404);
     }

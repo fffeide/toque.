@@ -1,12 +1,12 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../../api';
-import { OrderSlip, OrderStatus } from '../../api/types';
+import { OrderSlip, OrderStatus, WaiterCall } from '../../api/types';
 import { formatARS } from '../../lib/format';
 import { useToast } from '../../components/ui/Toast';
 import { Modal } from '../../components/ui/Modal';
 import { Button } from '../../components/ui/Button';
-import { Volume2, VolumeX, CheckCircle, Clock, AlertCircle } from 'lucide-react';
+import { Volume2, VolumeX, CheckCircle, Clock, BellRing, Phone, MapPin } from 'lucide-react';
 
 function playBeep() {
   try {
@@ -32,20 +32,27 @@ export const MenuOrdersView: React.FC = () => {
   const { showToast } = useToast();
   const [activeTab, setActiveTab] = useState<'salon' | 'cocina'>('salon');
   const [orders, setOrders] = useState<OrderSlip[]>([]);
+  const [waiterCalls, setWaiterCalls] = useState<WaiterCall[]>([]);
   const [soundEnabled, setSoundEnabled] = useState(false);
   const [cancelingOrder, setCancelingOrder] = useState<OrderSlip | null>(null);
   const [cancelReason, setCancelReason] = useState('Cancelado por el local');
   const previousNewCount = useRef<number>(0);
+  const previousCallsCount = useRef<number>(0);
 
   const loadOrders = useCallback(async (isInitial = false) => {
     try {
-      const data = await api.listOrders();
+      const [data, calls] = await Promise.all([
+        api.listOrders(),
+        api.listWaiterCalls().catch(() => []),
+      ]);
       setOrders(data);
+      setWaiterCalls(calls);
       const newOrders = data.filter((o) => o.status === 'nuevo');
-      if (!isInitial && soundEnabled && newOrders.length > previousNewCount.current) {
+      if (!isInitial && soundEnabled && (newOrders.length > previousNewCount.current || calls.length > previousCallsCount.current)) {
         playBeep();
       }
       previousNewCount.current = newOrders.length;
+      previousCallsCount.current = calls.length;
     } catch {
       // Silencioso
     }
@@ -140,6 +147,47 @@ export const MenuOrdersView: React.FC = () => {
         </div>
       </div>
 
+      {/* Alertas de Llamadas al Mozo en Vivo */}
+      {waiterCalls.length > 0 && (
+        <div className="space-y-2">
+          {waiterCalls.map((call) => (
+            <div
+              key={call.id}
+              className="p-3.5 rounded-2xl bg-[#D95B26]/10 border border-[#D95B26]/50 flex items-center justify-between gap-3 shadow-sm"
+            >
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-xl bg-[#D95B26] text-white flex items-center justify-center shrink-0 animate-bounce">
+                  <BellRing className="w-4 h-4" />
+                </div>
+                <div>
+                  <div className="text-xs font-bold text-[#F4F4F6]">
+                    Llamada al mozo: {call.tableLabel}
+                  </div>
+                  <div className="text-[11px] text-[#A1A1AA]">
+                    {new Date(call.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} · Atención solicitada
+                  </div>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={async () => {
+                  try {
+                    await api.dismissWaiterCall(call.id);
+                    setWaiterCalls((prev) => prev.filter((c) => c.id !== call.id));
+                    showToast(`Llamada de ${call.tableLabel} atendida`, 'success');
+                  } catch {
+                    showToast('No pudimos actualizar la llamada', 'error');
+                  }
+                }}
+                className="px-3 py-1.5 rounded-xl bg-[#D95B26] hover:bg-[#c04d1c] text-white font-bold text-xs transition-colors shrink-0"
+              >
+                Atender
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
       {/* Lista de Comandas */}
       {visibleOrders.length === 0 ? (
         <div className="bg-[#141418] border border-[#282830] rounded-2xl p-10 text-center space-y-2">
@@ -155,12 +203,17 @@ export const MenuOrdersView: React.FC = () => {
               <div
                 key={order.id}
                 className={`bg-[#141418] border rounded-2xl p-4 space-y-3 transition-colors ${
-                  order.status === 'nuevo' ? 'border-amber-500/40 bg-amber-500/[0.03]' : 'border-[#282830]'
+                  order.status === 'nuevo' ? 'border-[#D95B26]/40 bg-[#D95B26]/[0.03]' : 'border-[#282830]'
                 }`}
               >
                 <div className="flex items-center justify-between border-b border-[#282830] pb-2.5">
                   <div className="flex items-center gap-2">
                     <span className="text-sm font-bold text-[#F4F4F6]">{order.tableLabel}</span>
+                    {order.orderType && order.orderType !== 'mesa' && (
+                      <span className="text-[10px] px-2 py-0.5 rounded-md font-semibold bg-[#202028] text-amber-400">
+                        {order.orderType === 'delivery' ? 'A domicilio' : 'Retiro'}
+                      </span>
+                    )}
                     <span className="text-[11px] px-2 py-0.5 rounded-full bg-[#1F1F28] text-[#9E9EA8] flex items-center gap-1">
                       <Clock className="w-3 h-3" />
                       {timeStr}
@@ -168,6 +221,25 @@ export const MenuOrdersView: React.FC = () => {
                   </div>
                   <span className="text-sm font-semibold text-[#F4F4F6]">{formatARS(order.totalArs)}</span>
                 </div>
+
+                {/* Datos de contacto para delivery o retiro */}
+                {(order.customerName || order.customerPhone || order.customerAddress) && (
+                  <div className="p-2.5 rounded-xl bg-[#181820] border border-[#282834] text-[11px] space-y-1 text-[#C4C4D0]">
+                    {order.customerName && <div className="font-semibold text-white">Cliente: {order.customerName}</div>}
+                    {order.customerPhone && (
+                      <div className="flex items-center gap-1">
+                        <Phone className="w-3 h-3 text-[#9E9EA8]" />
+                        <span>{order.customerPhone}</span>
+                      </div>
+                    )}
+                    {order.customerAddress && (
+                      <div className="flex items-center gap-1">
+                        <MapPin className="w-3 h-3 text-[#9E9EA8]" />
+                        <span>{order.customerAddress}</span>
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 {/* Platos con cantidades */}
                 <div className="space-y-1.5 text-xs text-[#F4F4F6]">

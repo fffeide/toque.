@@ -612,10 +612,37 @@ export interface ToqueApi {
   getPublicMenu(tableCode: string): Promise<PublicMenuData>;
 
   createOrder(data: {
-    tableCode: string;
+    tableCode?: string;
+    tableLabel?: string;
+    orderType?: import('./types').OrderType;
+    customerName?: string;
+    customerPhone?: string;
+    customerAddress?: string;
+    paymentMethod?: string;
     items: Array<{ itemId: string; qty: number; note?: string }>;
     note?: string;
   }): Promise<OrderSlip>;
+
+  // Toque Carta — Llamar al mozo
+  callWaiter(data: {
+    tableCode?: string;
+    tableLabel: string;
+  }): Promise<import('./types').WaiterCall>;
+
+  listWaiterCalls(): Promise<import('./types').WaiterCall[]>;
+
+  dismissWaiterCall(id: string): Promise<void>;
+
+  // Toque Carta — Reservas
+  createReservation(data: {
+    customerName: string;
+    customerPhone: string;
+    customerEmail?: string;
+    peopleCount: number;
+    reservationDate: string;
+    reservationTime: string;
+    note?: string;
+  }): Promise<import('./types').TableReservation>;
 
   // Toque Carta — Comandas
   listOrders(filter?: { area?: 'salon' | 'cocina' }): Promise<OrderSlip[]>;

@@ -50,6 +50,9 @@ import {
   RestaurantTable,
   OrderSlip,
   OrderStatus,
+  OrderType,
+  WaiterCall,
+  TableReservation,
   MenuBranding,
   PublicMenuData,
 } from './types';
@@ -5541,17 +5544,27 @@ class MockApi implements ToqueApi {
     };
   }
 
+  private waiterCalls: WaiterCall[] = [];
+  private tableReservations: TableReservation[] = [];
+
   async createOrder(data: {
-    tableCode: string;
+    tableCode?: string;
+    tableLabel?: string;
+    orderType?: OrderType;
+    customerName?: string;
+    customerPhone?: string;
+    customerAddress?: string;
+    paymentMethod?: string;
     items: Array<{ itemId: string; qty: number; note?: string }>;
     note?: string;
   }): Promise<OrderSlip> {
     const cleanCode = (data.tableCode || '').trim().toUpperCase();
-    const tbl = this.restaurantTables.find(
+    const tbl = cleanCode ? this.restaurantTables.find(
       (t) => t.code.toUpperCase() === cleanCode && t.active
-    );
-    if (!tbl) throw new Error('Esta carta no está disponible.');
-    const features = this.tenantFeatures.get(tbl.tenantId) || { menu: true, club: true, stats: true };
+    ) : null;
+
+    const tenantId = tbl ? tbl.tenantId : this.getActiveTenantId();
+    const features = this.tenantFeatures.get(tenantId) || { menu: true, club: true, stats: true };
     if (!features.menu) throw new Error('Esta carta no está disponible.');
 
     // Validaciones de seguridad
@@ -5567,7 +5580,7 @@ class MockApi implements ToqueApi {
 
     for (const itemRequest of data.items) {
       const qty = Math.min(20, Math.max(1, Math.round(itemRequest.qty || 1)));
-      const dish = this.menuItems.find((i) => i.id === itemRequest.itemId && i.tenantId === tbl.tenantId);
+      const dish = this.menuItems.find((i) => i.id === itemRequest.itemId && i.tenantId === tenantId);
       if (!dish) continue;
       if (!dish.available) {
         throw new Error(`El plato "${dish.name}" ya no está disponible.`);
@@ -5589,22 +5602,85 @@ class MockApi implements ToqueApi {
       throw new Error('No se pudieron procesar los platos solicitados.');
     }
 
+    const orderType = data.orderType || (tbl ? 'mesa' : 'delivery');
+    const tableLabel = data.tableLabel || (tbl ? tbl.label : orderType === 'delivery' ? 'A domicilio' : 'Retiro');
+
     const orderSlip: OrderSlip = {
       id: `ord-${Date.now().toString(36)}-${Math.random().toString(36).substring(2, 5)}`,
-      tenantId: tbl.tenantId,
-      tableCode: tbl.code,
-      tableLabel: tbl.label,
+      tenantId,
+      tableCode: tbl?.code || data.tableCode || 'PEDIDO',
+      tableLabel,
+      orderType,
+      customerName: data.customerName?.trim() || undefined,
+      customerPhone: data.customerPhone?.trim() || undefined,
+      customerAddress: data.customerAddress?.trim() || undefined,
+      paymentMethod: data.paymentMethod || 'efectivo',
       items: slipItems,
       totalArs,
       status: 'nuevo',
       note: data.note?.trim() || undefined,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
-      area: 'salon',
+      area: orderType === 'mesa' ? 'salon' : 'cocina',
     };
 
     this.orderSlips.unshift(orderSlip);
     return orderSlip;
+  }
+
+  async callWaiter(data: { tableCode?: string; tableLabel: string }): Promise<WaiterCall> {
+    const tid = this.getActiveTenantId();
+    const cleanLabel = (data.tableLabel || 'Mesa').trim();
+    const call: WaiterCall = {
+      id: `call-${Date.now().toString(36)}-${Math.random().toString(36).substring(2, 5)}`,
+      tenantId: tid,
+      tableLabel: cleanLabel,
+      tableCode: data.tableCode?.trim() || undefined,
+      status: 'pendiente',
+      createdAt: new Date().toISOString(),
+    };
+    this.waiterCalls.unshift(call);
+    return call;
+  }
+
+  async listWaiterCalls(): Promise<WaiterCall[]> {
+    const tid = this.getActiveTenantId();
+    return this.waiterCalls.filter((c) => c.tenantId === tid && c.status === 'pendiente');
+  }
+
+  async dismissWaiterCall(id: string): Promise<void> {
+    const item = this.waiterCalls.find((c) => c.id === id);
+    if (item) {
+      item.status = 'atendido';
+      item.attendedAt = new Date().toISOString();
+    }
+  }
+
+  async createReservation(data: {
+    customerName: string;
+    customerPhone: string;
+    customerEmail?: string;
+    peopleCount: number;
+    reservationDate: string;
+    reservationTime: string;
+    note?: string;
+  }): Promise<TableReservation> {
+    const tid = this.getActiveTenantId();
+    const reservation: TableReservation = {
+      id: `res-${Date.now().toString(36)}-${Math.random().toString(36).substring(2, 5)}`,
+      tenantId: tid,
+      customerName: data.customerName.trim(),
+      customerPhone: data.customerPhone.trim(),
+      customerEmail: data.customerEmail?.trim() || undefined,
+      peopleCount: Math.max(1, data.peopleCount || 2),
+      reservationDate: data.reservationDate.trim(),
+      reservationTime: data.reservationTime.trim(),
+      note: data.note?.trim() || undefined,
+      status: 'pendiente',
+      createdAt: new Date().toISOString(),
+    };
+    this.tableReservations.unshift(reservation);
+    return reservation;
   }
 
   async listOrders(filter?: { area?: 'salon' | 'cocina' }): Promise<OrderSlip[]> {

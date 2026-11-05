@@ -67,6 +67,8 @@ const memoryMenuItems = new Map<string, any[]>();
 const memoryMenuTables = new Map<string, any[]>();
 const memoryMenuOrders = new Map<string, any[]>();
 const memoryMenuBranding = new Map<string, any>();
+const memoryWaiterCalls = new Map<string, any[]>();
+const memoryTableReservations = new Map<string, any[]>();
 
 const memoryWalletPasses = new Map<
   string,
@@ -384,6 +386,156 @@ async function startServer() {
       }
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
       res.end(JSON.stringify({ success: true }));
+      return;
+    }
+
+    // 1c. Carta: Menú público
+    if (pathname.startsWith('/api/public/menu/') && req.method === 'GET') {
+      const tableCode = decodeURIComponent(pathname.replace('/api/public/menu/', '').trim()).toUpperCase();
+      const tid = 'comercio-activo';
+      const categories = [
+        { id: 'cat-cafeteria', tenantId: tid, name: 'Cafetería', sortOrder: 1, active: true },
+        { id: 'cat-pasteleria', tenantId: tid, name: 'Pastelería', sortOrder: 2, active: true },
+        { id: 'cat-almuerzos', tenantId: tid, name: 'Almuerzos', sortOrder: 3, active: true },
+      ];
+      const items = [
+        { id: 'item-1', tenantId: tid, categoryId: 'cat-cafeteria', name: 'Café Flat White', description: 'Doble shot de espresso con leche texturizada sedosa', price: 3400, available: true },
+        { id: 'item-2', tenantId: tid, categoryId: 'cat-cafeteria', name: 'Espresso Doble', description: 'Granos de especialidad tostados en origen', price: 2800, available: true },
+        { id: 'item-3', tenantId: tid, categoryId: 'cat-pasteleria', name: 'Medialuna rellena de jamón y queso', description: 'Horneada en el día con manteca pura', price: 2900, available: true },
+        { id: 'item-4', tenantId: tid, categoryId: 'cat-pasteleria', name: 'Cookie con chips de chocolate', description: 'Masa tierna con chocolate belga semi amargo', price: 2500, available: false },
+        { id: 'item-5', tenantId: tid, categoryId: 'cat-almuerzos', name: 'Tostón de palta y huevo poché', description: 'Pan de masa madre, palta fresca, semillas y oliva', price: 5900, available: true },
+      ];
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({
+        tenantId: tid,
+        businessName: 'Mi comercio',
+        tableCode,
+        tableLabel: `Mesa ${tableCode.replace('MESA-', '')}`,
+        categories,
+        items,
+      }));
+      return;
+    }
+
+    // 1d. Carta: Crear pedido
+    if ((pathname === '/api/pedidos' || pathname === '/api/public/orders') && req.method === 'POST') {
+      const raw = await readBody(req);
+      const data = JSON.parse(raw || '{}');
+      const tid = 'comercio-activo';
+      const defaultDishes: Record<string, { name: string; price: number }> = {
+        'item-1': { name: 'Café Flat White', price: 3400 },
+        'item-2': { name: 'Espresso Doble', price: 2800 },
+        'item-3': { name: 'Medialuna rellena de jamón y queso', price: 2900 },
+        'item-4': { name: 'Cookie con chips de chocolate', price: 2500 },
+        'item-5': { name: 'Tostón de palta y huevo poché', price: 5900 },
+      };
+      let totalArs = 0;
+      const orderItems = (data.items || []).map((it: any) => {
+        const dish = defaultDishes[it.itemId] || { name: 'Plato', price: 2500 };
+        const subtotal = dish.price * (it.qty || 1);
+        totalArs += subtotal;
+        return {
+          itemId: it.itemId,
+          name: dish.name,
+          qty: it.qty || 1,
+          unitPrice: dish.price,
+          subtotal,
+          note: it.note,
+        };
+      });
+      const orderSlip = {
+        id: `ord-${Date.now().toString(36)}`,
+        tenantId: tid,
+        tableCode: data.tableCode || 'PEDIDO',
+        tableLabel: data.tableLabel || `Mesa ${data.tableCode?.replace('MESA-', '') || '1'}`,
+        orderType: data.orderType || 'mesa',
+        customerName: data.customerName,
+        customerPhone: data.customerPhone,
+        customerAddress: data.customerAddress,
+        paymentMethod: data.paymentMethod || 'efectivo',
+        items: orderItems,
+        totalArs,
+        status: 'nuevo',
+        note: data.note,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        area: data.orderType === 'mesa' ? 'salon' : 'cocina',
+      };
+      const curOrders = memoryMenuOrders.get(tid) || [];
+      curOrders.unshift(orderSlip);
+      memoryMenuOrders.set(tid, curOrders);
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify(orderSlip));
+      return;
+    }
+
+    // 1e. Carta: Llamar al mozo
+    if (pathname === '/api/mozo' && req.method === 'POST') {
+      const raw = await readBody(req);
+      const data = JSON.parse(raw || '{}');
+      const tid = 'comercio-activo';
+      const call = {
+        id: `call-${Date.now().toString(36)}`,
+        tenantId: tid,
+        tableLabel: data.tableLabel || 'Mesa',
+        tableCode: data.tableCode,
+        status: 'pendiente',
+        createdAt: new Date().toISOString(),
+      };
+      const list = memoryWaiterCalls.get(tid) || [];
+      list.unshift(call);
+      memoryWaiterCalls.set(tid, list);
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify(call));
+      return;
+    }
+
+    if (pathname === '/api/mozo' && req.method === 'GET') {
+      const tid = 'comercio-activo';
+      const list = (memoryWaiterCalls.get(tid) || []).filter((c: any) => c.status === 'pendiente');
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify(list));
+      return;
+    }
+
+    if (pathname.startsWith('/api/mozo/') && pathname.endsWith('/dismiss') && req.method === 'POST') {
+      const callId = pathname.replace('/api/mozo/', '').replace('/dismiss', '').trim();
+      const tid = 'comercio-activo';
+      const list = memoryWaiterCalls.get(tid) || [];
+      for (const item of list) {
+        if (item.id === callId) {
+          item.status = 'atendido';
+          item.attendedAt = new Date().toISOString();
+        }
+      }
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ success: true, callId }));
+      return;
+    }
+
+    // 1f. Carta: Reservas
+    if (pathname === '/api/reservas' && req.method === 'POST') {
+      const raw = await readBody(req);
+      const data = JSON.parse(raw || '{}');
+      const tid = 'comercio-activo';
+      const reservation = {
+        id: `res-${Date.now().toString(36)}`,
+        tenantId: tid,
+        customerName: data.customerName,
+        customerPhone: data.customerPhone,
+        customerEmail: data.customerEmail,
+        peopleCount: data.peopleCount || 2,
+        reservationDate: data.reservationDate,
+        reservationTime: data.reservationTime,
+        note: data.note,
+        status: 'pendiente',
+        createdAt: new Date().toISOString(),
+      };
+      const curRes = memoryTableReservations.get(tid) || [];
+      curRes.unshift(reservation);
+      memoryTableReservations.set(tid, curRes);
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify(reservation));
       return;
     }
 

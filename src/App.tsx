@@ -229,6 +229,8 @@ export const App: React.FC = () => {
 
                     {/* Toque Carta — Carta Digital Pública por QR de Mesa */}
                     <Route path="/m/:code" element={<PublicMenuView />} />
+                    <Route path="/m" element={<PublicMenuView />} />
+                    <Route path="/menu" element={<PublicMenuView />} />
 
                     {/* 2. Caja (POS) — Accesible para Cajero, Encargado, Dueño y SuperAdmin */}
                     <Route

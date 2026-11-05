@@ -862,11 +862,18 @@ export interface OrderSlipItem {
   note?: string;
 }
 
+export type OrderType = 'mesa' | 'delivery' | 'takeaway';
+
 export interface OrderSlip {
   id: string;
   tenantId: string;
-  tableCode: string;
-  tableLabel: string;
+  tableCode?: string;
+  tableLabel?: string;
+  orderType?: OrderType;
+  customerName?: string;
+  customerPhone?: string;
+  customerAddress?: string;
+  paymentMethod?: string;
   items: OrderSlipItem[];
   totalArs: number;
   status: OrderStatus;
@@ -875,6 +882,31 @@ export interface OrderSlip {
   createdAt: string;
   updatedAt: string;
   area: 'salon' | 'cocina';
+}
+
+export interface WaiterCall {
+  id: string;
+  tenantId: string;
+  tableId?: string;
+  tableLabel: string;
+  tableCode?: string;
+  status: 'pendiente' | 'atendido' | 'cancelado';
+  createdAt: string;
+  attendedAt?: string;
+}
+
+export interface TableReservation {
+  id: string;
+  tenantId: string;
+  customerName: string;
+  customerPhone: string;
+  customerEmail?: string;
+  peopleCount: number;
+  reservationDate: string;
+  reservationTime: string;
+  note?: string;
+  status: 'pendiente' | 'confirmada' | 'cancelada';
+  createdAt: string;
 }
 
 export interface MenuBranding {
@@ -888,8 +920,8 @@ export interface PublicMenuData {
   businessName: string;
   logoUrl?: string;
   accentColor?: string;
-  tableCode: string;
-  tableLabel: string;
+  tableCode?: string;
+  tableLabel?: string;
   categories: MenuCategory[];
   items: MenuItem[];
 }
