@@ -1,5 +1,5 @@
--- 0002_smart_hub.sql: Evolución Smart Receipt, Post-Purchase Hub y Tarjeta de Sellos Digital (Cloudflare D1)
--- Extiende el esquema sin romper 0001_init.sql e inicializa el comercio oficial Musical Monroe
+-- 0002_smart_hub.sql: Smart Hub y tarjeta de sellos digital (Cloudflare D1)
+-- Extiende el esquema sin crear comercios de demostración ni datos de clientes.
 
 -- 1. Extensión de la tabla de carteles
 ALTER TABLE carteles ADD COLUMN mode TEXT DEFAULT 'smart_hub' CHECK(mode IN ('direct_review', 'smart_hub'));
@@ -77,29 +77,3 @@ CREATE TABLE IF NOT EXISTS partner_referrals (
 
 CREATE INDEX IF NOT EXISTS idx_partner_referrals_code ON partner_referrals(partner_code);
 
--- 6. Configuración inicial lista para producción: "Musical Monroe" (MONROE01)
-INSERT OR IGNORE INTO tenants (id, slug, name, owner_name, email, created_at)
-VALUES ('musical-monroe', 'musical-monroe', 'Musical Monroe', 'Musical Monroe', 'hola@musicalmonroe.com.ar', datetime('now'));
-
-INSERT OR IGNORE INTO carteles (id, code, tenant_id, name, role, status, mode, tile_color, claim_status, created_at)
-VALUES ('cartel-monroe-01', 'MONROE01', 'musical-monroe', 'Mostrador Musical Monroe', 'caja', 'active', 'smart_hub', 'black', 'claimed', datetime('now'));
-
-INSERT OR IGNORE INTO hub_configs (
-  tenant_id,
-  brand_color,
-  loyalty_title,
-  loyalty_reward,
-  how_to_earn,
-  expiration_policy,
-  stamps_required,
-  updated_at
-) VALUES (
-  'musical-monroe',
-  '#1e1b4b',
-  'Tarjeta de sellos de Musical Monroe',
-  'Beneficio exclusivo en instrumentos y accesorios',
-  '1 sello por visita o compra',
-  'No vencen',
-  10,
-  datetime('now')
-);
