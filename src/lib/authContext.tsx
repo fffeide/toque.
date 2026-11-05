@@ -125,17 +125,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     })();
 
     try {
-      // Si hay un token guardado, validamos contra /api/auth/me
       if (savedToken) {
         try {
           const authRes = await fetch('/api/auth/me', {
             method: 'GET',
-            headers: {
-              Authorization: `Bearer ${savedToken}`,
-            },
+            credentials: 'include',
           });
 
-          if (authRes.status === 401) {
+          if (authRes.status === 401 && !savedUser) {
             setToken(null);
             setUser(null);
             setBusiness(null);
@@ -168,7 +165,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setBusiness(null);
       }
     } catch {
-      // Si hay error inesperado, conservar la sesión local si existía
       if (savedUser) {
         setUser(savedUser);
       }
@@ -199,27 +195,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   ): Promise<User | null> => {
     const res = await api.verifyOtp(email, code, extra);
     if (res.user) {
-      let nextToken = (res as any).token || `sess-${res.user.id}-${Date.now().toString(36)}`;
-      try {
-        const serverAuth = await fetch('/api/auth/login', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            email: res.user.email,
-            name: res.user.name,
-            role: res.user.role,
-            businessId: res.user.businessId,
-            userId: res.user.id,
-          }),
-        });
-        if (serverAuth.ok) {
-          const data = await serverAuth.json();
-          if (data?.token) nextToken = data.token;
-        }
-      } catch {
-        // fallback local token
-      }
-
+      const nextToken = (res as any).token || `sess-${res.user.id}-${Date.now().toString(36)}`;
       setToken(nextToken);
       setUser(res.user);
       persistMerchantSession(nextToken, res.user);
@@ -236,27 +212,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const login = async (credentials: { email: string; code?: string }) => {
     const res = await api.login(credentials);
-    let nextToken = res.token || `sess-${res.user.id}-${Date.now().toString(36)}`;
-    try {
-      const serverAuth = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          email: res.user.email,
-          name: res.user.name,
-          role: res.user.role,
-          businessId: res.user.businessId,
-          userId: res.user.id,
-        }),
-      });
-      if (serverAuth.ok) {
-        const data = await serverAuth.json();
-        if (data?.token) nextToken = data.token;
-      }
-    } catch {
-      // ignore
-    }
-
+    const nextToken = res.token || `sess-${res.user.id}-${Date.now().toString(36)}`;
     setToken(nextToken);
     setUser(res.user);
     persistMerchantSession(nextToken, res.user);
@@ -282,19 +238,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       const serverAuth = await fetch('/api/auth/register', {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           email: res.user.email,
           name: res.user.name,
           businessName: data.businessName,
-          role: res.user.role,
-          businessId: res.user.businessId,
-          userId: res.user.id,
         }),
       });
       if (serverAuth.ok) {
         const srv = await serverAuth.json();
         if (srv?.token) nextToken = srv.token;
+        if (srv?.user?.businessId) {
+          res.user.businessId = srv.user.businessId;
+        }
       }
     } catch {
       // ignore
@@ -313,12 +270,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const logout = async () => {
     try {
-      if (token) {
-        await fetch('/api/auth/logout', {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${token}` },
-        }).catch(() => {});
-      }
+      await fetch('/api/auth/logout', {
+        method: 'POST',
+        credentials: 'include',
+      }).catch(() => {});
       await api.logout();
     } finally {
       setToken(null);

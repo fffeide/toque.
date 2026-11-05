@@ -1,12 +1,9 @@
 /**
- * Worker Entrypoint para Toque
- * Implementa:
- * 1. Sesiones persistentes en D1 para comercios (tabla users) y clientes (tabla consumer_users) sin usar Map en memoria
- * 2. Cero tarjetas pre-creadas y límite estricto de 1 tarjeta por comercio (GET/POST /api/merchant/cards)
- * 3. Reclamo de tarjeta en Hub desacoplado de WalletWallet (POST /api/consumer/cards/claim siempre responde 200 OK con barcode_token de 8 dígitos)
- * 4. Sumar sello en caja unificado por barcode_token de 8 dígitos (POST /api/merchant/stamp)
- * 5. Comprobantes seguros con QR fijo: prioridad 1 por sello reciente (2 min) y prioridad 2 con ventana de 90s + distancia GPS < 120m
- * 6. Eliminación definitiva de cuenta de comercio en cascada en D1 (DELETE /api/merchant/account)
+ * Worker Entrypoint para Toque — Parche de Seguridad
+ * - Clave de WalletWallet leída únicamente de env.WALLETWALLET_API_KEY en el Worker.
+ * - Sesiones separadas y seguras en cookies HttpOnly: toque_merchant_session (30 días) y toque_session (180 días).
+ * - Códigos de verificación de 6 dígitos enviados con Resend, guardados con SHA-256 en KV, límite de intentos y un solo uso.
+ * - Identidad de comercio y cliente obtenida exclusivamente de la sesión validada en D1.
  */
 
 import {
@@ -20,11 +17,13 @@ import {
   CardInput,
 } from './walletwallet';
 
-const SECURITY_LOCKDOWN = false;
 const COOLDOWN_24H_MS = 86400000;
 const RECENT_STAMP_WINDOW_MS = 120000; // 2 minutos
 const RECEIPT_CLAIM_WINDOW_MS = 90000; // 90 segundos
 const MAX_RECEIPT_DISTANCE_METERS = 120;
+
+const MERCHANT_SESSION_MAX_AGE = 30 * 24 * 60 * 60; // 30 días
+const CONSUMER_SESSION_MAX_AGE = 180 * 24 * 60 * 60; // 180 días
 
 export interface D1Database {
   prepare: (query: string) => {
@@ -39,6 +38,7 @@ export interface D1Database {
 export interface KVNamespace {
   get: (key: string, type?: 'text' | 'json') => Promise<any>;
   put: (key: string, value: string, options?: { expirationTtl?: number }) => Promise<void>;
+  delete: (key: string) => Promise<void>;
 }
 
 export interface ExecutionContext {
@@ -52,6 +52,8 @@ export interface Env {
   DB?: D1Database;
   KV?: KVNamespace;
   WALLETWALLET_API_KEY?: string;
+  RESEND_API_KEY?: string;
+  MAIL_FROM?: string;
   GEMINI_API_KEY?: string;
   VITE_PUBLIC_SHORT_BASE?: string;
 }
@@ -138,17 +140,135 @@ function jsonResponse(body: unknown, status = 200, extraHeaders?: Record<string,
   });
 }
 
-function extractSessionToken(request: Request): string {
-  const authHeader = request.headers.get('Authorization') || '';
-  if (authHeader.toLowerCase().startsWith('bearer ')) {
-    const token = authHeader.slice(7).trim();
-    if (token) return token;
+function readCookie(request: Request, name: string): string {
+  const m = (request.headers.get('Cookie') || '').match(new RegExp(`(?:^|;\\s*)${name}=([^;]+)`));
+  return m ? decodeURIComponent(m[1].trim()) : '';
+}
+
+async function getMerchantSession(request: Request, env: Env) {
+  const token = readCookie(request, 'toque_merchant_session');
+  if (!token || !env.DB) return null;
+  const row = await env.DB
+    .prepare('SELECT id, tenant_id, email, role, name FROM users WHERE session_token = ? LIMIT 1')
+    .bind(token)
+    .first<{ id: string; tenant_id: string; email: string; role: string; name?: string }>();
+  return row
+    ? {
+        userId: row.id,
+        tenantId: row.tenant_id,
+        email: row.email,
+        role: row.role,
+        name: row.name || '',
+      }
+    : null;
+}
+
+async function getConsumerSession(request: Request, env: Env) {
+  const token = readCookie(request, 'toque_session');
+  if (!token || !env.DB) return null;
+  const row = await env.DB
+    .prepare(
+      'SELECT id, email, full_name, birth_date, created_at FROM consumer_users WHERE session_token = ? LIMIT 1'
+    )
+    .bind(token)
+    .first<{
+      id: string;
+      email: string;
+      full_name: string;
+      birth_date?: string | null;
+      created_at?: string;
+    }>();
+  return row
+    ? {
+        consumerId: row.id,
+        email: row.email,
+        fullName: row.full_name,
+        birthDate: row.birth_date || null,
+        createdAt: row.created_at || '',
+      }
+    : null;
+}
+
+function buildMerchantCookie(token: string): string {
+  return `toque_merchant_session=${encodeURIComponent(token)}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=${MERCHANT_SESSION_MAX_AGE}`;
+}
+
+function clearMerchantCookie(): string {
+  return 'toque_merchant_session=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0';
+}
+
+function buildConsumerCookie(token: string): string {
+  return `toque_session=${encodeURIComponent(token)}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=${CONSUMER_SESSION_MAX_AGE}`;
+}
+
+function clearConsumerCookie(): string {
+  return 'toque_session=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0';
+}
+
+async function sha256(input: string): Promise<string> {
+  const data = new TextEncoder().encode(input);
+  const digest = await crypto.subtle.digest('SHA-256', data);
+  return Array.from(new Uint8Array(digest))
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
+}
+
+function generate6DigitOtp(): string {
+  const arr = new Uint32Array(1);
+  crypto.getRandomValues(arr);
+  return String(100000 + (arr[0] % 900000));
+}
+
+function normalizeOtpPurpose(raw?: string): 'merchant' | 'consumer' {
+  const p = String(raw || '').trim().toLowerCase();
+  if (p === 'consumer' || p === 'register_client' || p === 'client_card') {
+    return 'consumer';
   }
-  const cookieHeader = request.headers.get('Cookie') || '';
-  const merchantMatch = cookieHeader.match(/(?:^|;\s*)toque_merchant_session=([^;]+)/);
-  if (merchantMatch) return decodeURIComponent(merchantMatch[1].trim());
-  const match = cookieHeader.match(/(?:^|;\s*)toque_session=([^;]+)/);
-  return match ? decodeURIComponent(match[1].trim()) : '';
+  return 'merchant';
+}
+
+function isValidEmail(email: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
+
+async function verifyAndConsumeOtp(
+  env: Env,
+  email: string,
+  code: string,
+  purpose: 'merchant' | 'consumer'
+): Promise<boolean> {
+  if (!env.KV || !/^\d{6}$/.test(code)) return false;
+  const key = `otp:${purpose}:${email}`;
+  const stored = (await env.KV.get(key, 'json').catch(() => null)) as {
+    h?: string;
+    tries?: number;
+  } | null;
+
+  if (!stored || typeof stored.h !== 'string') {
+    return false;
+  }
+
+  const tries = Number(stored.tries || 0);
+  if (tries >= 5) {
+    await env.KV.delete(key).catch(() => {});
+    return false;
+  }
+
+  const expectedHash = await sha256(`${code}:${email}:${purpose}`);
+  if (stored.h !== expectedHash) {
+    const nextTries = tries + 1;
+    if (nextTries >= 5) {
+      await env.KV.delete(key).catch(() => {});
+    } else {
+      await env.KV
+        .put(key, JSON.stringify({ h: stored.h, tries: nextTries }), { expirationTtl: 600 })
+        .catch(() => {});
+    }
+    return false;
+  }
+
+  await env.KV.delete(key).catch(() => {});
+  return true;
 }
 
 async function generateUnique8DigitBarcode(db?: D1Database): Promise<string> {
@@ -174,34 +294,30 @@ function normalize8DigitToken(raw?: string | null): string {
   return '';
 }
 
-/** Token bearer aleatorio de 256 bits, independiente del barcode público de 8 dígitos. */
-function generateWalletDownloadToken(): string {
+/** Token aleatorio de 256 bits para descargas de un solo uso */
+function generateRandomToken(): string {
   const bytes = crypto.getRandomValues(new Uint8Array(32));
   return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
 }
 
-async function ensureWalletDownloadToken(db: D1Database, memberId: string): Promise<string> {
-  const member = await db.prepare(
-    'SELECT id, wallet_download_token FROM loyalty_members WHERE id = ? LIMIT 1'
-  ).bind(memberId).first<{ id: string; wallet_download_token?: string | null }>();
-  if (!member) throw new Error('No encontramos el socio en loyalty_members.');
-
-  const current = String(member.wallet_download_token || '').trim();
-  if (/^[a-f0-9]{64}$/i.test(current)) return current;
-
-  for (let attempt = 0; attempt < 3; attempt++) {
-    const candidate = generateWalletDownloadToken();
-    await db.prepare(
-      `UPDATE loyalty_members SET wallet_download_token = ?
-       WHERE id = ? AND (wallet_download_token IS NULL OR wallet_download_token = '')`
-    ).bind(candidate, memberId).run();
-    const saved = await db.prepare(
-      'SELECT wallet_download_token FROM loyalty_members WHERE id = ? LIMIT 1'
-    ).bind(memberId).first<{ wallet_download_token?: string | null }>();
-    const token = String(saved?.wallet_download_token || '').trim();
-    if (/^[a-f0-9]{64}$/i.test(token)) return token;
+async function createOneTimeWalletDownloadUrl(
+  env: Env,
+  memberId: string
+): Promise<string | undefined> {
+  const token = generateRandomToken();
+  if (env.KV) {
+    await env.KV.put(`wallet_dl:${token}`, memberId, { expirationTtl: 300 });
+    return `/api/wallet/p/${token}`;
   }
-  throw new Error('No pudimos generar el enlace seguro para Apple Wallet.');
+  if (env.DB) {
+    await env.DB
+      .prepare('UPDATE loyalty_members SET wallet_download_token = ? WHERE id = ?')
+      .bind(token, memberId)
+      .run()
+      .catch(() => {});
+    return `/api/wallet/p/${token}`;
+  }
+  return undefined;
 }
 
 function calculateDistanceMeters(lat1: number, lng1: number, lat2: number, lng2: number): number {
@@ -224,189 +340,10 @@ function formatShortCustomerName(fullName?: string | null): string {
   return `${parts[0]} ${parts[1][0].toUpperCase()}.`;
 }
 
-let orphanCheckExecutedInIsolate = false;
-
-async function cleanOrphanRecordsInD1(db: D1Database): Promise<{
-  cleaned: boolean;
-  details: Record<string, number>;
-}> {
-  const details: Record<string, number> = {};
-  try {
-    // 0. Eliminar definitivamente cualquier Hub / registro residual de "Musical Monroe" (musical-monroe, MONROE01, MONROE02)
-    await db
-      .prepare(
-        `DELETE FROM carteles WHERE UPPER(code) IN ('MONROE01', 'MONROE02') OR LOWER(tenant_id) IN ('musical-monroe', 'monroe01', 'monroe02')`
-      )
-      .run()
-      .catch(() => {});
-    await db
-      .prepare(
-        `DELETE FROM hub_configs WHERE LOWER(tenant_id) IN ('musical-monroe', 'monroe01', 'monroe02') OR LOWER(TRIM(business_name)) = 'musical monroe'`
-      )
-      .run()
-      .catch(() => {});
-    await db
-      .prepare(
-        `DELETE FROM merchant_cards WHERE LOWER(tenant_id) IN ('musical-monroe', 'monroe01', 'monroe02') OR LOWER(TRIM(business_name)) = 'musical monroe'`
-      )
-      .run()
-      .catch(() => {});
-    await db
-      .prepare(
-        `DELETE FROM loyalty_members WHERE LOWER(tenant_id) IN ('musical-monroe', 'monroe01', 'monroe02')`
-      )
-      .run()
-      .catch(() => {});
-    await db
-      .prepare(
-        `DELETE FROM tenants WHERE LOWER(id) IN ('musical-monroe', 'monroe01', 'monroe02') OR LOWER(TRIM(name)) = 'musical monroe'`
-      )
-      .run()
-      .catch(() => {});
-
-    // 1. Eliminar tenants que no tengan ningún usuario activo en users (excepto si users está vacío)
-    const usersCountRes = await db
-      .prepare('SELECT COUNT(*) as cnt FROM users')
-      .first<{ cnt: number }>()
-      .catch(() => null);
-    const hasUsers = Number(usersCountRes?.cnt || 0) > 0;
-
-    if (hasUsers) {
-      const delTenants = await db
-        .prepare(
-          `DELETE FROM tenants
-           WHERE id NOT IN (SELECT DISTINCT tenant_id FROM users WHERE tenant_id IS NOT NULL AND tenant_id != '')`
-        )
-        .run()
-        .catch(() => null);
-      details.orphanTenants = Number(delTenants?.meta?.changes || 0);
-    }
-
-    // 2. Asegurar que cada usuario en users tenga un único tenant_id válido en tenants
-    const allUsers = await db
-      .prepare('SELECT id, tenant_id, email, name FROM users ORDER BY created_at DESC')
-      .all<D1MerchantUserRow>()
-      .catch(() => ({ results: [] as D1MerchantUserRow[] }));
-
-    const seenEmails = new Set<string>();
-    for (const u of allUsers.results || []) {
-      const mail = String(u.email || '').trim().toLowerCase();
-      if (!mail) continue;
-      if (seenEmails.has(mail)) {
-        await db
-          .prepare('DELETE FROM users WHERE id = ?')
-          .bind(u.id)
-          .run()
-          .catch(() => {});
-        details.duplicateUsers = (details.duplicateUsers || 0) + 1;
-        continue;
-      }
-      seenEmails.add(mail);
-
-      if (u.tenant_id && u.tenant_id.toLowerCase() !== 'musical-monroe') {
-        await db
-          .prepare(
-            `INSERT OR IGNORE INTO tenants (id, name, slug, created_at)
-             VALUES (?, ?, ?, datetime('now'))`
-          )
-          .bind(
-            u.tenant_id,
-            u.name || 'Mi comercio',
-            (u.name || 'mi-comercio').toLowerCase().replace(/[^a-z0-9]+/g, '-')
-          )
-          .run()
-          .catch(() => {});
-      }
-    }
-
-    // 3. Eliminar filas huérfanas de hub_configs, carteles, short_links, merchant_cards, cards, loyalty_members, pos_receipts, consumer_receipts
-    const dependentTables = [
-      'hub_configs',
-      'carteles',
-      'short_links',
-      'merchant_cards',
-      'cards',
-      'loyalty_members',
-      'pos_receipts',
-      'consumer_receipts',
-    ];
-
-    for (const table of dependentTables) {
-      const res = await db
-        .prepare(
-          `DELETE FROM ${table}
-           WHERE tenant_id IS NULL
-              OR tenant_id = ''
-              OR tenant_id NOT IN (SELECT id FROM tenants)
-              ${
-                hasUsers
-                  ? "OR tenant_id NOT IN (SELECT DISTINCT tenant_id FROM users WHERE tenant_id IS NOT NULL AND tenant_id != '')"
-                  : ''
-              }`
-        )
-        .run()
-        .catch(() => null);
-      details[table] = Number(res?.meta?.changes || 0);
-    }
-
-    // 4. Asegurar que cada tenant activo tenga un único cartel principal limpio sin códigos duplicados cruzados
-    const allCarteles = await db
-      .prepare('SELECT code, tenant_id FROM carteles ORDER BY created_at DESC')
-      .all<{ code: string; tenant_id: string }>()
-      .catch(() => ({ results: [] as Array<{ code: string; tenant_id: string }> }));
-
-    const seenTenantsForCartel = new Set<string>();
-    const seenCodes = new Set<string>();
-    for (const c of allCarteles.results || []) {
-      const codeUpper = String(c.code || '').trim().toUpperCase();
-      const tId = String(c.tenant_id || '').trim();
-      if (!codeUpper || !tId || seenCodes.has(codeUpper) || seenTenantsForCartel.has(tId)) {
-        await db
-          .prepare('DELETE FROM carteles WHERE code = ? AND tenant_id = ?')
-          .bind(c.code, c.tenant_id)
-          .run()
-          .catch(() => {});
-        details.duplicateCarteles = (details.duplicateCarteles || 0) + 1;
-      } else {
-        seenCodes.add(codeUpper);
-        seenTenantsForCartel.add(tId);
-      }
-    }
-
-    return { cleaned: true, details };
-  } catch {
-    return { cleaned: false, details };
-  }
-}
-
 export default {
   async fetch(request: Request, env: Env, ctx?: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
     const { pathname } = url;
-
-    // Saneamiento automático en la primera carga del isolate si hay base D1
-    if (env.DB && !orphanCheckExecutedInIsolate) {
-      orphanCheckExecutedInIsolate = true;
-      if (ctx) {
-        ctx.waitUntil(cleanOrphanRecordsInD1(env.DB));
-      } else {
-        await cleanOrphanRecordsInD1(env.DB);
-      }
-    }
-
-    if (
-      SECURITY_LOCKDOWN &&
-      ((pathname === '/api/consumer/sync' &&
-        (request.method === 'GET' || request.method === 'POST')) ||
-        (pathname === '/api/network/activations' && request.method === 'POST') ||
-        ((pathname === '/api/wallet/pass' || pathname === '/api/wallet/create') &&
-          request.method === 'POST'))
-    ) {
-      return jsonResponse(
-        { error: 'Temporalmente deshabilitado por mantenimiento de seguridad' },
-        503
-      );
-    }
 
     // 1. Healthcheck
     if (pathname === '/healthz' || pathname === '/api/healthz') {
@@ -416,242 +353,405 @@ export default {
       });
     }
 
-    // 1b. Endpoint administrativo de saneamiento: POST /api/debug/clean-orphans
-    if (
-      pathname === '/api/debug/clean-orphans' &&
-      (request.method === 'POST' || request.method === 'GET')
-    ) {
-      if (!env.DB) {
-        return jsonResponse({
-          success: true,
-          cleaned: true,
-          message: 'Datos mezclados y registros huérfanos depurados correctamente.',
-        });
-      }
-      const result = await cleanOrphanRecordsInD1(env.DB);
-      return jsonResponse({
-        success: true,
-        cleaned: result.cleaned,
-        details: result.details,
-        message: 'Datos mezclados y registros huérfanos depurados correctamente.',
-      });
+    // Ruta /api/debug/clean-orphans eliminada permanentemente -> 404
+    if (pathname === '/api/debug/clean-orphans') {
+      return jsonResponse({ error: 'Ruta no encontrada.' }, 404);
     }
 
-    // 2. Sesiones persistentes del Panel Comercio / Admin en D1:
-    // GET /api/auth/me, POST /api/auth/login, POST /api/auth/register, POST /api/auth/logout
-    if (pathname === '/api/auth/me' && request.method === 'GET') {
-      const token = extractSessionToken(request);
-      if (!token) {
-        return jsonResponse({ authenticated: false, error: 'Sesión no iniciada.' }, 401);
-      }
-
-      if (env.DB) {
-        try {
-          const userRow = await env.DB
-            .prepare(
-              'SELECT id, tenant_id, email, name, role, session_token, created_at FROM users WHERE session_token = ? LIMIT 1'
-            )
-            .bind(token)
-            .first<D1MerchantUserRow>();
-
-          if (!userRow) {
-            return jsonResponse({ authenticated: false, error: 'Sesión expirada o inválida.' }, 401);
-          }
-
-          return jsonResponse({
-            authenticated: true,
-            token,
-            user: {
-              id: userRow.id,
-              email: userRow.email,
-              name: userRow.name,
-              role: userRow.role,
-              businessId: userRow.tenant_id,
-            },
-          });
-        } catch {
-          // Si la tabla aún no fue migrada en el entorno actual, mantener la sesión local activa
-          return jsonResponse({ authenticated: true, token });
-        }
-      }
-
-      return jsonResponse({ authenticated: true, token });
+    // Ruta /api/auth/login eliminada permanentemente -> 404
+    if (pathname === '/api/auth/login') {
+      return jsonResponse({ error: 'Usá el ingreso con código de verificación por correo.' }, 404);
     }
 
-    if (pathname === '/api/auth/login' && request.method === 'POST') {
+    // 2. Envío de código OTP por correo con Resend y límite en KV: POST /api/auth/send-otp
+    if (pathname === '/api/auth/send-otp' && request.method === 'POST') {
       try {
-        const body = (await request.json()) as {
+        const body = (await request.json().catch(() => ({}))) as {
           email?: string;
-          name?: string;
-          role?: string;
-          businessId?: string;
-          userId?: string;
+          purpose?: string;
         };
         const cleanEmail = String(body.email || '').trim().toLowerCase();
-        if (!cleanEmail || !cleanEmail.includes('@')) {
+        if (!cleanEmail || !isValidEmail(cleanEmail)) {
           return jsonResponse({ error: 'Ingresá un correo válido.' }, 400);
         }
 
-        const sessionToken = `${crypto.randomUUID()}${crypto.randomUUID()}`.replace(/-/g, '');
-        const nowIso = new Date().toISOString();
+        const purpose = normalizeOtpPurpose(body.purpose);
+        if (!env.KV) {
+          return jsonResponse({ error: 'El servicio de verificación no está disponible.' }, 503);
+        }
 
-        let userPayload = {
-          id: body.userId || `usr-${crypto.randomUUID().slice(0, 8)}`,
-          email: cleanEmail,
-          name: String(body.name || cleanEmail.split('@')[0] || 'Comercio').trim(),
-          role: String(body.role || 'BUSINESS').trim(),
-          businessId: String(body.businessId || 'musical-monroe').trim(),
+        const clientIp =
+          request.headers.get('CF-Connecting-IP') ||
+          request.headers.get('X-Forwarded-For')?.split(',')[0]?.trim() ||
+          'unknown';
+
+        const emailRateKey = `rl:otp:mail:${cleanEmail}`;
+        const ipRateKey = `rl:otp:ip:${clientIp}`;
+
+        const [emailCountRaw, ipCountRaw] = await Promise.all([
+          env.KV.get(emailRateKey, 'text'),
+          env.KV.get(ipRateKey, 'text'),
+        ]);
+        const emailCount = Number(emailCountRaw || '0');
+        const ipCount = Number(ipCountRaw || '0');
+
+        if (emailCount >= 3 || ipCount >= 10) {
+          return jsonResponse(
+            { error: 'Demasiados envíos. Esperá unos minutos antes de pedir otro código.' },
+            429
+          );
+        }
+
+        await Promise.all([
+          env.KV.put(emailRateKey, String(emailCount + 1), { expirationTtl: 600 }),
+          env.KV.put(ipRateKey, String(ipCount + 1), { expirationTtl: 3600 }),
+        ]);
+
+        const code = generate6DigitOtp();
+        const hash = await sha256(`${code}:${cleanEmail}:${purpose}`);
+        await env.KV.put(`otp:${purpose}:${cleanEmail}`, JSON.stringify({ h: hash, tries: 0 }), {
+          expirationTtl: 600,
+        });
+
+        if (!env.RESEND_API_KEY || !env.MAIL_FROM) {
+          return jsonResponse(
+            { error: 'El envío de correos no está configurado en el servidor.' },
+            503
+          );
+        }
+
+        const resendRes = await fetch('https://api.resend.com/emails', {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${env.RESEND_API_KEY.trim()}`,
+            'Content-Type': 'application/json',
+            'Idempotency-Key': crypto.randomUUID(),
+          },
+          body: JSON.stringify({
+            from: env.MAIL_FROM.trim(),
+            to: [cleanEmail],
+            subject: 'Tu código de Toque',
+            text: `Tu código es ${code}. Vence en 10 minutos. Si no lo pediste, ignorá este mensaje.`,
+          }),
+        });
+
+        if (!resendRes.ok) {
+          return jsonResponse(
+            { error: 'No pudimos enviar el correo en este momento. Intentá de nuevo.' },
+            502
+          );
+        }
+
+        return jsonResponse({ ok: true });
+      } catch {
+        return jsonResponse({ error: 'No pudimos enviar el código de verificación.' }, 400);
+      }
+    }
+
+    // 3. Verificación estricta de código OTP: POST /api/auth/verify-otp y POST /api/consumer/verify-code
+    if (
+      (pathname === '/api/auth/verify-otp' || pathname === '/api/consumer/verify-code') &&
+      request.method === 'POST'
+    ) {
+      try {
+        const body = (await request.json().catch(() => ({}))) as {
+          email?: string;
+          code?: string;
+          purpose?: string;
         };
+        const cleanEmail = String(body.email || '').trim().toLowerCase();
+        const cleanCode = String(body.code || '').trim();
 
-        if (env.DB) {
-          try {
-            const existing = await env.DB
+        if (!cleanEmail || !isValidEmail(cleanEmail) || !/^\d{6}$/.test(cleanCode)) {
+          return jsonResponse({ error: 'Código incorrecto o vencido' }, 400);
+        }
+
+        const purpose: 'merchant' | 'consumer' =
+          pathname === '/api/consumer/verify-code'
+            ? 'consumer'
+            : normalizeOtpPurpose(body.purpose);
+
+        const isValid = await verifyAndConsumeOtp(env, cleanEmail, cleanCode, purpose);
+        if (!isValid) {
+          return jsonResponse({ error: 'Código incorrecto o vencido' }, 400);
+        }
+
+        if (!env.DB) {
+          return jsonResponse({ error: 'Base de datos no disponible.' }, 503);
+        }
+
+        // Flujo Comercio
+        if (purpose === 'merchant') {
+          const existingMerchant = await env.DB
+            .prepare(
+              'SELECT id, tenant_id, email, name, role FROM users WHERE LOWER(email) = ? LIMIT 1'
+            )
+            .bind(cleanEmail)
+            .first<D1MerchantUserRow>();
+
+          if (existingMerchant) {
+            const sessionToken = `${crypto.randomUUID()}${crypto.randomUUID()}`.replace(/-/g, '');
+            await env.DB
+              .prepare('UPDATE users SET session_token = ? WHERE id = ?')
+              .bind(sessionToken, existingMerchant.id)
+              .run();
+
+            return jsonResponse(
+              {
+                ok: true,
+                verified: true,
+                accountExists: true,
+                needsRegistration: false,
+                user: {
+                  id: existingMerchant.id,
+                  email: existingMerchant.email,
+                  name: existingMerchant.name,
+                  role: existingMerchant.role,
+                  businessId: existingMerchant.tenant_id,
+                },
+              },
+              200,
+              {
+                'Set-Cookie': buildMerchantCookie(sessionToken),
+              }
+            );
+          }
+
+          if (env.KV) {
+            await env.KV.put(`verified:merchant:${cleanEmail}`, '1', { expirationTtl: 900 });
+          }
+
+          return jsonResponse({
+            ok: true,
+            verified: true,
+            accountExists: false,
+            needsRegistration: true,
+          });
+        }
+
+        // Flujo Cliente
+        let userRow = await env.DB
+          .prepare(
+            'SELECT id, email, full_name, birth_date, created_at FROM consumer_users WHERE LOWER(email) = ? LIMIT 1'
+          )
+          .bind(cleanEmail)
+          .first<D1ConsumerUserRow>();
+
+        if (!userRow) {
+          const memberMatch = await env.DB
+            .prepare(
+              `SELECT id, customer_name, name, birth_day, birth_month
+               FROM loyalty_members
+               WHERE LOWER(customer_email) = ? OR LOWER(contact) = ?
+               ORDER BY created_at DESC LIMIT 1`
+            )
+            .bind(cleanEmail, cleanEmail)
+            .first<{
+              id: string;
+              customer_name?: string | null;
+              name?: string | null;
+              birth_day?: number | null;
+              birth_month?: number | null;
+            }>();
+
+          const foundName = (memberMatch?.customer_name || memberMatch?.name || '').trim();
+          if (memberMatch && foundName) {
+            const newUserId = crypto.randomUUID();
+            const birthDateStr =
+              memberMatch.birth_day && memberMatch.birth_month
+                ? `1995-${String(memberMatch.birth_month).padStart(2, '0')}-${String(
+                    memberMatch.birth_day
+                  ).padStart(2, '0')}`
+                : null;
+            const nowIso = new Date().toISOString();
+
+            await env.DB
               .prepare(
-                'SELECT id, tenant_id, email, name, role FROM users WHERE LOWER(email) = ? LIMIT 1'
+                `INSERT INTO consumer_users (id, email, full_name, birth_date, created_at)
+                 VALUES (?, ?, ?, ?, ?)`
               )
-              .bind(cleanEmail)
-              .first<D1MerchantUserRow>();
+              .bind(newUserId, cleanEmail, foundName, birthDateStr, nowIso)
+              .run();
 
-            if (existing) {
-              await env.DB
-                .prepare('UPDATE users SET session_token = ? WHERE id = ?')
-                .bind(sessionToken, existing.id)
-                .run();
-              userPayload = {
-                id: existing.id,
-                email: existing.email,
-                name: existing.name,
-                role: existing.role,
-                businessId: existing.tenant_id,
-              };
-            } else {
-              await env.DB
-                .prepare(
-                  `INSERT INTO users (id, tenant_id, email, name, role, session_token, created_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?)`
-                )
-                .bind(
-                  userPayload.id,
-                  userPayload.businessId,
-                  userPayload.email,
-                  userPayload.name,
-                  userPayload.role,
-                  sessionToken,
-                  nowIso
-                )
-                .run();
-            }
-          } catch {
-            // continue
+            await env.DB
+              .prepare(
+                `UPDATE loyalty_members SET consumer_id = ?
+                 WHERE LOWER(customer_email) = ? OR LOWER(contact) = ?`
+              )
+              .bind(newUserId, cleanEmail, cleanEmail)
+              .run()
+              .catch(() => {});
+
+            userRow = {
+              id: newUserId,
+              email: cleanEmail,
+              full_name: foundName,
+              birth_date: birthDateStr,
+              created_at: nowIso,
+            };
           }
         }
 
-        return jsonResponse(
-          {
-            authenticated: true,
-            token: sessionToken,
-            sessionToken,
-            user: userPayload,
-          },
-          200,
-          {
-            'Set-Cookie': `toque_merchant_session=${sessionToken}; Path=/; Max-Age=31536000; SameSite=Lax`,
-          }
-        );
-      } catch (err: any) {
-        return jsonResponse({ error: err?.message || 'No pudimos iniciar tu sesión.' }, 400);
+        if (userRow && userRow.full_name && userRow.full_name.trim().length > 0) {
+          const sessionToken = `${crypto.randomUUID()}${crypto.randomUUID()}`.replace(/-/g, '');
+          await env.DB
+            .prepare('UPDATE consumer_users SET session_token = ? WHERE id = ?')
+            .bind(sessionToken, userRow.id)
+            .run();
+
+          return jsonResponse(
+            {
+              ok: true,
+              verified: true,
+              success: true,
+              accountExists: true,
+              needsRegistration: false,
+              verifiedEmail: cleanEmail,
+              user: {
+                id: userRow.id,
+                email: userRow.email,
+                fullName: userRow.full_name,
+                birthDate: userRow.birth_date || undefined,
+              },
+            },
+            200,
+            {
+              'Set-Cookie': buildConsumerCookie(sessionToken),
+            }
+          );
+        }
+
+        if (env.KV) {
+          await env.KV.put(`verified:consumer:${cleanEmail}`, '1', { expirationTtl: 900 });
+        }
+
+        return jsonResponse({
+          ok: true,
+          verified: true,
+          success: true,
+          accountExists: false,
+          needsRegistration: true,
+          verifiedEmail: cleanEmail,
+          email: cleanEmail,
+        });
+      } catch {
+        return jsonResponse({ error: 'Código incorrecto o vencido' }, 400);
       }
+    }
+
+    // 4. Sesiones de Comercio: GET /api/auth/me, POST /api/auth/register, POST /api/auth/logout
+    if (pathname === '/api/auth/me' && request.method === 'GET') {
+      const session = await getMerchantSession(request, env);
+      if (!session) {
+        return jsonResponse({ authenticated: false, error: 'Iniciá sesión.' }, 401);
+      }
+
+      return jsonResponse({
+        authenticated: true,
+        user: {
+          id: session.userId,
+          email: session.email,
+          name: session.name,
+          role: session.role,
+          businessId: session.tenantId,
+        },
+      });
     }
 
     if (pathname === '/api/auth/register' && request.method === 'POST') {
       try {
-        const body = (await request.json()) as {
+        if (!env.DB || !env.KV) {
+          return jsonResponse({ error: 'Servicio no disponible.' }, 503);
+        }
+
+        const body = (await request.json().catch(() => ({}))) as {
           email?: string;
           name?: string;
+          ownerName?: string;
           businessName?: string;
-          role?: string;
-          businessId?: string;
-          userId?: string;
         };
         const cleanEmail = String(body.email || '').trim().toLowerCase();
-        const displayName = String(body.name || body.businessName || 'Mi Comercio').trim();
-        const businessName = String(body.businessName || displayName).trim();
-        if (!cleanEmail || !cleanEmail.includes('@')) {
-          return jsonResponse({ error: 'Ingresá un correo válido.' }, 400);
+        const displayName = String(body.ownerName || body.name || '').trim();
+        const businessName = String(body.businessName || displayName || 'Mi comercio').trim();
+
+        if (!cleanEmail || !isValidEmail(cleanEmail) || !businessName) {
+          return jsonResponse({ error: 'Completá tu correo y el nombre del comercio.' }, 400);
         }
 
-        const tenantId = String(body.businessId || `biz-${Date.now().toString(36)}`).trim();
-        const userId = String(body.userId || `usr-${Date.now().toString(36)}`).trim();
-        const role = String(body.role || 'BUSINESS').trim();
+        const verifiedFlag = await env.KV.get(`verified:merchant:${cleanEmail}`, 'text');
+        if (!verifiedFlag) {
+          return jsonResponse(
+            { error: 'Primero verificá tu correo con el código de 6 dígitos.' },
+            403
+          );
+        }
+
+        const existingUser = await env.DB
+          .prepare('SELECT id FROM users WHERE LOWER(email) = ? LIMIT 1')
+          .bind(cleanEmail)
+          .first<{ id: string }>();
+
+        if (existingUser) {
+          await env.KV.delete(`verified:merchant:${cleanEmail}`).catch(() => {});
+          return jsonResponse(
+            { error: 'Ya existe una cuenta con ese correo. Iniciá sesión.' },
+            409
+          );
+        }
+
+        const tenantId = crypto.randomUUID();
+        const userId = crypto.randomUUID();
+        const role = 'owner';
+        const ownerDisplay = displayName || cleanEmail.split('@')[0] || 'Titular';
         const sessionToken = `${crypto.randomUUID()}${crypto.randomUUID()}`.replace(/-/g, '');
         const nowIso = new Date().toISOString();
+        const slug = `${businessName
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, '-')
+          .replace(/^-|-$/g, '')}-${tenantId.slice(0, 6)}`;
 
-        if (env.DB) {
-          try {
-            await env.DB
-              .prepare(
-                `INSERT OR IGNORE INTO tenants (id, name, slug, created_at)
-                 VALUES (?, ?, ?, ?)`
-              )
-              .bind(
-                tenantId,
-                businessName,
-                businessName.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
-                nowIso
-              )
-              .run()
-              .catch(() => {});
+        await env.DB
+          .prepare(
+            `INSERT INTO tenants (id, name, slug, owner_name, email, created_at)
+             VALUES (?, ?, ?, ?, ?, ?)`
+          )
+          .bind(tenantId, businessName, slug, ownerDisplay, cleanEmail, nowIso)
+          .run();
 
-            await env.DB
-              .prepare(
-                `INSERT INTO users (id, tenant_id, email, name, role, session_token, created_at)
-                 VALUES (?, ?, ?, ?, ?, ?, ?)
-                 ON CONFLICT(email) DO UPDATE SET
-                   tenant_id = excluded.tenant_id,
-                   name = excluded.name,
-                   session_token = excluded.session_token`
-              )
-              .bind(userId, tenantId, cleanEmail, displayName, role, sessionToken, nowIso)
-              .run();
+        await env.DB
+          .prepare(
+            `INSERT INTO users (id, tenant_id, email, name, role, session_token, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?)`
+          )
+          .bind(userId, tenantId, cleanEmail, ownerDisplay, role, sessionToken, nowIso)
+          .run();
 
-            // Importante: un comercio nuevo nace con 0 tarjetas creadas por defecto
-            await env.DB
-              .prepare('DELETE FROM merchant_cards WHERE tenant_id = ?')
-              .bind(tenantId)
-              .run()
-              .catch(() => {});
-          } catch {
-            // continue
-          }
-        }
-
-        const userPayload = {
-          id: userId,
-          email: cleanEmail,
-          name: displayName,
-          role,
-          businessId: tenantId,
-        };
+        await env.KV.delete(`verified:merchant:${cleanEmail}`).catch(() => {});
 
         return jsonResponse(
           {
+            ok: true,
             authenticated: true,
-            token: sessionToken,
-            sessionToken,
-            user: userPayload,
+            user: {
+              id: userId,
+              email: cleanEmail,
+              name: ownerDisplay,
+              role,
+              businessId: tenantId,
+            },
           },
           200,
           {
-            'Set-Cookie': `toque_merchant_session=${sessionToken}; Path=/; Max-Age=31536000; SameSite=Lax`,
+            'Set-Cookie': buildMerchantCookie(sessionToken),
           }
         );
-      } catch (err: any) {
-        return jsonResponse({ error: err?.message || 'No pudimos crear la cuenta.' }, 400);
+      } catch {
+        return jsonResponse({ error: 'No pudimos crear la cuenta del comercio.' }, 400);
       }
     }
 
     if (pathname === '/api/auth/logout' && request.method === 'POST') {
-      const token = extractSessionToken(request);
+      const token = readCookie(request, 'toque_merchant_session');
       if (env.DB && token) {
         await env.DB
           .prepare('UPDATE users SET session_token = NULL WHERE session_token = ?')
@@ -660,23 +760,22 @@ export default {
           .catch(() => {});
       }
       return jsonResponse({ success: true }, 200, {
-        'Set-Cookie': 'toque_merchant_session=; Path=/; Max-Age=0; SameSite=Lax',
+        'Set-Cookie': clearMerchantCookie(),
       });
     }
 
-    // 3. Tarjetas del comercio: 0 tarjetas por defecto y límite estricto de 1 tarjeta por comercio
-    // GET /api/merchant/cards y POST /api/merchant/cards
+    // 5. Tarjetas del comercio: exigir sesión de comercio y usar session.tenantId
     if (
       (pathname === '/api/merchant/cards' || pathname === '/api/club/cards') &&
       request.method === 'GET'
     ) {
-      const tenantId = (
-        url.searchParams.get('tenantId') ||
-        url.searchParams.get('businessId') ||
-        ''
-      ).trim();
+      const session = await getMerchantSession(request, env);
+      if (!session) {
+        return jsonResponse({ error: 'Iniciá sesión.' }, 401);
+      }
+      const tenantId = session.tenantId;
 
-      if (env.DB && tenantId) {
+      if (env.DB) {
         try {
           const cardsRes = await env.DB
             .prepare(
@@ -717,10 +816,14 @@ export default {
       (pathname === '/api/merchant/cards' || pathname === '/api/club/cards') &&
       (request.method === 'POST' || request.method === 'PUT')
     ) {
+      const session = await getMerchantSession(request, env);
+      if (!session) {
+        return jsonResponse({ error: 'Iniciá sesión.' }, 401);
+      }
+      const tenantId = session.tenantId;
+
       try {
-        const body = (await request.json()) as {
-          tenantId?: string;
-          businessId?: string;
+        const body = (await request.json().catch(() => ({}))) as {
           businessName?: string;
           rewardText?: string;
           reward?: string;
@@ -731,8 +834,7 @@ export default {
           logoUrl?: string;
         };
 
-        const tenantId = String(body.tenantId || body.businessId || 'musical-monroe').trim();
-        const businessName = String(body.businessName || 'Musical Monroe').trim().slice(0, 64);
+        const businessName = String(body.businessName || 'Mi comercio').trim().slice(0, 64);
         const rewardText = String(
           body.rewardText || body.reward || 'Premio al completar tus 10 sellos'
         )
@@ -744,7 +846,10 @@ export default {
         const logoUrl = String(body.logoUrl || '').trim() || null;
 
         if (!rewardText) {
-          return jsonResponse({ error: 'Escribí cuál es el premio al completar los 10 sellos.' }, 400);
+          return jsonResponse(
+            { error: 'Escribí cuál es el premio al completar los 10 sellos.' },
+            400
+          );
         }
 
         if (env.DB) {
@@ -753,17 +858,6 @@ export default {
             .bind(tenantId)
             .first<{ id: string }>()
             .catch(() => null);
-
-          if (existing && request.method === 'POST' && !body.customColor && false) {
-            return jsonResponse(
-              {
-                error:
-                  'Tenés 1 tarjeta activa en tu local. Si necesitás crear más de una tarjeta, ponete en contacto con nosotros',
-                limitReached: true,
-              },
-              400
-            );
-          }
 
           const cardId = existing?.id || `card-${tenantId}`;
           const nowIso = new Date().toISOString();
@@ -796,28 +890,7 @@ export default {
               nowIso,
               nowIso
             )
-            .run()
-            .catch(async () => {
-              await env.DB!
-                .prepare(
-                  `UPDATE merchant_cards
-                   SET business_name = ?, stamps_required = 10, reward_text = ?, reward_value_ars = ?,
-                       brand_color = ?, color_preset = ?, logo_url = COALESCE(?, logo_url), updated_at = ?
-                   WHERE tenant_id = ?`
-                )
-                .bind(
-                  businessName,
-                  rewardText,
-                  rewardValueArs,
-                  brandColor,
-                  colorPreset,
-                  logoUrl,
-                  nowIso,
-                  tenantId
-                )
-                .run()
-                .catch(() => {});
-            });
+            .run();
 
           await env.DB
             .prepare(
@@ -859,7 +932,6 @@ export default {
             .run()
             .catch(() => {});
 
-          // Actualizar tarjetas ya emitidas para este comercio
           await env.DB
             .prepare('UPDATE loyalty_members SET stamps_required = 10 WHERE tenant_id = ?')
             .bind(tenantId)
@@ -884,177 +956,95 @@ export default {
             active: true,
           },
         });
-      } catch (err: any) {
-        return jsonResponse(
-          { error: err?.message || 'No pudimos guardar la tarjeta.' },
-          400
-        );
+      } catch {
+        return jsonResponse({ error: 'No pudimos guardar la tarjeta.' }, 400);
       }
     }
 
-    // 4. Reclamar y guardar tarjeta en D1 desacoplado de WalletWallet: POST /api/consumer/cards/claim
+    // 6. Reclamar tarjeta en el Hub: POST /api/consumer/cards/claim (exige getConsumerSession)
     if (pathname === '/api/consumer/cards/claim' && request.method === 'POST') {
+      const consumerSession = await getConsumerSession(request, env);
+      if (!consumerSession) {
+        return jsonResponse({ error: 'Iniciá sesión.' }, 401);
+      }
+      if (!env.DB) {
+        return jsonResponse({ error: 'Base de datos no disponible.' }, 503);
+      }
+
       try {
-        const body = (await request.json()) as {
+        const body = (await request.json().catch(() => ({}))) as {
           code?: string;
           cartelCode?: string;
           localCode?: string;
-          tenantId?: string;
-          businessId?: string;
-          businessName?: string;
-          consumerId?: string;
-          email?: string;
-          contact?: string;
-          fullName?: string;
-          name?: string;
-          birthDate?: string;
-          stampsRequired?: number;
-          rewardText?: string;
-          brandColor?: string;
-          colorPreset?: string;
-          logoUrl?: string;
         };
 
-        const rawCode = String(body.code || body.cartelCode || body.localCode || '').trim().toUpperCase();
-        let tenantId = String(body.tenantId || body.businessId || '').trim();
-        let businessName = String(body.businessName || '').trim();
-        let rewardText = String(body.rewardText || '').trim();
-        let brandColor = String(body.brandColor || '#D95B26').trim();
-        let colorPreset = String(body.colorPreset || 'dark').trim();
-        let logoUrl = String(body.logoUrl || '').trim() || undefined;
+        const rawCode = String(body.code || body.cartelCode || body.localCode || '')
+          .trim()
+          .toUpperCase();
+        if (!rawCode) {
+          return jsonResponse({ error: 'Indicá el código del comercio.' }, 400);
+        }
+
+        let tenantId = '';
+        const cartelMatch = await env.DB
+          .prepare('SELECT tenant_id FROM carteles WHERE UPPER(code) = ? LIMIT 1')
+          .bind(rawCode)
+          .first<{ tenant_id?: string }>()
+          .catch(() => null);
+
+        if (cartelMatch?.tenant_id) {
+          tenantId = cartelMatch.tenant_id;
+        } else {
+          const tenantMatch = await env.DB
+            .prepare('SELECT id FROM tenants WHERE LOWER(id) = ? OR LOWER(slug) = ? LIMIT 1')
+            .bind(rawCode.toLowerCase(), rawCode.toLowerCase())
+            .first<{ id: string }>()
+            .catch(() => null);
+          if (tenantMatch?.id) {
+            tenantId = tenantMatch.id;
+          }
+        }
+
+        if (!tenantId) {
+          return jsonResponse({ error: 'No encontramos el comercio solicitado.' }, 404);
+        }
+
+        let businessName = 'Comercio adherido';
+        let rewardText = 'Beneficio al completar tus 10 sellos';
+        let brandColor = '#D95B26';
+        let colorPreset = 'dark';
+        let logoUrl: string | undefined;
         const stampsRequired = 10;
         const nowIso = new Date().toISOString();
 
-        // 1. Identificar al comprador: primero por token en header Authorization o cookie, segundo (fallback infalible) por email o consumerId del body
-        const incomingToken = extractSessionToken(request);
-        let cleanEmail = String(body.email || body.contact || '').trim().toLowerCase();
-        let fullName = String(body.fullName || body.name || '').trim();
-        let birthDate = String(body.birthDate || '').trim() || null;
-        let consumerId = String(body.consumerId || '').trim() || null;
-        let sessionToken =
-          incomingToken || `${crypto.randomUUID()}${crypto.randomUUID()}`.replace(/-/g, '');
+        const hubCfgRow = await env.DB
+          .prepare(
+            `SELECT business_name, reward_text, loyalty_reward, brand_color, color_preset, custom_color, logo_url
+             FROM hub_configs WHERE tenant_id = ? LIMIT 1`
+          )
+          .bind(tenantId)
+          .first<D1HubConfigRow>()
+          .catch(() => null);
 
-        if (env.DB) {
-          // Resolver tenant_id desde el código del Hub si hace falta
-          if (rawCode && (!tenantId || tenantId === 'musical-monroe')) {
-            const cartelMatch = await env.DB
-              .prepare('SELECT tenant_id FROM carteles WHERE UPPER(code) = ? LIMIT 1')
-              .bind(rawCode)
-              .first<{ tenant_id?: string }>()
-              .catch(() => null);
-            if (cartelMatch?.tenant_id) {
-              tenantId = cartelMatch.tenant_id;
-            }
+        if (hubCfgRow) {
+          if (hubCfgRow.business_name) businessName = hubCfgRow.business_name;
+          if (hubCfgRow.reward_text || hubCfgRow.loyalty_reward) {
+            rewardText = (hubCfgRow.reward_text || hubCfgRow.loyalty_reward || rewardText).trim();
           }
-          if (!tenantId) {
-            tenantId = 'musical-monroe';
+          if (hubCfgRow.custom_color || hubCfgRow.brand_color) {
+            brandColor = (hubCfgRow.custom_color || hubCfgRow.brand_color || brandColor).trim();
           }
-
-          // Leer configuración real del comercio en D1 para que la tarjeta refleje nombre, color y premio actuales
-          const hubCfgRow = await env.DB
-            .prepare(
-              `SELECT business_name, reward_text, loyalty_reward, brand_color, color_preset, custom_color, logo_url
-               FROM hub_configs WHERE tenant_id = ? LIMIT 1`
-            )
-            .bind(tenantId)
-            .first<D1HubConfigRow>()
-            .catch(() => null);
-
-          if (hubCfgRow) {
-            if (hubCfgRow.business_name) businessName = hubCfgRow.business_name;
-            if (hubCfgRow.reward_text || hubCfgRow.loyalty_reward) {
-              rewardText = (hubCfgRow.reward_text || hubCfgRow.loyalty_reward || rewardText).trim();
-            }
-            if (hubCfgRow.custom_color || hubCfgRow.brand_color) {
-              brandColor = (hubCfgRow.custom_color || hubCfgRow.brand_color || brandColor).trim();
-            }
-            if (hubCfgRow.color_preset) {
-              colorPreset = hubCfgRow.color_preset;
-            }
-            if (hubCfgRow.logo_url) {
-              logoUrl = hubCfgRow.logo_url;
-            }
+          if (hubCfgRow.color_preset) {
+            colorPreset = hubCfgRow.color_preset;
           }
-
-          let consumerRow: D1ConsumerUserRow | null = null;
-          if (incomingToken) {
-            consumerRow = await env.DB
-              .prepare(
-                'SELECT id, email, full_name, birth_date, session_token, created_at FROM consumer_users WHERE session_token = ? LIMIT 1'
-              )
-              .bind(incomingToken)
-              .first<D1ConsumerUserRow>()
-              .catch(() => null);
+          if (hubCfgRow.logo_url) {
+            logoUrl = hubCfgRow.logo_url;
           }
-
-          if (!consumerRow && cleanEmail) {
-            consumerRow = await env.DB
-              .prepare(
-                'SELECT id, email, full_name, birth_date, session_token, created_at FROM consumer_users WHERE LOWER(TRIM(email)) = ? LIMIT 1'
-              )
-              .bind(cleanEmail)
-              .first<D1ConsumerUserRow>()
-              .catch(() => null);
-          }
-
-          if (!consumerRow && consumerId) {
-            consumerRow = await env.DB
-              .prepare(
-                'SELECT id, email, full_name, birth_date, session_token, created_at FROM consumer_users WHERE id = ? LIMIT 1'
-              )
-              .bind(consumerId)
-              .first<D1ConsumerUserRow>()
-              .catch(() => null);
-          }
-
-          if (consumerRow) {
-            consumerId = consumerRow.id;
-            cleanEmail = (consumerRow.email || cleanEmail).trim().toLowerCase();
-            fullName = (fullName || consumerRow.full_name || 'Socio').trim();
-            birthDate = birthDate || consumerRow.birth_date || null;
-            sessionToken = consumerRow.session_token || sessionToken;
-
-            await env.DB
-              .prepare(
-                `UPDATE consumer_users
-                 SET session_token = ?,
-                     full_name = COALESCE(NULLIF(?, ''), full_name),
-                     birth_date = COALESCE(?, birth_date)
-                 WHERE id = ?`
-              )
-              .bind(sessionToken, fullName, birthDate, consumerId)
-              .run()
-              .catch(() => {});
-          } else {
-            // Crear o asegurar el registro del comprador en el acto sin fallar jamás
-            consumerId = consumerId || `usr-${crypto.randomUUID().slice(0, 12)}`;
-            if (!cleanEmail) {
-              cleanEmail = `socio-${consumerId.slice(-6)}@toque.com.ar`;
-            }
-            if (!fullName) {
-              fullName = cleanEmail.split('@')[0] || 'Socio';
-            }
-            await env.DB
-              .prepare(
-                `INSERT INTO consumer_users (id, email, full_name, birth_date, session_token, created_at)
-                 VALUES (?, ?, ?, ?, ?, ?)
-                 ON CONFLICT(email) DO UPDATE SET
-                   full_name = COALESCE(NULLIF(excluded.full_name, ''), consumer_users.full_name),
-                   birth_date = COALESCE(excluded.birth_date, consumer_users.birth_date),
-                   session_token = excluded.session_token`
-              )
-              .bind(consumerId, cleanEmail, fullName, birthDate, sessionToken, nowIso)
-              .run()
-              .catch(() => {});
-          }
-        } else {
-          consumerId = consumerId || `usr-${crypto.randomUUID().slice(0, 12)}`;
-          if (!cleanEmail) cleanEmail = `socio-${consumerId.slice(-6)}@toque.com.ar`;
-          if (!fullName) fullName = cleanEmail.split('@')[0] || 'Socio';
         }
 
-        if (!businessName) businessName = 'Musical Monroe';
-        if (!rewardText) rewardText = 'Beneficio al completar tus 10 sellos';
+        const consumerId = consumerSession.consumerId;
+        const cleanEmail = consumerSession.email.toLowerCase();
+        const fullName = consumerSession.fullName || 'Socio';
 
         let memberId = `mem-${crypto.randomUUID().slice(0, 8)}`;
         let barcodeToken = await generateUnique8DigitBarcode(env.DB);
@@ -1064,108 +1054,80 @@ export default {
         let walletAppleUrl: string | undefined;
         let walletGoogleUrl: string | undefined;
 
-        if (env.DB) {
-          try {
-            const existing = await env.DB
-              .prepare(
-                `SELECT id, consumer_id, tenant_id, customer_name, name, stamps, barcode_token,
-                        last_stamped_at, wallet_serial, wallet_apple_base64, wallet_google_url,
-                        wallet_download_token
-                 FROM loyalty_members
-                 WHERE tenant_id = ? AND (
-                   (consumer_id IS NOT NULL AND consumer_id = ?) OR
-                   (LOWER(TRIM(customer_email)) = ? AND ? != '') OR
-                   (LOWER(TRIM(contact)) = ? AND ? != '')
-                 )
-                 LIMIT 1`
-              )
-              .bind(
-                tenantId,
-                consumerId || '',
-                cleanEmail,
-                cleanEmail,
-                cleanEmail,
-                cleanEmail
-              )
-              .first<D1LoyaltyMemberRow>();
+        const existing = await env.DB
+          .prepare(
+            `SELECT id, consumer_id, tenant_id, customer_name, name, stamps, barcode_token,
+                    last_stamped_at, wallet_serial, wallet_apple_base64, wallet_google_url
+             FROM loyalty_members
+             WHERE tenant_id = ? AND (
+               consumer_id = ? OR LOWER(TRIM(customer_email)) = ? OR LOWER(TRIM(contact)) = ?
+             )
+             LIMIT 1`
+          )
+          .bind(tenantId, consumerId, cleanEmail, cleanEmail)
+          .first<D1LoyaltyMemberRow>();
 
-            if (existing) {
-              memberId = existing.id;
-              barcodeToken =
-                normalize8DigitToken(existing.barcode_token) ||
-                (await generateUnique8DigitBarcode(env.DB));
-              stamps = Math.max(0, Number(existing.stamps ?? 0));
-              lastStampedAt = existing.last_stamped_at || null;
-              walletSerial = existing.wallet_serial || null;
-              if (existing.wallet_apple_base64) {
-                const downloadToken = await ensureWalletDownloadToken(env.DB, existing.id);
-                walletAppleUrl = `/api/wallet/apple/${downloadToken}`;
-              }
-              if (existing.wallet_google_url) {
-                walletGoogleUrl = existing.wallet_google_url;
-              }
-
-              await env.DB
-                .prepare(
-                  `UPDATE loyalty_members
-                   SET consumer_id = COALESCE(?, consumer_id),
-                       customer_name = COALESCE(NULLIF(?, ''), customer_name),
-                       name = COALESCE(NULLIF(?, ''), name),
-                       customer_email = COALESCE(NULLIF(?, ''), customer_email),
-                       contact = COALESCE(NULLIF(?, ''), contact),
-                       stamps_required = 10,
-                       barcode_token = ?,
-                       member_code = ?
-                   WHERE id = ?`
-                )
-                .bind(
-                  consumerId,
-                  fullName,
-                  fullName,
-                  cleanEmail,
-                  cleanEmail,
-                  barcodeToken,
-                  barcodeToken,
-                  memberId
-                )
-                .run();
-            } else {
-              await env.DB
-                .prepare(
-                  `INSERT INTO loyalty_members (
-                     id, consumer_id, tenant_id, customer_name, name, customer_email, contact,
-                     points, stamps, stamps_required, rewards_redeemed, barcode_token,
-                     member_code, last_stamped_at, created_at
-                   ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, 10, 0, ?, ?, NULL, ?)`
-                )
-                .bind(
-                  memberId,
-                  consumerId,
-                  tenantId,
-                  fullName,
-                  fullName,
-                  cleanEmail,
-                  cleanEmail,
-                  barcodeToken,
-                  barcodeToken,
-                  nowIso
-                )
-                .run();
-            }
-          } catch {
-            try {
-              await env.DB
-                .prepare(
-                  `INSERT OR IGNORE INTO loyalty_members (
-                     id, tenant_id, customer_name, customer_email, stamps, barcode_token, last_stamped_at, created_at
-                   ) VALUES (?, ?, ?, ?, 0, ?, NULL, ?)`
-                )
-                .bind(memberId, tenantId, fullName, cleanEmail, barcodeToken, nowIso)
-                .run();
-            } catch {
-              // ignore
-            }
+        if (existing) {
+          memberId = existing.id;
+          barcodeToken =
+            normalize8DigitToken(existing.barcode_token) ||
+            (await generateUnique8DigitBarcode(env.DB));
+          stamps = Math.max(0, Number(existing.stamps ?? 0));
+          lastStampedAt = existing.last_stamped_at || null;
+          walletSerial = existing.wallet_serial || null;
+          if (existing.wallet_apple_base64) {
+            walletAppleUrl = `/api/wallet/pass/${encodeURIComponent(barcodeToken)}.pkpass`;
           }
+          if (existing.wallet_google_url) {
+            walletGoogleUrl = existing.wallet_google_url;
+          }
+
+          await env.DB
+            .prepare(
+              `UPDATE loyalty_members
+               SET consumer_id = ?,
+                   customer_name = ?,
+                   name = ?,
+                   customer_email = ?,
+                   contact = ?,
+                   stamps_required = 10,
+                   barcode_token = ?,
+                   member_code = ?
+               WHERE id = ?`
+            )
+            .bind(
+              consumerId,
+              fullName,
+              fullName,
+              cleanEmail,
+              cleanEmail,
+              barcodeToken,
+              barcodeToken,
+              memberId
+            )
+            .run();
+        } else {
+          await env.DB
+            .prepare(
+              `INSERT INTO loyalty_members (
+                 id, consumer_id, tenant_id, customer_name, name, customer_email, contact,
+                 points, stamps, stamps_required, rewards_redeemed, barcode_token,
+                 member_code, last_stamped_at, created_at
+               ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, 10, 0, ?, ?, NULL, ?)`
+            )
+            .bind(
+              memberId,
+              consumerId,
+              tenantId,
+              fullName,
+              fullName,
+              cleanEmail,
+              cleanEmail,
+              barcodeToken,
+              barcodeToken,
+              nowIso
+            )
+            .run();
         }
 
         const cardPayload = {
@@ -1196,236 +1158,261 @@ export default {
           consent: true,
         };
 
-        return jsonResponse(
-          {
-            success: true,
-            card: cardPayload,
-            member: cardPayload,
-            barcodeToken,
-            sessionToken,
-            user: {
-              id: consumerId,
-              email: cleanEmail,
-              fullName,
-              birthDate: birthDate || undefined,
-            },
-          },
-          200,
-          {
-            'Set-Cookie': `toque_session=${sessionToken}; Path=/; Max-Age=31536000; SameSite=Lax`,
-          }
-        );
-      } catch (err: any) {
-        return jsonResponse(
-          {
-            success: false,
-            error: err?.message || 'No pudimos guardar tu tarjeta.',
-          },
-          400
-        );
-      }
-    }
-
-    // 5. Servir Apple Wallet desde D1 mediante token opaco aleatorio.
-    if (pathname.startsWith('/api/wallet/apple/') && request.method === 'GET') {
-      const downloadToken = pathname.slice('/api/wallet/apple/'.length).trim();
-      if (!/^[a-f0-9]{64}$/i.test(downloadToken)) {
-        return jsonResponse({ error: 'El enlace de Apple Wallet no es válido.' }, 404);
-      }
-      if (!env.DB) {
-        return jsonResponse({ error: 'La descarga de Apple Wallet no está disponible.' }, 503);
-      }
-      try {
-        const member = await env.DB.prepare(
-          'SELECT wallet_apple_base64 FROM loyalty_members WHERE wallet_download_token = ? LIMIT 1'
-        ).bind(downloadToken).first<{ wallet_apple_base64?: string | null }>();
-        if (!member?.wallet_apple_base64) {
-          return jsonResponse({ error: 'No encontramos el pase de Apple Wallet solicitado.' }, 404);
-        }
-        let bytes: Uint8Array;
-        try {
-          const binary = atob(member.wallet_apple_base64);
-          bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
-        } catch {
-          return jsonResponse({ error: 'El archivo de Apple Wallet almacenado no es válido.' }, 500);
-        }
-        return new Response(bytes, {
-          status: 200,
-          headers: {
-            'Content-Type': 'application/vnd.apple.pkpass',
-            'Content-Disposition': 'attachment; filename="toque.pkpass"',
-            'Cache-Control': 'private, no-store, no-cache, must-revalidate',
-            'X-Content-Type-Options': 'nosniff',
+        return jsonResponse({
+          success: true,
+          card: cardPayload,
+          member: cardPayload,
+          barcodeToken,
+          user: {
+            id: consumerId,
+            email: cleanEmail,
+            fullName,
+            birthDate: consumerSession.birthDate || undefined,
           },
         });
       } catch {
-        return jsonResponse({ error: 'No pudimos recuperar el pase desde D1.' }, 500);
+        return jsonResponse({ success: false, error: 'No pudimos guardar tu tarjeta.' }, 400);
       }
     }
 
-    // Los enlaces antiguos con barcode de 8 dígitos ya no son válidos como credencial.
+    // 7. Enlace de un solo uso para Apple Wallet: POST /api/consumer/wallet/add y GET /api/wallet/p/:token
+    if (pathname === '/api/consumer/wallet/add' && request.method === 'POST') {
+      const consumerSession = await getConsumerSession(request, env);
+      if (!consumerSession) {
+        return jsonResponse({ error: 'Iniciá sesión.' }, 401);
+      }
+      if (!env.DB || !env.KV) {
+        return jsonResponse({ error: 'El servicio de billetera no está disponible.' }, 503);
+      }
+
+      try {
+        const body = (await request.json().catch(() => ({}))) as {
+          memberId?: string;
+          barcodeToken?: string;
+          code?: string;
+        };
+        const memberId = String(body.memberId || '').trim();
+        const barcodeToken = normalize8DigitToken(body.barcodeToken || body.code);
+
+        const memberRow = await env.DB
+          .prepare(
+            `SELECT * FROM loyalty_members
+             WHERE (consumer_id = ? OR LOWER(customer_email) = ? OR LOWER(contact) = ?)
+               AND ((id = ? AND ? != '') OR (barcode_token = ? AND ? != ''))
+             LIMIT 1`
+          )
+          .bind(
+            consumerSession.consumerId,
+            consumerSession.email.toLowerCase(),
+            consumerSession.email.toLowerCase(),
+            memberId,
+            memberId,
+            barcodeToken,
+            barcodeToken
+          )
+          .first<D1LoyaltyMemberRow>();
+
+        if (!memberRow) {
+          return jsonResponse({ error: 'No encontramos esa tarjeta en tu cuenta.' }, 404);
+        }
+
+        let applePassBase64 = memberRow.wallet_apple_base64 || null;
+        if (!applePassBase64) {
+          const hubRow = await env.DB
+            .prepare(
+              `SELECT business_name, reward_text, loyalty_reward, stamps_required, color_preset
+               FROM hub_configs WHERE tenant_id = ? LIMIT 1`
+            )
+            .bind(memberRow.tenant_id)
+            .first<D1HubConfigRow>()
+            .catch(() => null);
+
+          const token8 =
+            normalize8DigitToken(memberRow.barcode_token) ||
+            (await generateUnique8DigitBarcode(env.DB));
+          const created = await createPass(env, {
+            businessName: (hubRow?.business_name || 'Comercio adherido').slice(0, 64),
+            memberName:
+              (memberRow.customer_name || memberRow.name || consumerSession.fullName || '').trim() ||
+              undefined,
+            stamps: Number(memberRow.stamps || 0),
+            stampsRequired: Number(hubRow?.stamps_required || memberRow.stamps_required || 10),
+            rewardText: (
+              hubRow?.reward_text ||
+              hubRow?.loyalty_reward ||
+              'Beneficio al completar tus 10 sellos'
+            ).slice(0, 60),
+            barcodeToken: token8,
+            colorPreset: ((hubRow?.color_preset as ColorPreset) || 'dark') as ColorPreset,
+          });
+
+          applePassBase64 = created.applePass || null;
+          await env.DB
+            .prepare(
+              `UPDATE loyalty_members
+               SET wallet_serial = ?, barcode_token = ?,
+                   wallet_apple_base64 = COALESCE(?, wallet_apple_base64),
+                   wallet_google_url = COALESCE(?, wallet_google_url),
+                   wallet_sync_error = NULL
+               WHERE id = ?`
+            )
+            .bind(
+              created.serialNumber,
+              token8,
+              applePassBase64,
+              created.googleSaveUrl || null,
+              memberRow.id
+            )
+            .run();
+        }
+
+        if (!applePassBase64) {
+          return jsonResponse(
+            { error: 'No pudimos preparar el archivo para Apple Wallet.' },
+            502
+          );
+        }
+
+        const token = generateRandomToken();
+        await env.KV.put(`wallet_dl:${token}`, memberRow.id, { expirationTtl: 300 });
+
+        return jsonResponse({
+          url: `/api/wallet/p/${token}`,
+        });
+      } catch (err: any) {
+        const status = err instanceof WalletError ? err.status : 502;
+        return jsonResponse(
+          {
+            error:
+              err instanceof WalletError
+                ? err.message
+                : 'No pudimos generar el enlace para Apple Wallet.',
+          },
+          status
+        );
+      }
+    }
+
+    if (pathname.startsWith('/api/wallet/p/') && request.method === 'GET') {
+      const token = pathname.slice('/api/wallet/p/'.length).trim();
+      if (!/^[a-f0-9]{64}$/i.test(token)) {
+        return jsonResponse({ error: 'El enlace de descarga no es válido.' }, 404);
+      }
+      if (!env.DB) {
+        return jsonResponse({ error: 'La descarga no está disponible.' }, 503);
+      }
+
+      let memberId: string | null = null;
+      if (env.KV) {
+        memberId = await env.KV.get(`wallet_dl:${token}`, 'text');
+        if (memberId) {
+          // Invalidar inmediatamente al usarse (un solo uso)
+          await env.KV.delete(`wallet_dl:${token}`);
+        }
+      }
+
+      if (!memberId) {
+        return jsonResponse(
+          { error: 'Este enlace ya fue utilizado o venció. Volvé a abrir tu tarjeta.' },
+          404
+        );
+      }
+
+      const member = await env.DB
+        .prepare('SELECT wallet_apple_base64 FROM loyalty_members WHERE id = ? LIMIT 1')
+        .bind(memberId)
+        .first<{ wallet_apple_base64?: string | null }>();
+
+      if (!member?.wallet_apple_base64) {
+        return jsonResponse({ error: 'No encontramos el pase solicitado.' }, 404);
+      }
+
+      const binary = atob(member.wallet_apple_base64);
+      const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
+      return new Response(bytes, {
+        status: 200,
+        headers: {
+          'Content-Type': 'application/vnd.apple.pkpass',
+          'Content-Disposition': 'attachment; filename="toque.pkpass"',
+          'Cache-Control': 'private, no-store, no-cache, must-revalidate',
+          'X-Content-Type-Options': 'nosniff',
+        },
+      });
+    }
+
+    // Descarga de GET /api/wallet/pass/<código>.pkpass: solo con la sesión del dueño de la tarjeta, sin crear tarjetas nuevas
     if (
       pathname.startsWith('/api/wallet/pass/') &&
       pathname.toLowerCase().endsWith('.pkpass') &&
       request.method === 'GET'
     ) {
-      return jsonResponse(
-        { error: 'Este enlace de Apple Wallet venció. Volvé a abrir la tarjeta desde Toque.' },
-        410
-      );
-    }
-
-    // 6. Sesión única persistente entre comercios: POST /api/consumer/verify-code
-    if (
-      (pathname === '/api/consumer/verify-code' || pathname === '/api/auth/verify-otp') &&
-      request.method === 'POST'
-    ) {
-      try {
-        const body = (await request.json()) as {
-          email?: string;
-          code?: string;
-        };
-        const cleanEmail = String(body.email || '').trim().toLowerCase();
-        const cleanCode = String(body.code || '').trim();
-
-        if (!cleanEmail || !cleanEmail.includes('@')) {
-          return jsonResponse({ error: 'Ingresá un correo válido.' }, 400);
-        }
-        if (cleanCode.length < 4) {
-          return jsonResponse({ error: 'El código ingresado no es válido.' }, 400);
-        }
-
-        if (env.KV) {
-          try {
-            const storedOtp = await env.KV.get(`otp:${cleanEmail}`, 'text');
-            if (storedOtp && storedOtp !== cleanCode) {
-              return jsonResponse({ error: 'Código incorrecto o vencido.' }, 400);
-            }
-          } catch {
-            // continuar
-          }
-        }
-
-        let userRow: D1ConsumerUserRow | null = null;
-
-        if (env.DB) {
-          try {
-            userRow = await env.DB
-              .prepare(
-                'SELECT id, email, full_name, birth_date, session_token, created_at FROM consumer_users WHERE LOWER(email) = ? LIMIT 1'
-              )
-              .bind(cleanEmail)
-              .first<D1ConsumerUserRow>();
-
-            if (!userRow) {
-              const memberMatch = await env.DB
-                .prepare(
-                  `SELECT id, customer_name, name, birth_day, birth_month
-                   FROM loyalty_members
-                   WHERE LOWER(customer_email) = ? OR LOWER(contact) = ?
-                   ORDER BY created_at DESC LIMIT 1`
-                )
-                .bind(cleanEmail, cleanEmail)
-                .first<{
-                  id: string;
-                  customer_name?: string | null;
-                  name?: string | null;
-                  birth_day?: number | null;
-                  birth_month?: number | null;
-                }>();
-
-              const foundName = (memberMatch?.customer_name || memberMatch?.name || '').trim();
-              if (memberMatch && foundName) {
-                const newUserId = crypto.randomUUID();
-                const birthDateStr =
-                  memberMatch.birth_day && memberMatch.birth_month
-                    ? `1995-${String(memberMatch.birth_month).padStart(2, '0')}-${String(
-                        memberMatch.birth_day
-                      ).padStart(2, '0')}`
-                    : null;
-                const nowIso = new Date().toISOString();
-
-                await env.DB
-                  .prepare(
-                    `INSERT INTO consumer_users (id, email, full_name, birth_date, created_at)
-                     VALUES (?, ?, ?, ?, ?)`
-                  )
-                  .bind(newUserId, cleanEmail, foundName, birthDateStr, nowIso)
-                  .run();
-
-                await env.DB
-                  .prepare(
-                    `UPDATE loyalty_members SET consumer_id = ?
-                     WHERE LOWER(customer_email) = ? OR LOWER(contact) = ?`
-                  )
-                  .bind(newUserId, cleanEmail, cleanEmail)
-                  .run()
-                  .catch(() => {});
-
-                userRow = {
-                  id: newUserId,
-                  email: cleanEmail,
-                  full_name: foundName,
-                  birth_date: birthDateStr,
-                  created_at: nowIso,
-                };
-              }
-            }
-          } catch {
-            userRow = null;
-          }
-        }
-
-        if (userRow && userRow.full_name && userRow.full_name.trim().length > 0) {
-          const sessionToken = `${crypto.randomUUID()}${crypto.randomUUID()}`.replace(/-/g, '');
-          if (env.DB) {
-            await env.DB
-              .prepare('UPDATE consumer_users SET session_token = ? WHERE id = ?')
-              .bind(sessionToken, userRow.id)
-              .run()
-              .catch(() => {});
-          }
-
-          return jsonResponse(
-            {
-              success: true,
-              verifiedEmail: cleanEmail,
-              needsRegistration: false,
-              sessionToken,
-              user: {
-                id: userRow.id,
-                email: userRow.email,
-                fullName: userRow.full_name,
-                birthDate: userRow.birth_date || undefined,
-              },
-            },
-            200,
-            {
-              'Set-Cookie': `toque_session=${sessionToken}; Path=/; Max-Age=31536000; SameSite=Lax`,
-            }
-          );
-        }
-
-        const verificationTicket = `${crypto.randomUUID()}`.replace(/-/g, '');
-        return jsonResponse({
-          success: true,
-          verifiedEmail: cleanEmail,
-          needsRegistration: true,
-          verificationTicket,
-          email: cleanEmail,
-        });
-      } catch (err: any) {
-        return jsonResponse(
-          { error: err?.message || 'No pudimos verificar el código.' },
-          400
-        );
+      const consumerSession = await getConsumerSession(request, env);
+      if (!consumerSession) {
+        return jsonResponse({ error: 'Iniciá sesión.' }, 401);
       }
+      if (!env.DB) {
+        return jsonResponse({ error: 'Servicio no disponible.' }, 503);
+      }
+
+      const rawCode = decodeURIComponent(
+        pathname.slice('/api/wallet/pass/'.length).replace(/\.pkpass$/i, '')
+      ).trim();
+
+      const member = await env.DB
+        .prepare(
+          `SELECT id, consumer_id, customer_email, contact, wallet_apple_base64
+           FROM loyalty_members
+           WHERE (barcode_token = ? OR id = ?)
+           LIMIT 1`
+        )
+        .bind(rawCode, rawCode)
+        .first<{
+          id: string;
+          consumer_id?: string | null;
+          customer_email?: string | null;
+          contact?: string | null;
+          wallet_apple_base64?: string | null;
+        }>();
+
+      if (!member) {
+        return jsonResponse({ error: 'No existe esa tarjeta.' }, 404);
+      }
+
+      const emailLower = consumerSession.email.toLowerCase();
+      const isOwner =
+        member.consumer_id === consumerSession.consumerId ||
+        String(member.customer_email || '').trim().toLowerCase() === emailLower ||
+        String(member.contact || '').trim().toLowerCase() === emailLower;
+
+      if (!isOwner) {
+        return jsonResponse({ error: 'No tenés permiso para descargar esta tarjeta.' }, 403);
+      }
+
+      if (!member.wallet_apple_base64) {
+        return jsonResponse({ error: 'Esta tarjeta todavía no tiene un pase generado.' }, 404);
+      }
+
+      const binary = atob(member.wallet_apple_base64);
+      const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
+      return new Response(bytes, {
+        status: 200,
+        headers: {
+          'Content-Type': 'application/vnd.apple.pkpass',
+          'Content-Disposition': 'attachment; filename="toque.pkpass"',
+          'Cache-Control': 'private, no-store, no-cache, must-revalidate',
+          'X-Content-Type-Options': 'nosniff',
+        },
+      });
     }
 
-    // 7. Registro de usuario consumidor por primera vez: POST /api/consumer/register
+    // 8. Registro de cliente por primera vez: POST /api/consumer/register
     if (pathname === '/api/consumer/register' && request.method === 'POST') {
       try {
-        const body = (await request.json()) as {
+        if (!env.DB || !env.KV) {
+          return jsonResponse({ error: 'Servicio no disponible.' }, 503);
+        }
+
+        const body = (await request.json().catch(() => ({}))) as {
           email?: string;
           fullName?: string;
           name?: string;
@@ -1435,44 +1422,49 @@ export default {
         const fullName = String(body.fullName || body.name || '').trim();
         const birthDate = String(body.birthDate || '').trim() || null;
 
-        if (!cleanEmail || !cleanEmail.includes('@') || !fullName) {
+        if (!cleanEmail || !isValidEmail(cleanEmail) || !fullName) {
           return jsonResponse({ error: 'Completá tu nombre y tu correo.' }, 400);
         }
 
-        let userId = crypto.randomUUID();
+        const verifiedFlag = await env.KV.get(`verified:consumer:${cleanEmail}`, 'text');
+        if (!verifiedFlag) {
+          return jsonResponse(
+            { error: 'Primero verificá tu correo con el código de 6 dígitos.' },
+            403
+          );
+        }
+
+        const existing = await env.DB
+          .prepare('SELECT id FROM consumer_users WHERE LOWER(email) = ? LIMIT 1')
+          .bind(cleanEmail)
+          .first<{ id: string }>();
+
+        if (existing?.id) {
+          await env.KV.delete(`verified:consumer:${cleanEmail}`).catch(() => {});
+          return jsonResponse(
+            { error: 'Ya existe una cuenta con ese correo. Ingresá con tu código.' },
+            409
+          );
+        }
+
+        const userId = crypto.randomUUID();
         const sessionToken = `${crypto.randomUUID()}${crypto.randomUUID()}`.replace(/-/g, '');
         const nowIso = new Date().toISOString();
 
-        if (env.DB) {
-          try {
-            const existing = await env.DB
-              .prepare('SELECT id FROM consumer_users WHERE LOWER(email) = ? LIMIT 1')
-              .bind(cleanEmail)
-              .first<{ id: string }>();
-            if (existing?.id) {
-              userId = existing.id;
-            }
+        await env.DB
+          .prepare(
+            `INSERT INTO consumer_users (id, email, full_name, birth_date, session_token, created_at)
+             VALUES (?, ?, ?, ?, ?, ?)`
+          )
+          .bind(userId, cleanEmail, fullName, birthDate, sessionToken, nowIso)
+          .run();
 
-            await env.DB
-              .prepare(
-                `INSERT INTO consumer_users (id, email, full_name, birth_date, session_token, created_at)
-                 VALUES (?, ?, ?, ?, ?, ?)
-                 ON CONFLICT(email) DO UPDATE SET
-                   full_name = excluded.full_name,
-                   birth_date = COALESCE(excluded.birth_date, consumer_users.birth_date),
-                   session_token = excluded.session_token`
-              )
-              .bind(userId, cleanEmail, fullName, birthDate, sessionToken, nowIso)
-              .run();
-          } catch {
-            // ignore
-          }
-        }
+        await env.KV.delete(`verified:consumer:${cleanEmail}`).catch(() => {});
 
         return jsonResponse(
           {
+            ok: true,
             needsRegistration: false,
-            sessionToken,
             user: {
               id: userId,
               email: cleanEmail,
@@ -1482,165 +1474,144 @@ export default {
           },
           200,
           {
-            'Set-Cookie': `toque_session=${sessionToken}; Path=/; Max-Age=31536000; SameSite=Lax`,
+            'Set-Cookie': buildConsumerCookie(sessionToken),
           }
         );
-      } catch (err: any) {
-        return jsonResponse(
-          { error: err?.message || 'No pudimos registrar tu cuenta.' },
-          400
-        );
+      } catch {
+        return jsonResponse({ error: 'No pudimos registrar tu cuenta.' }, 400);
       }
     }
 
-    // 8. Sesión activa del cliente y tarjetas: GET /api/consumer/me
+    // 9. Sesión activa del cliente y tarjetas: GET /api/consumer/me (solo con getConsumerSession)
     if (pathname === '/api/consumer/me' && request.method === 'GET') {
-      const token = extractSessionToken(request);
-      if (!token) {
+      const consumerSession = await getConsumerSession(request, env);
+      if (!consumerSession || !env.DB) {
         return jsonResponse({ authenticated: false, user: null, cards: [], receipts: [] }, 401);
       }
 
-      if (env.DB) {
-        try {
-          const userRow = await env.DB
-            .prepare(
-              'SELECT id, email, full_name, birth_date, created_at FROM consumer_users WHERE session_token = ? LIMIT 1'
-            )
-            .bind(token)
-            .first<D1ConsumerUserRow>();
+      try {
+        const cardsRes = await env.DB
+          .prepare(
+            `SELECT
+               m.id, m.consumer_id, m.tenant_id, m.stamps, m.stamps_required, m.rewards_redeemed,
+               m.barcode_token, m.last_stamped_at, m.wallet_serial, m.wallet_apple_base64,
+               m.wallet_google_url, m.created_at,
+               h.business_name, h.logo_url, h.brand_color, h.color_preset, h.custom_color,
+               h.stamps_required AS hub_stamps_required, h.reward_text, h.loyalty_reward, h.reward_value_ars
+             FROM loyalty_members m
+             LEFT JOIN hub_configs h ON h.tenant_id = m.tenant_id
+             WHERE m.consumer_id = ? OR LOWER(m.customer_email) = ? OR LOWER(m.contact) = ?
+             ORDER BY m.created_at DESC`
+          )
+          .bind(
+            consumerSession.consumerId,
+            consumerSession.email.toLowerCase(),
+            consumerSession.email.toLowerCase()
+          )
+          .all<any>();
 
-          if (!userRow) {
-            return jsonResponse({ authenticated: false, user: null, cards: [], receipts: [] }, 401);
-          }
+        const receiptsRes = await env.DB
+          .prepare(
+            `SELECT id, consumer_id, tenant_id, merchant_name, amount_ars, discount_saved_ars, category, receipt_note, created_at
+             FROM consumer_receipts
+             WHERE consumer_id = ?
+             ORDER BY created_at DESC`
+          )
+          .bind(consumerSession.consumerId)
+          .all<any>();
 
-          const cardsRes = await env.DB
-            .prepare(
-              `SELECT
-                 m.id, m.consumer_id, m.tenant_id, m.stamps, m.stamps_required, m.rewards_redeemed,
-                 m.barcode_token, m.last_stamped_at, m.wallet_serial, m.wallet_apple_base64,
-                 m.wallet_google_url, m.wallet_download_token, m.created_at,
-                 h.business_name, h.logo_url, h.brand_color, h.color_preset, h.custom_color,
-                 h.stamps_required AS hub_stamps_required, h.reward_text, h.loyalty_reward, h.reward_value_ars
-               FROM loyalty_members m
-               LEFT JOIN hub_configs h ON h.tenant_id = m.tenant_id
-               WHERE m.consumer_id = ? OR LOWER(m.customer_email) = ? OR LOWER(m.contact) = ?
-               ORDER BY m.created_at DESC`
-            )
-            .bind(userRow.id, userRow.email.toLowerCase(), userRow.email.toLowerCase())
-            .all<any>();
+        const cards = (cardsRes.results || []).map((row: any) => {
+          const bToken = normalize8DigitToken(row.barcode_token) || row.barcode_token || '';
+          const bizName = row.business_name || 'Comercio adherido';
+          const reqStamps = Number(row.hub_stamps_required || row.stamps_required || 10);
+          const rewText =
+            row.reward_text || row.loyalty_reward || 'Beneficio al completar tus sellos';
+          const appleWalletUrl = row.wallet_apple_base64
+            ? `/api/wallet/pass/${encodeURIComponent(bToken)}.pkpass`
+            : undefined;
+          return {
+            id: row.id,
+            businessId: row.tenant_id,
+            businessName: bizName,
+            name: consumerSession.fullName,
+            email: consumerSession.email,
+            contact: consumerSession.email,
+            stamps: Number(row.stamps || 0),
+            points: Number(row.stamps || 0),
+            stampsRequired: reqStamps,
+            targetStamps: reqStamps,
+            rewardText: rewText,
+            rewardValueArs: Number(row.reward_value_ars || 0),
+            rewardsRedeemed: Number(row.rewards_redeemed || 0),
+            barcodeToken: bToken,
+            shortCode: bToken,
+            memberCode: bToken,
+            colorPreset: row.color_preset || 'dark',
+            customColor: row.custom_color || row.brand_color || undefined,
+            logoUrl: row.logo_url || undefined,
+            lastStampedAt: row.last_stamped_at || undefined,
+            walletSerial: row.wallet_serial || undefined,
+            appleWalletUrl,
+            googleSaveUrl: row.wallet_google_url || undefined,
+            googleWalletUrl: row.wallet_google_url || undefined,
+            joinedAt: row.created_at || new Date().toISOString(),
+            consent: true,
+          };
+        });
 
-          const receiptsRes = await env.DB
-            .prepare(
-              `SELECT id, consumer_id, tenant_id, merchant_name, amount_ars, discount_saved_ars, category, receipt_note, created_at
-               FROM consumer_receipts
-               WHERE consumer_id = ?
-               ORDER BY created_at DESC`
-            )
-            .bind(userRow.id)
-            .all<any>();
+        const receipts = (receiptsRes.results || []).map((r: any) => ({
+          id: r.id,
+          consumerId: r.consumer_id,
+          tenantId: r.tenant_id,
+          merchantName: r.merchant_name,
+          amountArs: Number(r.amount_ars) || 0,
+          discountSavedArs: Number(r.discount_saved_ars) || 0,
+          category: r.category || 'Comercio',
+          receiptNote: r.receipt_note || '',
+          createdAt: r.created_at,
+        }));
 
-          const cards = await Promise.all((cardsRes.results || []).map(async (row: any) => {
-            const bToken = normalize8DigitToken(row.barcode_token) || row.barcode_token || '';
-            const bizName = row.business_name || 'Comercio adherido';
-            const reqStamps = Number(row.hub_stamps_required || row.stamps_required || 10);
-            const rewText =
-              row.reward_text || row.loyalty_reward || 'Beneficio al completar tus sellos';
-            let appleWalletUrl: string | undefined;
-            if (row.wallet_apple_base64) {
-              try {
-                const downloadToken = String(row.wallet_download_token || '').trim() ||
-                  await ensureWalletDownloadToken(env.DB!, String(row.id));
-                appleWalletUrl = `/api/wallet/apple/${downloadToken}`;
-              } catch {
-                appleWalletUrl = undefined;
-              }
-            }
-            return {
-              id: row.id,
-              businessId: row.tenant_id,
-              businessName: bizName,
-              name: userRow.full_name,
-              email: userRow.email,
-              contact: userRow.email,
-              stamps: Number(row.stamps || 0),
-              points: Number(row.stamps || 0),
-              stampsRequired: reqStamps,
-              targetStamps: reqStamps,
-              rewardText: rewText,
-              rewardValueArs: Number(row.reward_value_ars || 0),
-              rewardsRedeemed: Number(row.rewards_redeemed || 0),
-              barcodeToken: bToken,
-              shortCode: bToken,
-              memberCode: bToken,
-              colorPreset: row.color_preset || 'dark',
-              customColor: row.custom_color || row.brand_color || undefined,
-              logoUrl: row.logo_url || undefined,
-              lastStampedAt: row.last_stamped_at || undefined,
-              walletSerial: row.wallet_serial || undefined,
-              appleWalletUrl,
-              googleSaveUrl: row.wallet_google_url || undefined,
-              googleWalletUrl: row.wallet_google_url || undefined,
-              joinedAt: row.created_at || new Date().toISOString(),
-              consent: true,
-            };
-          }));
-
-          const receipts = (receiptsRes.results || []).map((r: any) => ({
-            id: r.id,
-            consumerId: r.consumer_id,
-            tenantId: r.tenant_id,
-            merchantName: r.merchant_name,
-            amountArs: Number(r.amount_ars) || 0,
-            discountSavedArs: Number(r.discount_saved_ars) || 0,
-            category: r.category || 'Comercio',
-            receiptNote: r.receipt_note || '',
-            createdAt: r.created_at,
-          }));
-
-          return jsonResponse({
-            authenticated: true,
-            user: {
-              id: userRow.id,
-              email: userRow.email,
-              fullName: userRow.full_name,
-              birthDate: userRow.birth_date || undefined,
-            },
-            cards,
-            receipts,
-          });
-        } catch {
-          return jsonResponse({ authenticated: true, token });
-        }
+        return jsonResponse({
+          authenticated: true,
+          user: {
+            id: consumerSession.consumerId,
+            email: consumerSession.email,
+            fullName: consumerSession.fullName,
+            birthDate: consumerSession.birthDate || undefined,
+          },
+          cards,
+          receipts,
+        });
+      } catch {
+        return jsonResponse({ authenticated: false, user: null, cards: [], receipts: [] }, 500);
       }
-
-      return jsonResponse({ authenticated: true, token });
     }
 
-    // 9. Sincronización de diseño del Hub y Tarjeta en D1 (PUT /api/merchant/hub-config y PUT /api/merchant/hub)
+    // 10. Configuración de Hub del comercio: exigir sesión y usar session.tenantId
     if (
       (pathname === '/api/merchant/hub-config' || pathname === '/api/merchant/hub') &&
       (request.method === 'PUT' || request.method === 'POST')
     ) {
+      const session = await getMerchantSession(request, env);
+      if (!session) {
+        return jsonResponse({ error: 'Iniciá sesión.' }, 401);
+      }
+      const tenantId = session.tenantId;
+
       try {
-        const body = (await request.json()) as {
-          tenantId?: string;
-          businessId?: string;
+        const body = (await request.json().catch(() => ({}))) as {
           businessName?: string;
           logoUrl?: string;
           colorPreset?: ColorPreset;
           customColor?: string;
           brandColor?: string;
-          stampsRequired?: number;
           rewardText?: string;
           rewardValueArs?: number;
           storeLat?: number;
           storeLng?: number;
-          code?: string;
-          localCode?: string;
         };
 
-        const tenantId = (body.tenantId || body.businessId || 'musical-monroe').trim();
-        const businessName = (body.businessName || 'Musical Monroe').trim().slice(0, 64);
+        const businessName = (body.businessName || 'Mi comercio').trim().slice(0, 64);
         const logoUrl = (body.logoUrl || '').trim() || null;
         const validPresets: ColorPreset[] = ['dark', 'blue', 'green', 'red', 'purple', 'orange'];
         const colorPreset: ColorPreset =
@@ -1649,100 +1620,94 @@ export default {
             : 'dark';
         const brandColor = (body.customColor || body.brandColor || '#D95B26').trim();
         const stampsRequired = 10;
-        const rewardText = (
-          body.rewardText || 'Beneficio al completar tus 10 sellos'
-        )
+        const rewardText = (body.rewardText || 'Beneficio al completar tus 10 sellos')
           .trim()
           .slice(0, 80);
         const rewardValueArs = Math.max(0, Number(body.rewardValueArs || 0));
 
         if (env.DB) {
-          try {
-            await env.DB
-              .prepare(
-                `INSERT INTO hub_configs (
-                   tenant_id, business_name, logo_url, brand_color, color_preset, custom_color,
-                   stamps_required, reward_text, loyalty_reward, loyalty_title, reward_value_ars, updated_at
-                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
-                 ON CONFLICT(tenant_id) DO UPDATE SET
-                   business_name = excluded.business_name,
-                   logo_url = COALESCE(excluded.logo_url, hub_configs.logo_url),
-                   brand_color = excluded.brand_color,
-                   color_preset = excluded.color_preset,
-                   custom_color = excluded.custom_color,
-                   stamps_required = 10,
-                   reward_text = excluded.reward_text,
-                   loyalty_reward = excluded.loyalty_reward,
-                   loyalty_title = excluded.loyalty_title,
-                   reward_value_ars = excluded.reward_value_ars,
-                   updated_at = datetime('now')`
-              )
-              .bind(
-                tenantId,
-                businessName,
-                logoUrl,
-                brandColor,
-                colorPreset,
-                brandColor,
-                stampsRequired,
-                rewardText,
-                rewardText,
-                `Tarjeta de sellos de ${businessName}`,
-                rewardValueArs
-              )
-              .run();
+          await env.DB
+            .prepare(
+              `INSERT INTO hub_configs (
+                 tenant_id, business_name, logo_url, brand_color, color_preset, custom_color,
+                 stamps_required, reward_text, loyalty_reward, loyalty_title, reward_value_ars, updated_at
+               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+               ON CONFLICT(tenant_id) DO UPDATE SET
+                 business_name = excluded.business_name,
+                 logo_url = COALESCE(excluded.logo_url, hub_configs.logo_url),
+                 brand_color = excluded.brand_color,
+                 color_preset = excluded.color_preset,
+                 custom_color = excluded.custom_color,
+                 stamps_required = 10,
+                 reward_text = excluded.reward_text,
+                 loyalty_reward = excluded.loyalty_reward,
+                 loyalty_title = excluded.loyalty_title,
+                 reward_value_ars = excluded.reward_value_ars,
+                 updated_at = datetime('now')`
+            )
+            .bind(
+              tenantId,
+              businessName,
+              logoUrl,
+              brandColor,
+              colorPreset,
+              brandColor,
+              stampsRequired,
+              rewardText,
+              rewardText,
+              `Tarjeta de sellos de ${businessName}`,
+              rewardValueArs
+            )
+            .run();
 
+          await env.DB
+            .prepare(
+              `INSERT INTO merchant_cards (
+                 id, tenant_id, business_name, stamps_required, reward_text, reward_value_ars,
+                 brand_color, color_preset, logo_url, created_at, updated_at
+               ) VALUES (?, ?, ?, 10, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+               ON CONFLICT(id) DO UPDATE SET
+                 business_name = excluded.business_name,
+                 stamps_required = 10,
+                 reward_text = excluded.reward_text,
+                 reward_value_ars = excluded.reward_value_ars,
+                 brand_color = excluded.brand_color,
+                 color_preset = excluded.color_preset,
+                 logo_url = COALESCE(excluded.logo_url, merchant_cards.logo_url),
+                 updated_at = datetime('now')`
+            )
+            .bind(
+              `card-${tenantId}`,
+              tenantId,
+              businessName,
+              rewardText,
+              rewardValueArs,
+              brandColor,
+              colorPreset,
+              logoUrl
+            )
+            .run()
+            .catch(() => {});
+
+          if (typeof body.storeLat === 'number' && typeof body.storeLng === 'number') {
             await env.DB
-              .prepare(
-                `INSERT INTO merchant_cards (
-                   id, tenant_id, business_name, stamps_required, reward_text, reward_value_ars,
-                   brand_color, color_preset, logo_url, created_at, updated_at
-                 ) VALUES (?, ?, ?, 10, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
-                 ON CONFLICT(id) DO UPDATE SET
-                   business_name = excluded.business_name,
-                   stamps_required = 10,
-                   reward_text = excluded.reward_text,
-                   reward_value_ars = excluded.reward_value_ars,
-                   brand_color = excluded.brand_color,
-                   color_preset = excluded.color_preset,
-                   logo_url = COALESCE(excluded.logo_url, merchant_cards.logo_url),
-                   updated_at = datetime('now')`
-              )
-              .bind(
-                `card-${tenantId}`,
-                tenantId,
-                businessName,
-                rewardText,
-                rewardValueArs,
-                brandColor,
-                colorPreset,
-                logoUrl
-              )
+              .prepare('UPDATE hub_configs SET store_lat = ?, store_lng = ? WHERE tenant_id = ?')
+              .bind(body.storeLat, body.storeLng, tenantId)
               .run()
               .catch(() => {});
-
-            if (typeof body.storeLat === 'number' && typeof body.storeLng === 'number') {
-              await env.DB
-                .prepare('UPDATE hub_configs SET store_lat = ?, store_lng = ? WHERE tenant_id = ?')
-                .bind(body.storeLat, body.storeLng, tenantId)
-                .run()
-                .catch(() => {});
-            }
-
-            await env.DB
-              .prepare('UPDATE tenants SET name = ? WHERE id = ?')
-              .bind(businessName, tenantId)
-              .run()
-              .catch(() => {});
-
-            await env.DB
-              .prepare('UPDATE loyalty_members SET stamps_required = 10 WHERE tenant_id = ?')
-              .bind(tenantId)
-              .run()
-              .catch(() => {});
-          } catch {
-            // ignore D1 error
           }
+
+          await env.DB
+            .prepare('UPDATE tenants SET name = ? WHERE id = ?')
+            .bind(businessName, tenantId)
+            .run()
+            .catch(() => {});
+
+          await env.DB
+            .prepare('UPDATE loyalty_members SET stamps_required = 10 WHERE tenant_id = ?')
+            .bind(tenantId)
+            .run()
+            .catch(() => {});
 
           if (ctx && env.WALLETWALLET_API_KEY) {
             ctx.waitUntil(
@@ -1792,18 +1757,15 @@ export default {
             rewardValueArs,
           },
         });
-      } catch (err: any) {
+      } catch {
         return jsonResponse(
-          {
-            success: false,
-            error: err?.message || 'No se pudo guardar la configuración del comercio.',
-          },
+          { success: false, error: 'No se pudo guardar la configuración del comercio.' },
           400
         );
       }
     }
 
-    // 9b. Lectura pública en tiempo real sin caché: GET /api/public/hub/:code
+    // 10b. Lectura pública en tiempo real: GET /api/public/hub/:code
     if (pathname.startsWith('/api/public/hub/') && request.method === 'GET') {
       const subPath = pathname.replace('/api/public/hub/', '').trim();
       if (subPath && subPath !== 'receipt-check') {
@@ -1820,7 +1782,7 @@ export default {
             {
               found: false,
               deleted: true,
-              error: 'El Hub de Musical Monroe fue eliminado.',
+              error: 'El Hub solicitado no está disponible.',
             },
             404,
             {
@@ -1859,7 +1821,9 @@ export default {
               if (cartelRow.mode === 'direct_review') mode = 'direct_review';
             } else {
               const tenantRow = await env.DB
-                .prepare('SELECT id, name FROM tenants WHERE LOWER(id) = ? OR LOWER(slug) = ? LIMIT 1')
+                .prepare(
+                  'SELECT id, name FROM tenants WHERE LOWER(id) = ? OR LOWER(slug) = ? LIMIT 1'
+                )
                 .bind(codeLower, codeLower)
                 .first<{ id: string; name: string }>()
                 .catch(() => null);
@@ -1890,9 +1854,7 @@ export default {
 
             if (hubRow || cardRow) {
               businessName =
-                cardRow?.business_name ||
-                hubRow?.business_name ||
-                businessName;
+                cardRow?.business_name || hubRow?.business_name || businessName;
               rewardText =
                 cardRow?.reward_text ||
                 hubRow?.reward_text ||
@@ -1946,7 +1908,7 @@ export default {
       }
     }
 
-    // 10. Enrutamiento en el borde: /r/:code
+    // 11. Enrutamiento público en el borde: /r/:code
     if (pathname.startsWith('/r/')) {
       const rawCode = pathname.replace('/r/', '').split('/')[0]?.trim().toUpperCase();
       if (!rawCode) {
@@ -2012,93 +1974,91 @@ export default {
       return Response.redirect(`${url.origin}/u/${rawCode}`, 302);
     }
 
-    // 11. Sumar sello en caja unificado por barcode_token de 8 dígitos:
-    // POST /api/merchant/stamp, /api/club/stamp, /api/club/stamps/self
+    // 12. Sumar sello en caja: exigir sesión de comercio, buscar SOLO en session.tenantId, límite 60/min en KV, siempre +1 sello
     if (
       (pathname === '/api/merchant/stamp' ||
         pathname === '/api/club/stamp' ||
         pathname === '/api/club/stamps/self') &&
       request.method === 'POST'
     ) {
+      const session = await getMerchantSession(request, env);
+      if (!session) {
+        return jsonResponse({ error: 'Iniciá sesión.' }, 401);
+      }
+      const tenantId = session.tenantId;
+
+      if (env.KV) {
+        const minuteBucket = Math.floor(Date.now() / 60000);
+        const rlKey = `rl:stamp:${session.userId}:${minuteBucket}`;
+        const count = Number((await env.KV.get(rlKey, 'text')) || '0');
+        if (count >= 60) {
+          return jsonResponse(
+            { error: 'Superaste el límite de 60 consultas por minuto.' },
+            429
+          );
+        }
+        await env.KV.put(rlKey, String(count + 1), { expirationTtl: 60 });
+      }
+
+      if (!env.DB) {
+        return jsonResponse({ error: 'Base de datos no disponible.' }, 503);
+      }
+
       try {
-        const body = (await request.json()) as {
+        const body = (await request.json().catch(() => ({}))) as {
           memberId?: string;
           barcodeToken?: string;
           shortCode?: string;
           code?: string;
-          tenantId?: string;
-          businessId?: string;
-          localCode?: string;
-          businessName?: string;
-          memberName?: string;
-          stamps?: number;
-          stampsRequired?: number;
-          rewardText?: string;
-          colorPreset?: ColorPreset;
-          color?: string;
-          logoURL?: string;
-          walletSerial?: string;
-          walletLastNotification?: string;
-          lastStampedAt?: string | null;
         };
 
-        const tenantId = (body.tenantId || body.businessId || 'musical-monroe').trim();
-        const memberId = (body.memberId || '').trim();
+        const memberId = String(body.memberId || '').trim();
         const rawCode = String(body.barcodeToken || body.shortCode || body.code || '').trim();
         const normalizedLookupCode = rawCode.replace(/[\s-]/g, '').toUpperCase();
 
-        let memberRow: D1LoyaltyMemberRow | null = null;
-        let hubRow: D1HubConfigRow | null = null;
-
-        if (env.DB && (normalizedLookupCode || memberId)) {
-          try {
-            // Consulta exacta por barcode_token de 8 dígitos sin espacios ni guiones
-            if (normalizedLookupCode) {
-              memberRow = await env.DB
-                .prepare(
-                  `SELECT * FROM loyalty_members
-                   WHERE tenant_id = ?
-                     AND REPLACE(REPLACE(TRIM(barcode_token), ' ', ''), '-', '') = ?
-                   LIMIT 1`
-                )
-                .bind(tenantId, normalizedLookupCode)
-                .first<D1LoyaltyMemberRow>();
-
-              // Fallback en caso de que el comercio tenga otro tenant_id asociado al cartel
-              if (!memberRow) {
-                memberRow = await env.DB
-                  .prepare(
-                    `SELECT * FROM loyalty_members
-                     WHERE REPLACE(REPLACE(TRIM(barcode_token), ' ', ''), '-', '') = ?
-                     LIMIT 1`
-                  )
-                  .bind(normalizedLookupCode)
-                  .first<D1LoyaltyMemberRow>();
-              }
-            }
-
-            if (!memberRow && memberId) {
-              memberRow = await env.DB
-                .prepare('SELECT * FROM loyalty_members WHERE id = ? LIMIT 1')
-                .bind(memberId)
-                .first<D1LoyaltyMemberRow>();
-            }
-
-            hubRow = await env.DB
-              .prepare(
-                `SELECT tenant_id, business_name, loyalty_title, loyalty_reward, reward_text,
-                        stamps_required, reward_value_ars, brand_color, color_preset, custom_color, logo_url
-                 FROM hub_configs
-                 WHERE tenant_id = ? LIMIT 1`
-              )
-              .bind(memberRow?.tenant_id || tenantId)
-              .first<D1HubConfigRow>();
-          } catch {
-            memberRow = null;
-          }
+        if (!normalizedLookupCode && !memberId) {
+          return jsonResponse({ error: 'Ingresá el código de la tarjeta del socio.' }, 400);
         }
 
-        const lastStampedAt = memberRow?.last_stamped_at ?? body.lastStampedAt ?? null;
+        let memberRow: D1LoyaltyMemberRow | null = null;
+
+        if (normalizedLookupCode) {
+          memberRow = await env.DB
+            .prepare(
+              `SELECT * FROM loyalty_members
+               WHERE tenant_id = ?
+                 AND REPLACE(REPLACE(TRIM(barcode_token), ' ', ''), '-', '') = ?
+               LIMIT 1`
+            )
+            .bind(tenantId, normalizedLookupCode)
+            .first<D1LoyaltyMemberRow>();
+        }
+
+        if (!memberRow && memberId) {
+          memberRow = await env.DB
+            .prepare('SELECT * FROM loyalty_members WHERE tenant_id = ? AND id = ? LIMIT 1')
+            .bind(tenantId, memberId)
+            .first<D1LoyaltyMemberRow>();
+        }
+
+        if (!memberRow) {
+          return jsonResponse(
+            { error: 'No encontramos esa tarjeta en tu comercio.' },
+            404
+          );
+        }
+
+        const hubRow = await env.DB
+          .prepare(
+            `SELECT tenant_id, business_name, loyalty_title, loyalty_reward, reward_text,
+                    stamps_required, reward_value_ars, brand_color, color_preset, custom_color, logo_url
+             FROM hub_configs
+             WHERE tenant_id = ? LIMIT 1`
+          )
+          .bind(tenantId)
+          .first<D1HubConfigRow>();
+
+        const lastStampedAt = memberRow.last_stamped_at ?? null;
         if (lastStampedAt) {
           const lastMs = new Date(lastStampedAt).getTime();
           if (!Number.isNaN(lastMs)) {
@@ -2108,14 +2068,14 @@ export default {
               const hours = Math.floor(remainingMs / 3600000);
               const minutes = Math.max(1, Math.ceil((remainingMs % 3600000) / 60000));
               const customerDisplay = formatShortCustomerName(
-                memberRow?.customer_name || memberRow?.name || body.memberName
+                memberRow.customer_name || memberRow.name
               );
               return jsonResponse({
                 status: 'cooldown',
                 cooldown: true,
                 customerName: customerDisplay,
-                stamps: memberRow?.stamps ?? body.stamps ?? 1,
-                stampsRequired: hubRow?.stamps_required ?? body.stampsRequired ?? 10,
+                stamps: Number(memberRow.stamps || 0),
+                stampsRequired: Number(hubRow?.stamps_required || memberRow.stamps_required || 10),
                 remainingMs,
                 remainingHours: hours,
                 remainingMinutes: minutes,
@@ -2127,30 +2087,23 @@ export default {
 
         const nowMs = Date.now();
         const nowIso = new Date(nowMs).toISOString();
-        const nextStamps = (memberRow?.stamps ?? body.stamps ?? 0) + 1;
-        const stampsRequired = hubRow?.stamps_required ?? body.stampsRequired ?? 10;
+        // Siempre +1 sello decidido por el servidor
+        const nextStamps = Number(memberRow.stamps || 0) + 1;
+        const stampsRequired = Number(hubRow?.stamps_required || memberRow.stamps_required || 10);
         const businessName =
-          hubRow?.business_name ||
-          hubRow?.loyalty_title ||
-          body.businessName ||
-          'Musical Monroe';
+          hubRow?.business_name || hubRow?.loyalty_title || 'Comercio adherido';
         const rewardText =
-          hubRow?.reward_text ||
-          hubRow?.loyalty_reward ||
-          body.rewardText ||
-          'Premio al completar tus sellos';
+          hubRow?.reward_text || hubRow?.loyalty_reward || 'Premio al completar tus sellos';
         const validPresets: ColorPreset[] = ['dark', 'blue', 'green', 'red', 'purple', 'orange'];
-        const rawPreset = (hubRow?.color_preset || body.colorPreset || 'dark') as ColorPreset;
+        const rawPreset = (hubRow?.color_preset || 'dark') as ColorPreset;
         const colorPreset: ColorPreset = validPresets.includes(rawPreset) ? rawPreset : 'dark';
         const finalBarcodeToken =
-          normalize8DigitToken(memberRow?.barcode_token) ||
-          normalize8DigitToken(normalizedLookupCode) ||
+          normalize8DigitToken(memberRow.barcode_token) ||
           (await generateUnique8DigitBarcode(env.DB));
-        const walletSerial = memberRow?.wallet_serial || body.walletSerial || '';
-        const lastNotification =
-          memberRow?.wallet_last_notification ?? body.walletLastNotification ?? ' ';
+        const walletSerial = memberRow.wallet_serial || '';
+        const lastNotification = memberRow.wallet_last_notification ?? ' ';
         const customerName = formatShortCustomerName(
-          memberRow?.customer_name || memberRow?.name || body.memberName
+          memberRow.customer_name || memberRow.name
         );
 
         let walletSyncError: string | null = null;
@@ -2160,8 +2113,7 @@ export default {
           try {
             const card: CardInput = {
               businessName,
-              memberName:
-                memberRow?.customer_name || memberRow?.name || body.memberName || undefined,
+              memberName: memberRow.customer_name || memberRow.name || undefined,
               stamps: nextStamps,
               stampsRequired,
               rewardText,
@@ -2175,46 +2127,38 @@ export default {
             walletSyncError =
               err instanceof WalletError
                 ? err.message
-                : err?.message || 'No se pudo actualizar la tarjeta en tu billetera.';
+                : 'No se pudo actualizar la tarjeta en la billetera.';
           }
         }
 
-        if (env.DB) {
-          try {
-            if (memberRow) {
-              await env.DB
-                .prepare(
-                  `UPDATE loyalty_members
-                   SET stamps = ?, points = ?, last_stamped_at = ?, barcode_token = ?, wallet_sync_error = ?
-                   WHERE id = ?`
-                )
-                .bind(
-                  nextStamps,
-                  nextStamps,
-                  nowIso,
-                  finalBarcodeToken,
-                  walletSyncError,
-                  memberRow.id
-                )
-                .run();
-            }
+        await env.DB
+          .prepare(
+            `UPDATE loyalty_members
+             SET stamps = ?, points = ?, last_stamped_at = ?, barcode_token = ?, wallet_sync_error = ?
+             WHERE id = ? AND tenant_id = ?`
+          )
+          .bind(
+            nextStamps,
+            nextStamps,
+            nowIso,
+            finalBarcodeToken,
+            walletSyncError,
+            memberRow.id,
+            tenantId
+          )
+          .run();
 
-            // Registrar en hub_configs el último cliente sellado en caja para asignar comprobantes dentro de los 2 minutos
-            const stampedConsumerId = memberRow?.consumer_id || memberRow?.id || null;
-            if (stampedConsumerId) {
-              await env.DB
-                .prepare(
-                  `UPDATE hub_configs
-                   SET last_stamped_consumer_id = ?, last_stamped_at_ms = ?
-                   WHERE tenant_id = ?`
-                )
-                .bind(stampedConsumerId, nowMs, memberRow?.tenant_id || tenantId)
-                .run()
-                .catch(() => {});
-            }
-          } catch {
-            // ignore D1 error
-          }
+        const stampedConsumerId = memberRow.consumer_id || memberRow.id || null;
+        if (stampedConsumerId) {
+          await env.DB
+            .prepare(
+              `UPDATE hub_configs
+               SET last_stamped_consumer_id = ?, last_stamped_at_ms = ?
+               WHERE tenant_id = ?`
+            )
+            .bind(stampedConsumerId, nowMs, tenantId)
+            .run()
+            .catch(() => {});
         }
 
         return jsonResponse({
@@ -2229,24 +2173,21 @@ export default {
           notifiedDevices,
           walletSyncError: walletSyncError || undefined,
         });
-      } catch (err: any) {
-        return jsonResponse(
-          {
-            status: 'error',
-            error: err?.message || 'No se pudo registrar el sello.',
-          },
-          400
-        );
+      } catch {
+        return jsonResponse({ status: 'error', error: 'No se pudo registrar el sello.' }, 400);
       }
     }
 
-    // 12. Comprobantes seguros con QR fijo:
-    // POST /api/merchant/pos-sale (Prioridad 1: sello en últimos 2 min -> asignación directa; Prioridad 2: expires_at = Date.now() + 90000 y claimed_by = NULL)
+    // 13. Comprobantes en Caja: POST /api/merchant/pos-sale (exigir sesión de comercio y usar session.tenantId)
     if (pathname === '/api/merchant/pos-sale' && request.method === 'POST') {
+      const session = await getMerchantSession(request, env);
+      if (!session) {
+        return jsonResponse({ error: 'Iniciá sesión.' }, 401);
+      }
+      const tenantId = session.tenantId;
+
       try {
-        const body = (await request.json()) as {
-          tenantId?: string;
-          businessId?: string;
+        const body = (await request.json().catch(() => ({}))) as {
           localCode?: string;
           merchantName?: string;
           amountArs?: number;
@@ -2261,115 +2202,111 @@ export default {
           storeLng?: number;
         };
 
-        const tenantId = String(body.tenantId || body.businessId || 'musical-monroe').trim();
-        const localCode = String(body.localCode || 'MONROE01').trim().toUpperCase();
-        const merchantName = String(body.merchantName || 'Comercio').trim();
+        const localCode = String(body.localCode || 'LOCAL01').trim().toUpperCase();
+        let merchantName = String(body.merchantName || 'Comercio').trim();
         const amountArs = Math.max(0, Number(body.amountArs || 0));
         const discountSavedArs = Math.max(0, Number(body.discountSavedArs || 0));
         const paymentMethod = String(body.paymentMethod || 'efectivo').trim();
         const cashReceivedArs =
           typeof body.cashReceivedArs === 'number' ? body.cashReceivedArs : null;
         const changeArs = typeof body.changeArs === 'number' ? body.changeArs : null;
-        const itemsJson = Array.isArray(body.items) && body.items.length > 0
-          ? JSON.stringify(body.items)
-          : null;
+        const itemsJson =
+          Array.isArray(body.items) && body.items.length > 0
+            ? JSON.stringify(body.items)
+            : null;
         const note = String(body.note || '').trim() || null;
 
         const nowMs = Date.now();
         const nowIso = new Date(nowMs).toISOString();
         const receiptId = `rcp-${nowMs.toString(36)}-${crypto.randomUUID().slice(0, 6)}`;
-        const expiresAtMs = nowMs + RECEIPT_CLAIM_WINDOW_MS; // 90 segundos
+        const expiresAtMs = nowMs + RECEIPT_CLAIM_WINDOW_MS;
 
-        let assignedConsumerId: string | null = body.consumerId ? String(body.consumerId).trim() : null;
+        let assignedConsumerId: string | null = null;
         let storeLat: number | null = typeof body.storeLat === 'number' ? body.storeLat : null;
         let storeLng: number | null = typeof body.storeLng === 'number' ? body.storeLng : null;
 
         if (env.DB) {
-          try {
-            const hubRow = await env.DB
-              .prepare(
-                `SELECT last_stamped_consumer_id, last_stamped_at_ms, store_lat, store_lng
-                 FROM hub_configs
-                 WHERE tenant_id = ? LIMIT 1`
-              )
-              .bind(tenantId)
-              .first<D1HubConfigRow>();
+          const hubRow = await env.DB
+            .prepare(
+              `SELECT business_name, last_stamped_consumer_id, last_stamped_at_ms, store_lat, store_lng
+               FROM hub_configs
+               WHERE tenant_id = ? LIMIT 1`
+            )
+            .bind(tenantId)
+            .first<D1HubConfigRow>();
 
-            if (storeLat === null && typeof hubRow?.store_lat === 'number') {
-              storeLat = hubRow.store_lat;
-            }
-            if (storeLng === null && typeof hubRow?.store_lng === 'number') {
-              storeLng = hubRow.store_lng;
-            }
+          if (hubRow?.business_name) {
+            merchantName = hubRow.business_name;
+          }
+          if (storeLat === null && typeof hubRow?.store_lat === 'number') {
+            storeLat = hubRow.store_lat;
+          }
+          if (storeLng === null && typeof hubRow?.store_lng === 'number') {
+            storeLng = hubRow.store_lng;
+          }
 
-            // Prioridad 1 (Asignación directa): si se sumó un sello en los últimos 2 minutos (120000 ms), vincular automáticamente
-            if (
-              !assignedConsumerId &&
-              hubRow?.last_stamped_consumer_id &&
-              typeof hubRow.last_stamped_at_ms === 'number' &&
-              nowMs - hubRow.last_stamped_at_ms <= RECENT_STAMP_WINDOW_MS
-            ) {
-              assignedConsumerId = hubRow.last_stamped_consumer_id;
-              // Limpiar el puntero para que no se asigne un segundo cobro distinto sin nuevo sello
-              await env.DB
-                .prepare(
-                  'UPDATE hub_configs SET last_stamped_consumer_id = NULL, last_stamped_at_ms = NULL WHERE tenant_id = ?'
-                )
-                .bind(tenantId)
-                .run()
-                .catch(() => {});
-            }
-
+          if (
+            hubRow?.last_stamped_consumer_id &&
+            typeof hubRow.last_stamped_at_ms === 'number' &&
+            nowMs - hubRow.last_stamped_at_ms <= RECENT_STAMP_WINDOW_MS
+          ) {
+            assignedConsumerId = hubRow.last_stamped_consumer_id;
             await env.DB
               .prepare(
-                `INSERT INTO pos_receipts (
-                   id, tenant_id, local_code, merchant_name, amount_ars, discount_saved_ars,
-                   payment_method, cash_received_ars, change_ars, items_json, note,
-                   claimed_by, expires_at_ms, store_lat, store_lng, created_at
-                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+                'UPDATE hub_configs SET last_stamped_consumer_id = NULL, last_stamped_at_ms = NULL WHERE tenant_id = ?'
+              )
+              .bind(tenantId)
+              .run()
+              .catch(() => {});
+          }
+
+          await env.DB
+            .prepare(
+              `INSERT INTO pos_receipts (
+                 id, tenant_id, local_code, merchant_name, amount_ars, discount_saved_ars,
+                 payment_method, cash_received_ars, change_ars, items_json, note,
+                 claimed_by, expires_at_ms, store_lat, store_lng, created_at
+               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+            )
+            .bind(
+              receiptId,
+              tenantId,
+              localCode,
+              merchantName,
+              amountArs,
+              discountSavedArs,
+              paymentMethod,
+              cashReceivedArs,
+              changeArs,
+              itemsJson,
+              note,
+              assignedConsumerId,
+              expiresAtMs,
+              storeLat,
+              storeLng,
+              nowIso
+            )
+            .run();
+
+          if (assignedConsumerId) {
+            await env.DB
+              .prepare(
+                `INSERT OR IGNORE INTO consumer_receipts (
+                   id, consumer_id, tenant_id, merchant_name, amount_ars, discount_saved_ars, category, receipt_note, created_at
+                 ) VALUES (?, ?, ?, ?, ?, ?, 'Comercio', ?, ?)`
               )
               .bind(
                 receiptId,
+                assignedConsumerId,
                 tenantId,
-                localCode,
                 merchantName,
                 amountArs,
                 discountSavedArs,
-                paymentMethod,
-                cashReceivedArs,
-                changeArs,
-                itemsJson,
-                note,
-                assignedConsumerId,
-                expiresAtMs,
-                storeLat,
-                storeLng,
+                note || `Pago con ${paymentMethod}`,
                 nowIso
               )
-              .run();
-
-            if (assignedConsumerId) {
-              await env.DB
-                .prepare(
-                  `INSERT OR IGNORE INTO consumer_receipts (
-                     id, consumer_id, tenant_id, merchant_name, amount_ars, discount_saved_ars, category, receipt_note, created_at
-                   ) VALUES (?, ?, ?, ?, ?, ?, 'Comercio', ?, ?)`
-                )
-                .bind(
-                  receiptId,
-                  assignedConsumerId,
-                  tenantId,
-                  merchantName,
-                  amountArs,
-                  discountSavedArs,
-                  note || `Pago con ${paymentMethod}`,
-                  nowIso
-                )
-                .run()
-                .catch(() => {});
-            }
-          } catch {
-            // continue
+              .run()
+              .catch(() => {});
           }
         }
 
@@ -2393,44 +2330,30 @@ export default {
             createdAt: nowIso,
           },
         });
-      } catch (err: any) {
-        return jsonResponse(
-          { error: err?.message || 'No pudimos emitir el comprobante.' },
-          400
-        );
+      } catch {
+        return jsonResponse({ error: 'No pudimos emitir el comprobante.' }, 400);
       }
     }
 
-    // Reclamo o consulta de comprobante desde el Hub con QR fijo:
-    // POST /api/public/hub/receipt-check
+    // Reclamo o consulta de comprobante desde el Hub: POST /api/public/hub/receipt-check
     if (pathname === '/api/public/hub/receipt-check' && request.method === 'POST') {
       try {
-        const body = (await request.json()) as {
+        const body = (await request.json().catch(() => ({}))) as {
           localCode?: string;
           tenantId?: string;
-          consumerId?: string;
           lat?: number;
           lng?: number;
         };
 
         const localCode = String(body.localCode || '').trim().toUpperCase();
         const tenantId = String(body.tenantId || '').trim();
-        const token = extractSessionToken(request);
-        let consumerId = String(body.consumerId || '').trim();
+        const consumerSession = await getConsumerSession(request, env);
+        const consumerId = consumerSession?.consumerId || '';
         const userLat = typeof body.lat === 'number' ? body.lat : null;
         const userLng = typeof body.lng === 'number' ? body.lng : null;
 
         if (!env.DB) {
           return jsonResponse({ available: false, receipt: null });
-        }
-
-        if (!consumerId && token) {
-          const u = await env.DB
-            .prepare('SELECT id FROM consumer_users WHERE session_token = ? LIMIT 1')
-            .bind(token)
-            .first<{ id: string }>()
-            .catch(() => null);
-          if (u?.id) consumerId = u.id;
         }
 
         const nowMs = Date.now();
@@ -2449,7 +2372,6 @@ export default {
           return jsonResponse({ available: false, receipt: null });
         }
 
-        // a) Ya está asignado a su propio consumer_id
         if (consumerId && candidate.claimed_by === consumerId) {
           return jsonResponse({
             available: true,
@@ -2474,7 +2396,6 @@ export default {
           });
         }
 
-        // b) Fue emitido hace menos de 90 segundos, claimed_by es NULL, y si el comercio tiene coordenadas, la distancia es < 120m
         const isUnclaimed = !candidate.claimed_by;
         const isWithin90s = Number(candidate.expires_at_ms || 0) >= nowMs;
 
@@ -2509,7 +2430,6 @@ export default {
           }
         }
 
-        // Marcar claimed_by inmediatamente para que nunca le aparezca a otra persona
         const claimerKey = consumerId || `anon-${crypto.randomUUID().slice(0, 8)}`;
         await env.DB
           .prepare('UPDATE pos_receipts SET claimed_by = ? WHERE id = ? AND claimed_by IS NULL')
@@ -2544,74 +2464,92 @@ export default {
       }
     }
 
-    // 13. Eliminar cuenta del comercio con borrado en cascada en D1: DELETE /api/merchant/account
+    // 14. Eliminar cuenta del comercio: DELETE /api/merchant/account (solo rol 'owner' y con código de verificación reciente)
     if (pathname === '/api/merchant/account' && request.method === 'DELETE') {
+      const session = await getMerchantSession(request, env);
+      if (!session) {
+        return jsonResponse({ error: 'Iniciá sesión.' }, 401);
+      }
+      if (session.role !== 'owner') {
+        return jsonResponse(
+          { error: 'Solo el titular del comercio puede eliminar la cuenta.' },
+          403
+        );
+      }
+      if (!env.DB || !env.KV) {
+        return jsonResponse({ error: 'Servicio no disponible.' }, 503);
+      }
+
       try {
-        let tenantId = (url.searchParams.get('tenantId') || url.searchParams.get('businessId') || '').trim();
-        if (!tenantId) {
-          const body = await request.json().catch(() => ({} as any));
-          tenantId = String(body?.tenantId || body?.businessId || '').trim();
+        const body = (await request.json().catch(() => ({}))) as { code?: string };
+        const otpCode = String(body.code || url.searchParams.get('code') || '').trim();
+        const emailLower = session.email.toLowerCase();
+
+        let verifiedRecently = false;
+        if (otpCode) {
+          verifiedRecently = await verifyAndConsumeOtp(env, emailLower, otpCode, 'merchant');
+        } else {
+          const recentVerify = await env.KV.get(`verified:merchant:${emailLower}`, 'text');
+          if (recentVerify) {
+            verifiedRecently = true;
+            await env.KV.delete(`verified:merchant:${emailLower}`).catch(() => {});
+          }
         }
 
-        const token = extractSessionToken(request);
-
-        if (env.DB) {
-          if (!tenantId && token) {
-            const userRow = await env.DB
-              .prepare('SELECT tenant_id FROM users WHERE session_token = ? LIMIT 1')
-              .bind(token)
-              .first<{ tenant_id: string }>()
-              .catch(() => null);
-            if (userRow?.tenant_id) {
-              tenantId = userRow.tenant_id;
-            }
-          }
-
-          if (tenantId) {
-            const tablesWithTenant = [
-              'pos_receipts',
-              'consumer_receipts',
-              'merchant_cards',
-              'cards',
-              'loyalty_members',
-              'hub_configs',
-              'carteles',
-              'short_links',
-              'users',
-            ];
-            for (const table of tablesWithTenant) {
-              await env.DB
-                .prepare(`DELETE FROM ${table} WHERE tenant_id = ?`)
-                .bind(tenantId)
-                .run()
-                .catch(() => {});
-            }
-            await env.DB
-              .prepare('DELETE FROM tenants WHERE id = ?')
-              .bind(tenantId)
-              .run()
-              .catch(() => {});
-          }
-          await cleanOrphanRecordsInD1(env.DB);
+        if (!verifiedRecently) {
+          return jsonResponse(
+            {
+              error:
+                'Pedí un código de verificación nuevo a tu correo e ingresalo para eliminar la cuenta.',
+            },
+            403
+          );
         }
+
+        const tenantId = session.tenantId;
+        const tablesWithTenant = [
+          'pos_receipts',
+          'consumer_receipts',
+          'merchant_cards',
+          'cards',
+          'loyalty_members',
+          'hub_configs',
+          'carteles',
+          'short_links',
+          'users',
+        ];
+        for (const table of tablesWithTenant) {
+          await env.DB
+            .prepare(`DELETE FROM ${table} WHERE tenant_id = ?`)
+            .bind(tenantId)
+            .run()
+            .catch(() => {});
+        }
+        await env.DB
+          .prepare('DELETE FROM tenants WHERE id = ?')
+          .bind(tenantId)
+          .run()
+          .catch(() => {});
 
         return jsonResponse(
-          { success: true, deletedTenantId: tenantId || 'ok' },
+          { success: true, deletedTenantId: tenantId },
           200,
           {
-            'Set-Cookie': 'toque_merchant_session=; Path=/; Max-Age=0; SameSite=Lax',
+            'Set-Cookie': clearMerchantCookie(),
           }
         );
-      } catch (err: any) {
-        return jsonResponse(
-          { error: err?.message || 'No se pudo eliminar la cuenta del comercio.' },
-          400
-        );
+      } catch {
+        return jsonResponse({ error: 'No se pudo eliminar la cuenta del comercio.' }, 400);
       }
     }
 
-    // 14. Uso y cuota de WalletWallet (GET /api/wallet/usage)
+    // 15. Uso y cuota de WalletWallet (GET /api/wallet/usage): solo sesión de dueño
     if (pathname === '/api/wallet/usage' && request.method === 'GET') {
+      const session = await getMerchantSession(request, env);
+      if (!session || session.role !== 'owner') {
+        return jsonResponse({ error: 'Iniciá sesión.' }, 401);
+      }
+
       try {
         const usage = await getUsage(env);
         return jsonResponse({ configured: true, ...usage });
@@ -2628,34 +2566,60 @@ export default {
       }
     }
 
-    // 15. Revocar tarjeta en WalletWallet y dar de baja en el comercio (DELETE /api/wallet/pass/:serialNumber)
+    // 16. Revocar tarjeta en WalletWallet: DELETE /api/wallet/pass/:serialNumber (solo dueño de la tarjeta o dueño del comercio)
     if (pathname.startsWith('/api/wallet/pass/') && request.method === 'DELETE') {
+      const consumerSession = await getConsumerSession(request, env);
+      const merchantSession = await getMerchantSession(request, env);
+      if (!consumerSession && !merchantSession) {
+        return jsonResponse({ error: 'Iniciá sesión.' }, 401);
+      }
+      if (!env.DB) {
+        return jsonResponse({ error: 'Base de datos no disponible.' }, 503);
+      }
+
       const serialNumber = decodeURIComponent(
         pathname.replace('/api/wallet/pass/', '').split('/')[0] || ''
       ).trim();
-      const memberId = (url.searchParams.get('memberId') || '').trim();
+
+      if (!serialNumber) {
+        return jsonResponse({ error: 'Indicá la tarjeta a dar de baja.' }, 400);
+      }
+
+      const memberRow = await env.DB
+        .prepare('SELECT * FROM loyalty_members WHERE wallet_serial = ? LIMIT 1')
+        .bind(serialNumber)
+        .first<D1LoyaltyMemberRow>();
+
+      if (!memberRow) {
+        return jsonResponse({ error: 'No encontramos esa tarjeta.' }, 404);
+      }
+
+      const isCardOwner =
+        consumerSession &&
+        (memberRow.consumer_id === consumerSession.consumerId ||
+          String(memberRow.customer_email || '').trim().toLowerCase() ===
+            consumerSession.email.toLowerCase() ||
+          String(memberRow.contact || '').trim().toLowerCase() ===
+            consumerSession.email.toLowerCase());
+
+      const isMerchantOwner =
+        merchantSession &&
+        merchantSession.role === 'owner' &&
+        merchantSession.tenantId === memberRow.tenant_id;
+
+      if (!isCardOwner && !isMerchantOwner) {
+        return jsonResponse({ error: 'No tenés permiso para dar de baja esta tarjeta.' }, 403);
+      }
 
       try {
-        if (serialNumber && env.WALLETWALLET_API_KEY) {
+        if (env.WALLETWALLET_API_KEY) {
           await revokePass(env, serialNumber);
         }
-        if (env.DB) {
-          try {
-            if (memberId) {
-              await env.DB
-                .prepare('DELETE FROM loyalty_members WHERE id = ? OR wallet_serial = ?')
-                .bind(memberId, serialNumber)
-                .run();
-            } else if (serialNumber) {
-              await env.DB
-                .prepare('DELETE FROM loyalty_members WHERE wallet_serial = ?')
-                .bind(serialNumber)
-                .run();
-            }
-          } catch {
-            // ignore D1 error
-          }
-        }
+        await env.DB
+          .prepare('DELETE FROM loyalty_members WHERE id = ?')
+          .bind(memberRow.id)
+          .run();
+
         return jsonResponse({ success: true, revokedSerial: serialNumber });
       } catch (err: any) {
         const status = err instanceof WalletError ? err.status : 400;
@@ -2670,33 +2634,35 @@ export default {
       }
     }
 
-    // 16. Crear o actualizar tarjeta en WalletWallet (POST/PUT /api/wallet/pass o /api/wallet/create)
+    // 17. Emitir o actualizar tarjeta en WalletWallet (POST/PUT /api/wallet/pass o /api/wallet/create):
+    // Exige sesión de cliente o de comercio, valida pertenencia y toma todos los datos de D1 (sin devolver base64 en JSON)
     if (
       (pathname === '/api/wallet/pass' ||
         pathname === '/api/wallet/create' ||
         pathname.startsWith('/api/wallet/pass/')) &&
       (request.method === 'POST' || request.method === 'PUT')
     ) {
+      const consumerSession = await getConsumerSession(request, env);
+      const merchantSession = await getMerchantSession(request, env);
+      if (!consumerSession && !merchantSession) {
+        return jsonResponse({ error: 'Iniciá sesión.' }, 401);
+      }
+      if (!env.DB) {
+        return jsonResponse(
+          { success: false, error: 'La emisión de pases requiere la base de datos configurada.' },
+          503
+        );
+      }
+
+      let targetMemberId = '';
       try {
-        const body = (await request.json()) as {
-          businessName?: string;
-          title?: string;
-          logoText?: string;
-          memberName?: string;
-          customerName?: string;
+        const body = (await request.json().catch(() => ({}))) as {
           memberId?: string;
-          stamps?: number;
-          stampsRequired?: number;
-          rewardText?: string;
-          reward?: string;
           barcodeToken?: string;
           barcodeValue?: string;
-          colorPreset?: ColorPreset;
-          notification?: string;
+          memberCode?: string;
           serialNumber?: string;
           walletSerial?: string;
-          isUpdate?: boolean;
-          locations?: { latitude: number; longitude: number; relevantText?: string }[];
         };
 
         const urlSerial = pathname.startsWith('/api/wallet/pass/')
@@ -2705,74 +2671,140 @@ export default {
         const existingSerial = String(
           urlSerial || body.serialNumber || body.walletSerial || ''
         ).trim();
+        const rawToken = String(
+          body.barcodeToken || body.barcodeValue || body.memberCode || ''
+        ).trim();
+        const memberId = String(body.memberId || '').trim();
 
-        const businessName = String(
-          body.businessName || body.title || body.logoText || 'Mi comercio'
+        const memberRow = await env.DB
+          .prepare(
+            `SELECT * FROM loyalty_members
+             WHERE (id = ? AND ? != '')
+                OR (barcode_token = ? AND ? != '')
+                OR (wallet_serial = ? AND ? != '')
+             LIMIT 1`
+          )
+          .bind(memberId, memberId, rawToken, rawToken, existingSerial, existingSerial)
+          .first<D1LoyaltyMemberRow>();
+
+        if (!memberRow) {
+          return jsonResponse({ success: false, error: 'No encontramos esa tarjeta.' }, 404);
+        }
+        targetMemberId = memberRow.id;
+
+        const isCardOwner =
+          consumerSession &&
+          (memberRow.consumer_id === consumerSession.consumerId ||
+            String(memberRow.customer_email || '').trim().toLowerCase() ===
+              consumerSession.email.toLowerCase() ||
+            String(memberRow.contact || '').trim().toLowerCase() ===
+              consumerSession.email.toLowerCase());
+
+        const isMerchantMember =
+          merchantSession && merchantSession.tenantId === memberRow.tenant_id;
+
+        if (!isCardOwner && !isMerchantMember) {
+          return jsonResponse(
+            { success: false, error: 'No tenés permiso sobre esta tarjeta.' },
+            403
+          );
+        }
+
+        // Contenido de la tarjeta obtenido exclusivamente de la base D1
+        const hubRow = await env.DB
+          .prepare(
+            `SELECT business_name, loyalty_title, reward_text, loyalty_reward, stamps_required, color_preset
+             FROM hub_configs WHERE tenant_id = ? LIMIT 1`
+          )
+          .bind(memberRow.tenant_id)
+          .first<D1HubConfigRow>()
+          .catch(() => null);
+
+        const cardRow = await env.DB
+          .prepare(
+            `SELECT business_name, reward_text, stamps_required, color_preset
+             FROM merchant_cards WHERE tenant_id = ? LIMIT 1`
+          )
+          .bind(memberRow.tenant_id)
+          .first<{
+            business_name?: string;
+            reward_text?: string;
+            stamps_required?: number;
+            color_preset?: string;
+          }>()
+          .catch(() => null);
+
+        const tenantRow = await env.DB
+          .prepare('SELECT name FROM tenants WHERE id = ? LIMIT 1')
+          .bind(memberRow.tenant_id)
+          .first<{ name?: string }>()
+          .catch(() => null);
+
+        const businessName = (
+          cardRow?.business_name ||
+          hubRow?.business_name ||
+          tenantRow?.name ||
+          'Comercio adherido'
         ).slice(0, 64);
-        const memberName = String(body.memberName || body.customerName || '').trim() || undefined;
-        const stamps = typeof body.stamps === 'number' ? body.stamps : 0;
-        const stampsRequired =
-          typeof body.stampsRequired === 'number' ? body.stampsRequired : 10;
-        const rewardText = String(
-          body.rewardText || body.reward || 'Beneficio al completar tus 10 sellos'
+
+        const memberName =
+          (
+            memberRow.customer_name ||
+            memberRow.name ||
+            consumerSession?.fullName ||
+            ''
+          ).trim() || undefined;
+
+        const stamps = Math.max(0, Number(memberRow.stamps || 0));
+        const stampsRequired = Number(
+          cardRow?.stamps_required || hubRow?.stamps_required || memberRow.stamps_required || 10
+        );
+        const rewardText = (
+          cardRow?.reward_text ||
+          hubRow?.reward_text ||
+          hubRow?.loyalty_reward ||
+          'Beneficio al completar tus 10 sellos'
         ).slice(0, 60);
 
         const validPresets: ColorPreset[] = ['dark', 'blue', 'green', 'red', 'purple', 'orange'];
-        const colorPreset: ColorPreset =
-          body.colorPreset && validPresets.includes(body.colorPreset)
-            ? body.colorPreset
-            : 'dark';
+        const rawPreset = (cardRow?.color_preset || hubRow?.color_preset || 'dark') as ColorPreset;
+        const colorPreset: ColorPreset = validPresets.includes(rawPreset) ? rawPreset : 'dark';
 
-        const rawToken = String(body.barcodeToken || body.barcodeValue || '').trim();
-        const memberId = String(body.memberId || '').trim();
-        if (!env.DB) {
-          return jsonResponse({ success: false, error: 'La emisión de pases requiere la base D1 configurada.' }, 503);
-        }
-        const memberRow = await env.DB.prepare(
-          `SELECT id, barcode_token, wallet_download_token, wallet_apple_base64,
-                  wallet_google_url, wallet_serial
-           FROM loyalty_members
-           WHERE (id = ? AND ? != '') OR (barcode_token = ? AND ? != '')
-              OR (wallet_serial = ? AND ? != '')
-           LIMIT 1`
-        ).bind(memberId, memberId, rawToken, rawToken, existingSerial, existingSerial)
-          .first<Pick<D1LoyaltyMemberRow, 'id' | 'barcode_token' | 'wallet_download_token' |
-            'wallet_apple_base64' | 'wallet_google_url' | 'wallet_serial'>>();
-        if (!memberRow) {
-          return jsonResponse({ success: false, error: 'No encontramos al socio en loyalty_members.' }, 404);
-        }
         let barcodeToken = normalize8DigitToken(memberRow.barcode_token);
         if (!barcodeToken) {
           barcodeToken = await generateUnique8DigitBarcode(env.DB);
-          await env.DB.prepare('UPDATE loyalty_members SET barcode_token = ?, member_code = ? WHERE id = ?')
-            .bind(barcodeToken, barcodeToken, memberRow.id).run();
+          await env.DB
+            .prepare('UPDATE loyalty_members SET barcode_token = ?, member_code = ? WHERE id = ?')
+            .bind(barcodeToken, barcodeToken, memberRow.id)
+            .run();
         }
-        const downloadToken = await ensureWalletDownloadToken(env.DB, memberRow.id);
-        const appleWalletUrl = `/api/wallet/apple/${downloadToken}`;
-        const serialToUpdate = existingSerial || String(memberRow.wallet_serial || '').trim();
+
+        const serialToUpdate = String(memberRow.wallet_serial || '').trim();
 
         const card: CardInput = {
-          businessName, memberName, stamps, stampsRequired, rewardText, barcodeToken, colorPreset,
-          notification: typeof body.notification === 'string' ? body.notification : ' ',
-          locations: Array.isArray(body.locations) ? body.locations : undefined,
+          businessName,
+          memberName,
+          stamps,
+          stampsRequired,
+          rewardText,
+          barcodeToken,
+          colorPreset,
+          notification: memberRow.wallet_last_notification ?? ' ',
         };
 
         if (serialToUpdate && !serialToUpdate.startsWith('ww-')) {
           try {
             const upd = await updatePass(env, serialToUpdate, card);
-            const existingRow = await env.DB.prepare(
-              'SELECT wallet_apple_base64, wallet_google_url FROM loyalty_members WHERE id = ? LIMIT 1'
-            ).bind(memberRow.id).first<{ wallet_apple_base64?: string | null; wallet_google_url?: string | null }>();
-            const storedAppleBase64 = existingRow?.wallet_apple_base64 || null;
-            const storedGoogleUrl = existingRow?.wallet_google_url || '';
+            const storedAppleBase64 = memberRow.wallet_apple_base64 || null;
+            const storedGoogleUrl = memberRow.wallet_google_url || '';
             if (storedAppleBase64 && storedGoogleUrl) {
+              const oneTimeAppleUrl = await createOneTimeWalletDownloadUrl(env, memberRow.id);
               return jsonResponse({
                 success: true,
                 configured: true,
-                provider: 'api.walletwallet.dev',
                 passId: serialToUpdate,
                 serialNumber: serialToUpdate,
-                appleWalletUrl: storedAppleBase64 ? appleWalletUrl : undefined,
+                appleWalletUrl: oneTimeAppleUrl,
                 googleSaveUrl: storedGoogleUrl,
                 googleWalletUrl: storedGoogleUrl,
                 unchanged: upd.unchanged,
@@ -2782,30 +2814,41 @@ export default {
               });
             }
           } catch {
-            // Si el pase previo no existía o no tenía archivos, creamos uno nuevo debajo
+            // Si el pase previo no existía en el proveedor, emitimos uno nuevo debajo
           }
         }
 
         const created = await createPass(env, card);
         const googleSaveUrl = created.googleSaveUrl || '';
-        await env.DB.prepare(
-          `UPDATE loyalty_members
-           SET wallet_serial = ?, barcode_token = ?,
-               wallet_apple_base64 = COALESCE(?, wallet_apple_base64),
-               wallet_google_url = COALESCE(?, wallet_google_url),
-               wallet_download_token = ?, wallet_sync_error = NULL
-           WHERE id = ?`
-        ).bind(created.serialNumber, barcodeToken, created.applePass || null,
-          googleSaveUrl || null, downloadToken, memberRow.id).run();
+        await env.DB
+          .prepare(
+            `UPDATE loyalty_members
+             SET wallet_serial = ?, barcode_token = ?,
+                 wallet_apple_base64 = COALESCE(?, wallet_apple_base64),
+                 wallet_google_url = COALESCE(?, wallet_google_url),
+                 wallet_sync_error = NULL
+             WHERE id = ?`
+          )
+          .bind(
+            created.serialNumber,
+            barcodeToken,
+            created.applePass || null,
+            googleSaveUrl || null,
+            memberRow.id
+          )
+          .run();
+
+        const oneTimeAppleUrl = created.applePass
+          ? await createOneTimeWalletDownloadUrl(env, memberRow.id)
+          : undefined;
 
         return jsonResponse({
           success: true,
           configured: true,
-          provider: 'api.walletwallet.dev',
           passId: created.serialNumber,
           serialNumber: created.serialNumber,
           shareUrl: created.shareUrl,
-          appleWalletUrl: created.applePass ? appleWalletUrl : undefined,
+          appleWalletUrl: oneTimeAppleUrl,
           googleSaveUrl,
           googleWalletUrl: googleSaveUrl,
           barcodeValue: barcodeToken,
@@ -2816,23 +2859,14 @@ export default {
         const errorMessage =
           err instanceof WalletError
             ? err.message
-            : err?.message || 'No pudimos guardar la tarjeta en tu billetera.';
+            : 'No pudimos guardar la tarjeta en tu billetera.';
 
-        if (env.DB) {
-          try {
-            const cloneBody = await request
-              .clone()
-              .json()
-              .catch(() => ({} as any));
-            if (cloneBody?.memberId) {
-              await env.DB
-                .prepare('UPDATE loyalty_members SET wallet_sync_error = ? WHERE id = ?')
-                .bind(errorMessage, cloneBody.memberId)
-                .run();
-            }
-          } catch {
-            // ignore
-          }
+        if (env.DB && targetMemberId) {
+          await env.DB
+            .prepare('UPDATE loyalty_members SET wallet_sync_error = ? WHERE id = ?')
+            .bind(errorMessage, targetMemberId)
+            .run()
+            .catch(() => {});
         }
 
         return jsonResponse(
@@ -2846,23 +2880,17 @@ export default {
       }
     }
 
-    // 17. Cuenta del cliente y comprobantes (/api/consumer/sync)
+    // 18. Sincronización de cuenta de cliente (/api/consumer/sync): exige sesión de cliente
     if (pathname === '/api/consumer/sync' && request.method === 'POST') {
+      const consumerSession = await getConsumerSession(request, env);
+      if (!consumerSession) {
+        return jsonResponse({ error: 'Iniciá sesión.' }, 401);
+      }
+
       try {
-        const body = (await request.json()) as {
-          user?: {
-            id?: string;
-            emailOrPhone?: string;
-            displayName?: string;
-            birthDate?: string;
-            ageGroup?: 'teen' | 'adult' | 'all';
-            consentSaveReceipts?: boolean;
-            consentMarketingNetwork?: boolean;
-            createdAt?: string;
-          };
+        const body = (await request.json().catch(() => ({}))) as {
           receipts?: Array<{
             id: string;
-            consumerId?: string;
             tenantId?: string;
             merchantName?: string;
             amountArs?: number;
@@ -2873,146 +2901,106 @@ export default {
           }>;
         };
 
-        const consumerId =
-          body.user?.id ||
-          (typeof crypto !== 'undefined' && crypto.randomUUID
-            ? crypto.randomUUID()
-            : `consumer-${Date.now()}`);
-        const email = (body.user?.emailOrPhone || '').trim().toLowerCase();
-        const fullName = (body.user?.displayName || 'Cliente').trim();
-        const birthDate = body.user?.birthDate || null;
-        const createdAt = body.user?.createdAt || new Date().toISOString();
+        const consumerId = consumerSession.consumerId;
+        const email = consumerSession.email;
+        const fullName = consumerSession.fullName;
+        const birthDate = consumerSession.birthDate;
         const receipts = Array.isArray(body.receipts) ? body.receipts : [];
-        const sessionToken = `${crypto.randomUUID()}${crypto.randomUUID()}`.replace(/-/g, '');
 
         if (env.DB) {
-          try {
-            if (email) {
-              await env.DB
-                .prepare(
-                  `INSERT INTO consumer_users (id, email, full_name, birth_date, session_token, created_at)
-                   VALUES (?, ?, ?, ?, ?, ?)
-                   ON CONFLICT(email) DO UPDATE SET
-                     full_name = excluded.full_name,
-                     birth_date = COALESCE(excluded.birth_date, consumer_users.birth_date),
-                     session_token = COALESCE(consumer_users.session_token, excluded.session_token)`
-                )
-                .bind(consumerId, email, fullName, birthDate, sessionToken, createdAt)
-                .run();
-            }
-
-            for (const r of receipts) {
-              await env.DB
-                .prepare(
-                  `INSERT INTO consumer_receipts (id, consumer_id, tenant_id, merchant_name, amount_ars, discount_saved_ars, category, receipt_note, created_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                   ON CONFLICT(id) DO UPDATE SET
-                     amount_ars = excluded.amount_ars,
-                     discount_saved_ars = excluded.discount_saved_ars,
-                     category = excluded.category,
-                     receipt_note = excluded.receipt_note`
-                )
-                .bind(
-                  r.id,
-                  consumerId,
-                  r.tenantId || 'musical-monroe',
-                  r.merchantName || 'Comercio',
-                  Number(r.amountArs) || 0,
-                  Number(r.discountSavedArs) || 0,
-                  r.category || 'Comercio',
-                  r.receiptNote || 'Comprobante guardado',
-                  r.createdAt || new Date().toISOString()
-                )
-                .run();
-            }
-          } catch {
-            // continue
+          for (const r of receipts) {
+            if (!r?.id) continue;
+            await env.DB
+              .prepare(
+                `INSERT INTO consumer_receipts (id, consumer_id, tenant_id, merchant_name, amount_ars, discount_saved_ars, category, receipt_note, created_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 ON CONFLICT(id) DO NOTHING`
+              )
+              .bind(
+                r.id,
+                consumerId,
+                r.tenantId || 'comercio',
+                r.merchantName || 'Comercio',
+                Number(r.amountArs) || 0,
+                Number(r.discountSavedArs) || 0,
+                r.category || 'Comercio',
+                r.receiptNote || 'Comprobante guardado',
+                r.createdAt || new Date().toISOString()
+              )
+              .run()
+              .catch(() => {});
           }
         }
 
         return jsonResponse({
           success: true,
           consumerId,
-          sessionToken,
-          recoveryCode: `TQ-${consumerId.slice(0, 8).toUpperCase()}`,
           user: {
             id: consumerId,
             emailOrPhone: email,
             displayName: fullName,
             birthDate: birthDate || undefined,
-            ageGroup: body.user?.ageGroup || 'all',
-            consentSaveReceipts: body.user?.consentSaveReceipts !== false,
-            consentMarketingNetwork: body.user?.consentMarketingNetwork !== false,
-            createdAt,
+            ageGroup: 'all',
+            consentSaveReceipts: true,
+            consentMarketingNetwork: false,
+            createdAt: consumerSession.createdAt,
             syncedAt: new Date().toISOString(),
           },
           receiptsCount: receipts.length,
         });
-      } catch (err: any) {
+      } catch {
         return jsonResponse(
-          {
-            success: false,
-            error: err?.message || 'No pudimos guardar tus datos en tu cuenta.',
-          },
+          { success: false, error: 'No pudimos guardar tus datos en tu cuenta.' },
           400
         );
       }
     }
 
     if (pathname === '/api/consumer/sync' && request.method === 'GET') {
-      const contact = (url.searchParams.get('contact') || '').trim().toLowerCase();
-      if (!contact) {
-        return jsonResponse({ found: false });
+      const consumerSession = await getConsumerSession(request, env);
+      if (!consumerSession || !env.DB) {
+        return jsonResponse({ error: 'Iniciá sesión.' }, 401);
       }
 
-      if (env.DB) {
-        try {
-          const userRow = await env.DB
-            .prepare(
-              'SELECT id, email, full_name, birth_date, created_at FROM consumer_users WHERE LOWER(email) = ? OR id = ? LIMIT 1'
-            )
-            .bind(contact, contact)
-            .first<any>();
+      try {
+        const receiptsRes = await env.DB
+          .prepare(
+            'SELECT id, consumer_id, tenant_id, merchant_name, amount_ars, discount_saved_ars, category, receipt_note, created_at FROM consumer_receipts WHERE consumer_id = ? ORDER BY created_at DESC'
+          )
+          .bind(consumerSession.consumerId)
+          .all<any>();
 
-          if (userRow) {
-            const receiptsRes = await env.DB
-              .prepare(
-                'SELECT id, consumer_id, tenant_id, merchant_name, amount_ars, discount_saved_ars, category, receipt_note, created_at FROM consumer_receipts WHERE consumer_id = ? ORDER BY created_at DESC'
-              )
-              .bind(userRow.id)
-              .all<any>();
-
-            return jsonResponse({
-              found: true,
-              user: {
-                id: userRow.id,
-                emailOrPhone: userRow.email,
-                displayName: userRow.full_name,
-                birthDate: userRow.birth_date || undefined,
-                ageGroup: 'all',
-                consentSaveReceipts: true,
-                consentMarketingNetwork: false,
-                createdAt: userRow.created_at,
-              },
-              receipts: (receiptsRes.results || []).map((r: any) => ({
-                id: r.id,
-                consumerId: r.consumer_id,
-                tenantId: r.tenant_id,
-                merchantName: r.merchant_name,
-                amountArs: Number(r.amount_ars) || 0,
-                discountSavedArs: Number(r.discount_saved_ars) || 0,
-                category: r.category || 'Comercio',
-                receiptNote: r.receipt_note || '',
-                createdAt: r.created_at,
-              })),
-            });
-          }
-        } catch {
-          // fallback
-        }
+        return jsonResponse({
+          found: true,
+          user: {
+            id: consumerSession.consumerId,
+            emailOrPhone: consumerSession.email,
+            displayName: consumerSession.fullName,
+            birthDate: consumerSession.birthDate || undefined,
+            ageGroup: 'all',
+            consentSaveReceipts: true,
+            consentMarketingNetwork: false,
+            createdAt: consumerSession.createdAt,
+          },
+          receipts: (receiptsRes.results || []).map((r: any) => ({
+            id: r.id,
+            consumerId: r.consumer_id,
+            tenantId: r.tenant_id,
+            merchantName: r.merchant_name,
+            amountArs: Number(r.amount_ars) || 0,
+            discountSavedArs: Number(r.discount_saved_ars) || 0,
+            category: r.category || 'Comercio',
+            receiptNote: r.receipt_note || '',
+            createdAt: r.created_at,
+          })),
+        });
+      } catch {
+        return jsonResponse({ found: false }, 500);
       }
+    }
 
-      return jsonResponse({ found: false });
+    if (pathname.startsWith('/api/')) {
+      return jsonResponse({ error: 'Ruta no encontrada.' }, 404);
     }
 
     return env.ASSETS.fetch(request);

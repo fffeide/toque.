@@ -141,18 +141,12 @@ export function clearConsumerSession(): void {
 export async function fetchConsumerMe(): Promise<ConsumerMeResponse> {
   const token = getConsumerSessionToken();
   const savedUser = getSavedConsumerUser();
-  if (!token) {
-    return { authenticated: false, user: null, cards: [], receipts: [] };
-  }
   try {
     const res = await fetch('/api/consumer/me', {
       method: 'GET',
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
+      credentials: 'include',
     });
     if (res.status === 401) {
-      // Si tenemos sesión local válida en el entorno de vista previa, mantenerla salvo que no exista usuario local
       if (savedUser) {
         return {
           authenticated: true,
@@ -166,7 +160,7 @@ export async function fetchConsumerMe(): Promise<ConsumerMeResponse> {
     if (res.ok) {
       const data = await res.json();
       if (data && data.authenticated && data.user) {
-        saveConsumerSession(token, data.user.email, data.user);
+        saveConsumerSession(token || `sess-${data.user.id}`, data.user.email, data.user);
         return {
           authenticated: true,
           user: data.user,

@@ -7,6 +7,7 @@ import { UserRole, PlanState } from '../../api/types';
 import { TOQUE_PLANS, formatArs } from '../../config/pricing';
 import { BrandLogo } from '../ui/Avatar';
 import { useToast } from '../ui/Toast';
+import { useFeature } from '../../lib/features';
 import {
   LayoutDashboard,
   CreditCard,
@@ -26,6 +27,7 @@ import {
   QrCode,
   AlertTriangle,
   CheckCircle2,
+  UtensilsCrossed,
 } from 'lucide-react';
 
 interface NavItem {
@@ -34,6 +36,7 @@ interface NavItem {
   icon: React.FC<{ className?: string }>;
   roles: UserRole[];
   proFeature?: boolean;
+  feature?: 'menu' | 'club' | 'stats';
 }
 
 // Pestañas del Panel con "Escanear" como pestaña central accesible para cajero, encargado y dueño
@@ -62,6 +65,13 @@ const ALL_NAV_ITEMS: NavItem[] = [
     label: 'Escanear',
     icon: QrCode,
     roles: ['owner', 'manager', 'cashier', 'superadmin'],
+  },
+  {
+    to: '/panel/carta',
+    label: 'Carta',
+    icon: UtensilsCrossed,
+    roles: ['owner', 'manager', 'cashier', 'superadmin'],
+    feature: 'menu',
   },
   {
     to: '/panel/hub',
@@ -125,8 +135,17 @@ export const PanelLayout: React.FC = () => {
 
   const currentRole: UserRole = isVerifiedSuperAdmin ? 'superadmin' : user?.role || 'owner';
   const isFreePlan = planState?.status === 'free' || planState?.planId === 'free';
+  const hasMenuFeature = useFeature('menu');
+  const hasClubFeature = useFeature('club');
+  const hasStatsFeature = useFeature('stats');
 
-  const visibleNavItems = ALL_NAV_ITEMS.filter((item) => item.roles.includes(currentRole));
+  const visibleNavItems = ALL_NAV_ITEMS.filter((item) => {
+    if (!item.roles.includes(currentRole)) return false;
+    if (item.feature === 'menu' && !hasMenuFeature) return false;
+    if (item.feature === 'club' && !hasClubFeature) return false;
+    if (item.feature === 'stats' && !hasStatsFeature) return false;
+    return true;
+  });
 
   const handleLogout = async () => {
     await logout();

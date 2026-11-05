@@ -1,7 +1,16 @@
 import React from 'react';
 import { Barcode128 } from '../Barcode128';
-import { ColorPreset, COLOR_PRESET_HEX } from '../../lib/walletwalletClient';
-export type { ColorPreset };
+
+export type ColorPreset = 'dark' | 'blue' | 'green' | 'red' | 'purple' | 'orange';
+
+export const COLOR_PRESET_HEX: Record<ColorPreset, string> = {
+  dark: '#141414',
+  blue: '#1E3A8A',
+  green: '#14532D',
+  red: '#7F1D1D',
+  purple: '#4C1D95',
+  orange: '#D95B26',
+};
 
 export interface WalletPassCardProps {
   businessName: string;

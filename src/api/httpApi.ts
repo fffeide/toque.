@@ -44,6 +44,14 @@ import {
   NetworkActivationFormat,
   ConsumerUser,
   ConsumerReceipt,
+  TenantFeaturesRecord,
+  MenuCategory,
+  MenuItem,
+  RestaurantTable,
+  OrderSlip,
+  OrderStatus,
+  MenuBranding,
+  PublicMenuData,
 } from './types';
 
 interface ApiErrorResponse {
@@ -863,16 +871,18 @@ class HttpApi implements ToqueApi {
     });
   }
 
-  async deleteAccount(): Promise<{ deleted: boolean }> {
-    return this.request('/account', {
+  async deleteAccount(code?: string): Promise<{ deleted: boolean }> {
+    return this.request('/merchant/account', {
       method: 'DELETE',
+      body: JSON.stringify({ code }),
     });
   }
 
   async cleanOrphanData(): Promise<{ cleaned: boolean; message: string }> {
-    return this.request('/debug/clean-orphans', {
-      method: 'POST',
-    });
+    return {
+      cleaned: true,
+      message: 'Cuenta sincronizada.',
+    };
   }
 
   async getSuperAdminSummary(): Promise<SuperAdminSummary> {
@@ -906,6 +916,145 @@ class HttpApi implements ToqueApi {
   async removeToqueAdmin(idOrEmail: string): Promise<void> {
     await this.request(`/admin/toque-team/${encodeURIComponent(idOrEmail)}`, {
       method: 'DELETE',
+    });
+  }
+
+  // ==========================================
+  // Toque Carta — Funciones por comercio y flags
+  // ==========================================
+  async getFeatures(): Promise<Record<string, boolean>> {
+    return this.request('/features');
+  }
+
+  async listTenantsFeatures(): Promise<TenantFeaturesRecord[]> {
+    return this.request('/admin/tenant-features');
+  }
+
+  async setTenantFeature(tenantId: string, key: string, enabled: boolean): Promise<void> {
+    await this.request('/admin/tenant-features', {
+      method: 'POST',
+      body: JSON.stringify({ tenantId, key, enabled }),
+    });
+  }
+
+  // Toque Carta — Gestión de Carta
+  async listMenu(): Promise<{ categories: MenuCategory[]; items: MenuItem[]; branding?: MenuBranding }> {
+    return this.request('/menu');
+  }
+
+  async createCategory(data: { name: string }): Promise<MenuCategory> {
+    return this.request('/menu/categories', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateCategory(id: string, patch: Partial<MenuCategory>): Promise<MenuCategory> {
+    return this.request(`/menu/categories/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(patch),
+    });
+  }
+
+  async deleteCategory(id: string): Promise<void> {
+    await this.request(`/menu/categories/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+    });
+  }
+
+  async createItem(data: {
+    categoryId: string;
+    name: string;
+    description?: string;
+    price: number;
+    available?: boolean;
+    imageUrl?: string;
+  }): Promise<MenuItem> {
+    return this.request('/menu/items', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateItem(id: string, patch: Partial<MenuItem>): Promise<MenuItem> {
+    return this.request(`/menu/items/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(patch),
+    });
+  }
+
+  async deleteItem(id: string): Promise<void> {
+    await this.request(`/menu/items/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+    });
+  }
+
+  async updateMenuBranding(patch: Partial<MenuBranding>): Promise<MenuBranding> {
+    return this.request('/menu/branding', {
+      method: 'PATCH',
+      body: JSON.stringify(patch),
+    });
+  }
+
+  // Toque Carta — Gestión de Mesas
+  async listTables(): Promise<RestaurantTable[]> {
+    return this.request('/menu/tables');
+  }
+
+  async createTables(data: { labels: string[] }): Promise<RestaurantTable[]> {
+    return this.request('/menu/tables', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateTable(id: string, patch: Partial<RestaurantTable>): Promise<RestaurantTable> {
+    return this.request(`/menu/tables/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(patch),
+    });
+  }
+
+  async deleteTable(id: string): Promise<void> {
+    await this.request(`/menu/tables/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+    });
+  }
+
+  // Toque Carta — Vista Pública del Cliente
+  async getPublicMenu(tableCode: string): Promise<PublicMenuData> {
+    return this.request(`/public/menu/${encodeURIComponent(tableCode)}`);
+  }
+
+  async createOrder(data: {
+    tableCode: string;
+    items: Array<{ itemId: string; qty: number; note?: string }>;
+    note?: string;
+  }): Promise<OrderSlip> {
+    return this.request('/public/orders', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  // Toque Carta — Comandas
+  async listOrders(filter?: { area?: 'salon' | 'cocina' }): Promise<OrderSlip[]> {
+    const params = new URLSearchParams();
+    if (filter?.area) params.set('area', filter.area);
+    const qs = params.toString() ? `?${params.toString()}` : '';
+    return this.request(`/menu/orders${qs}`);
+  }
+
+  async setOrderStatus(orderId: string, status: OrderStatus, reason?: string): Promise<OrderSlip> {
+    return this.request(`/menu/orders/${encodeURIComponent(orderId)}/status`, {
+      method: 'PATCH',
+      body: JSON.stringify({ status, reason }),
+    });
+  }
+
+  async payOrder(orderId: string): Promise<OrderSlip> {
+    return this.request(`/menu/orders/${encodeURIComponent(orderId)}/pay`, {
+      method: 'POST',
     });
   }
 }

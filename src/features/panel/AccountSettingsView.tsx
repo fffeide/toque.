@@ -72,23 +72,7 @@ export const AccountSettingsView: React.FC = () => {
 
   useEffect(() => {
     loadData();
-    // Saneamiento automático en primera carga si hubiera datos mezclados de pruebas anteriores
-    api.cleanOrphanData().catch(() => {});
   }, []);
-
-  const handleCleanOrphans = async () => {
-    try {
-      setCleaningOrphans(true);
-      await api.cleanOrphanData();
-      await refreshSession();
-      await loadData();
-      showToast('Se purgaron los datos mezclados y se sincronizó tu cuenta.', 'success');
-    } catch (err: any) {
-      showToast(err?.message || 'No se pudieron purgar los datos mezclados', 'error');
-    } finally {
-      setCleaningOrphans(false);
-    }
-  };
 
   const handleSaveProfile = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -129,15 +113,38 @@ export const AccountSettingsView: React.FC = () => {
   };
 
   const [deleteConfirmText, setDeleteConfirmText] = useState('');
+  const [deleteOtpCode, setDeleteOtpCode] = useState('');
+  const [sendingDeleteOtp, setSendingDeleteOtp] = useState(false);
+
+  const handleOpenDeleteModal = async () => {
+    setDeleteConfirmText('');
+    setDeleteOtpCode('');
+    setShowDeleteModal(true);
+    if (currentEmail) {
+      try {
+        setSendingDeleteOtp(true);
+        await api.requestOtp(currentEmail, 'login');
+        showToast(`Te enviamos un código de verificación a ${currentEmail}`, 'success');
+      } catch {
+        // ignore
+      } finally {
+        setSendingDeleteOtp(false);
+      }
+    }
+  };
 
   const handleConfirmDeleteAccount = async () => {
     if (deleteConfirmText.trim().toLowerCase() !== 'eliminar') {
       showToast('Escribí "eliminar" para confirmar', 'error');
       return;
     }
+    if (deleteOtpCode.replace(/\D/g, '').length !== 6) {
+      showToast('Ingresá el código de 6 dígitos enviado a tu correo', 'error');
+      return;
+    }
     try {
       setDeletingAccount(true);
-      await api.deleteAccount();
+      await api.deleteAccount(deleteOtpCode.replace(/\D/g, ''));
       await logout();
       try {
         localStorage.clear();
@@ -327,32 +334,6 @@ export const AccountSettingsView: React.FC = () => {
         </div>
       </form>
 
-      {/* 3B. PURGAR DATOS MEZCLADOS */}
-      <section className="rounded-2xl bg-[#141418] border border-[#282830] p-5">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div className="flex items-start gap-2.5">
-            <div className="w-8 h-8 rounded-xl bg-[#D95B26]/15 text-[#D95B26] flex items-center justify-center shrink-0 mt-0.5">
-              <Sparkles className="w-4 h-4" />
-            </div>
-            <div>
-              <h2 className="text-sm font-bold text-[#F4F4F6]">Purgar datos mezclados</h2>
-              <p className="text-xs text-[#9E9EA8]">
-                Limpia datos antiguos de pruebas eliminadas y deja sincronizados solo el Hub y las tarjetas actuales de tu comercio.
-              </p>
-            </div>
-          </div>
-
-          <button
-            type="button"
-            disabled={cleaningOrphans}
-            onClick={handleCleanOrphans}
-            className="px-4 py-2 rounded-xl bg-[#1C1C22] hover:bg-[#26262E] border border-[#282830] text-xs font-bold text-[#F4F4F6] transition-colors disabled:opacity-50 cursor-pointer shrink-0"
-          >
-            {cleaningOrphans ? 'Purgando...' : 'Purgar datos mezclados'}
-          </button>
-        </div>
-      </section>
-
       {/* 4. ELIMINAR MI CUENTA */}
       <section className="rounded-2xl bg-[#141418] border border-[#f87171]/30 p-5 space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -371,10 +352,7 @@ export const AccountSettingsView: React.FC = () => {
           {!showDeleteModal && (
             <button
               type="button"
-              onClick={() => {
-                setDeleteConfirmText('');
-                setShowDeleteModal(true);
-              }}
+              onClick={handleOpenDeleteModal}
               className="px-4 py-2 rounded-xl bg-[#f87171]/15 hover:bg-[#f87171]/25 border border-[#f87171]/40 text-xs font-bold text-[#f87171] transition-colors cursor-pointer shrink-0"
             >
               Eliminar mi cuenta
@@ -396,6 +374,7 @@ export const AccountSettingsView: React.FC = () => {
                 onClick={() => {
                   setShowDeleteModal(false);
                   setDeleteConfirmText('');
+                  setDeleteOtpCode('');
                 }}
                 className="p-1 text-[#9E9EA8] hover:text-white cursor-pointer shrink-0"
               >
@@ -403,18 +382,34 @@ export const AccountSettingsView: React.FC = () => {
               </button>
             </div>
 
-            <div>
-              <label className="block text-xs text-[#9E9EA8] mb-1.5">
-                Escribí <strong className="text-[#F4F4F6]">eliminar</strong> para confirmar:
-              </label>
-              <input
-                type="text"
-                autoFocus
-                value={deleteConfirmText}
-                onChange={(e) => setDeleteConfirmText(e.target.value)}
-                placeholder="eliminar"
-                className="w-full px-3 py-2 rounded-xl bg-[#141418] border border-[#282830] text-xs text-[#F4F4F6] focus:outline-none focus:border-[#f87171]"
-              />
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs text-[#9E9EA8] mb-1.5">
+                  Código de 6 dígitos enviado a <strong className="text-[#F4F4F6]">{currentEmail}</strong>:
+                </label>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  maxLength={6}
+                  value={deleteOtpCode}
+                  onChange={(e) => setDeleteOtpCode(e.target.value.replace(/\D/g, ''))}
+                  placeholder={sendingDeleteOtp ? 'Enviando código...' : '123456'}
+                  className="w-full px-3 py-2 rounded-xl bg-[#141418] border border-[#282830] text-xs text-[#F4F4F6] focus:outline-none focus:border-[#f87171]"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs text-[#9E9EA8] mb-1.5">
+                  Escribí <strong className="text-[#F4F4F6]">eliminar</strong> para confirmar:
+                </label>
+                <input
+                  type="text"
+                  value={deleteConfirmText}
+                  onChange={(e) => setDeleteConfirmText(e.target.value)}
+                  placeholder="eliminar"
+                  className="w-full px-3 py-2 rounded-xl bg-[#141418] border border-[#282830] text-xs text-[#F4F4F6] focus:outline-none focus:border-[#f87171]"
+                />
+              </div>
             </div>
 
             <div className="flex items-center justify-end gap-2 pt-1">
@@ -423,6 +418,7 @@ export const AccountSettingsView: React.FC = () => {
                 onClick={() => {
                   setShowDeleteModal(false);
                   setDeleteConfirmText('');
+                  setDeleteOtpCode('');
                 }}
                 className="px-3.5 py-2 rounded-xl bg-[#1C1C22] border border-[#282830] text-xs font-bold text-[#9E9EA8] hover:text-white cursor-pointer"
               >
@@ -432,7 +428,8 @@ export const AccountSettingsView: React.FC = () => {
                 type="button"
                 disabled={
                   deletingAccount ||
-                  deleteConfirmText.trim().toLowerCase() !== 'eliminar'
+                  deleteConfirmText.trim().toLowerCase() !== 'eliminar' ||
+                  deleteOtpCode.replace(/\D/g, '').length !== 6
                 }
                 onClick={handleConfirmDeleteAccount}
                 className="px-4 py-2 rounded-xl bg-[#ef4444] hover:bg-[#dc2626] text-white text-xs font-bold cursor-pointer disabled:opacity-50"

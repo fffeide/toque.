@@ -809,3 +809,87 @@ export interface ToqueAdminStaff {
 
 export type ToqueAdminMember = ToqueAdminStaff;
 
+// ==========================================
+// Toque Carta — Tipos de Carta Digital, Mesas y Comandas
+// ==========================================
+
+export type TenantFeatureKey = 'menu' | 'club' | 'stats';
+
+export type TenantFeatures = Record<TenantFeatureKey | string, boolean>;
+
+export interface TenantFeaturesRecord {
+  tenantId: string;
+  businessName: string;
+  features: TenantFeatures;
+}
+
+export interface MenuCategory {
+  id: string;
+  tenantId: string;
+  name: string;
+  sortOrder: number;
+  active: boolean;
+}
+
+export interface MenuItem {
+  id: string;
+  tenantId: string;
+  categoryId: string;
+  name: string;
+  description?: string;
+  price: number;
+  available: boolean;
+  imageUrl?: string;
+}
+
+export interface RestaurantTable {
+  id: string;
+  tenantId: string;
+  code: string;
+  label: string;
+  active: boolean;
+  qrUrl?: string;
+}
+
+export type OrderStatus = 'nuevo' | 'confirmado' | 'listo' | 'entregado' | 'cobrado' | 'cancelado';
+
+export interface OrderSlipItem {
+  itemId: string;
+  name: string;
+  qty: number;
+  unitPrice: number;
+  subtotal: number;
+  note?: string;
+}
+
+export interface OrderSlip {
+  id: string;
+  tenantId: string;
+  tableCode: string;
+  tableLabel: string;
+  items: OrderSlipItem[];
+  totalArs: number;
+  status: OrderStatus;
+  cancelReason?: string;
+  note?: string;
+  createdAt: string;
+  updatedAt: string;
+  area: 'salon' | 'cocina';
+}
+
+export interface MenuBranding {
+  colorPreset: 'dark' | 'blue' | 'green' | 'red' | 'purple' | 'orange';
+  customColor?: string;
+  logoUrl?: string;
+}
+
+export interface PublicMenuData {
+  tenantId: string;
+  businessName: string;
+  logoUrl?: string;
+  accentColor?: string;
+  tableCode: string;
+  tableLabel: string;
+  categories: MenuCategory[];
+  items: MenuItem[];
+}

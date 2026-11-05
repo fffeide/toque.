@@ -1,7 +1,4 @@
 /**
- * Toque — Capa de Datos de Producción (mockApi + sincronización con servidor Node/Express)
- * Configurada con el comercio oficial de lanzamiento "Musical Monroe" (musical-monroe / MONROE01).
- * Cero datos falsos: todas las métricas, pases de Wallet, ventas y escaneos reflejan actividad 100% real.
  */
 
 import { ToqueApi } from './ToqueApi';
@@ -47,6 +44,14 @@ import {
   ToqueAdminStaff,
   ToqueAdminLevel,
   CashierMemberLookupResult,
+  TenantFeaturesRecord,
+  MenuCategory,
+  MenuItem,
+  RestaurantTable,
+  OrderSlip,
+  OrderStatus,
+  MenuBranding,
+  PublicMenuData,
 } from './types';
 import { TRIAL_DAYS, pruebaGratisDias, getPlanLimits } from '../config/pricing';
 import {
@@ -787,13 +792,18 @@ class MockApi implements ToqueApi {
     let deliveryProvider = 'local';
 
     // Llamada real al servidor (/api/auth/send-otp) para enviar el correo de verificación
+    const serverPurpose =
+      purpose === 'register_client' || purpose === 'client_card' || purpose === 'cashier_confirm'
+        ? 'consumer'
+        : 'merchant';
     try {
       const response = await fetch('/api/auth/send-otp', {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           email: cleanEmail,
-          purpose,
+          purpose: serverPurpose,
           contextLabel: this.businessProfile.name || 'Toque',
         }),
       });
@@ -804,13 +814,12 @@ class MockApi implements ToqueApi {
       if (data?.previewCode) {
         code = String(data.previewCode);
       }
-      emailSent = Boolean(data?.emailSent);
+      emailSent = Boolean(data?.emailSent || data?.ok);
       deliveryProvider = data?.deliveryProvider || 'server';
     } catch (err: any) {
       if (err?.message && err.message.includes('Esperá')) {
         throw err;
       }
-      // Si la llamada HTTP falla en modo offline, mantenemos el código generado en memoria
     }
 
     this.otpStore.set(cleanEmail, {
@@ -847,6 +856,7 @@ class MockApi implements ToqueApi {
     }
   ): Promise<{
     verified: boolean;
+    accountExists?: boolean;
     user?: User;
     account?: RecognizedClientAccount;
   }> {
@@ -858,76 +868,64 @@ class MockApi implements ToqueApi {
     }
 
     const record = this.otpStore.get(cleanEmail);
+    const purpose = record?.purpose || 'login';
+    const isConsumerFlow =
+      purpose === 'register_client' ||
+      purpose === 'client_card' ||
+      purpose === 'cashier_confirm';
+
     let verifiedOnServer = false;
+    let serverResponseData: any = null;
 
     try {
-      const res = await fetch('/api/auth/verify-otp', {
+      const endpoint = isConsumerFlow ? '/api/consumer/verify-code' : '/api/auth/verify-otp';
+      const res = await fetch(endpoint, {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: cleanEmail, code: cleanCode }),
+        body: JSON.stringify({
+          email: cleanEmail,
+          code: cleanCode,
+          purpose: isConsumerFlow ? 'consumer' : 'merchant',
+        }),
       });
       if (res.ok) {
         verifiedOnServer = true;
-      } else if (!record) {
+        serverResponseData = await res.json().catch(() => ({}));
+      } else {
         const errData = await res.json().catch(() => ({}));
-        throw new Error(errData?.error || 'Código incorrecto o vencido.');
+        throw new Error(errData?.error || 'Código incorrecto o vencido');
       }
     } catch (err: any) {
-      if (!record && err?.message) {
+      if (err?.message) {
         throw err;
       }
     }
 
     if (!verifiedOnServer) {
       if (!record) {
-        throw new Error('Primero pedí un código para tu correo electrónico.');
+        throw new Error('Código incorrecto o vencido');
       }
-      if (record.used) {
-        throw new Error('Este código ya fue usado. Pedí uno nuevo.');
-      }
-      if (Date.now() > record.expiresAtMs) {
-        throw new Error('El código venció (dura 10 minutos). Pedí uno nuevo.');
-      }
-      if (record.attempts >= 5) {
-        throw new Error('Superaste los 5 intentos permitidos. Pedí un código nuevo.');
+      if (record.used || Date.now() > record.expiresAtMs || record.attempts >= 5) {
+        throw new Error('Código incorrecto o vencido');
       }
       if (record.code !== cleanCode) {
         record.attempts += 1;
-        const remaining = 5 - record.attempts;
-        if (remaining <= 0) {
-          throw new Error(
-            'Código incorrecto. Superaste los 5 intentos permitidos. Pedí un código nuevo.'
-          );
-        }
-        throw new Error(`El código no coincide. Te quedan ${remaining} intento(s).`);
+        throw new Error('Código incorrecto o vencido');
       }
       record.used = true;
     } else if (record) {
       record.used = true;
     }
 
-    const purpose = record?.purpose || 'login';
-
     // Si es flujo de cliente del Club
-    if (purpose === 'register_client' || purpose === 'cashier_confirm') {
-      // Verificar también en el servidor (/api/consumer/verify-code)
-      let serverConsumer: {
+    if (isConsumerFlow) {
+      const serverConsumer = serverResponseData as {
+        accountExists?: boolean;
         needsRegistration?: boolean;
         sessionToken?: string;
         user?: { id: string; email: string; fullName: string; birthDate?: string };
-      } | null = null;
-      try {
-        const cRes = await fetch('/api/consumer/verify-code', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email: cleanEmail, code: cleanCode }),
-        });
-        if (cRes.ok) {
-          serverConsumer = await cRes.json();
-        }
-      } catch {
-        // Fallback en memoria
-      }
+      } | null;
 
       const existingAcc = this.clientAccountsByEmail.get(cleanEmail);
       const hasMemberCard = this.clubMembers.some(
@@ -937,7 +935,9 @@ class MockApi implements ToqueApi {
       );
 
       if (
-        (serverConsumer && serverConsumer.needsRegistration === false && serverConsumer.user) ||
+        (serverConsumer &&
+          (serverConsumer.accountExists === true || serverConsumer.needsRegistration === false) &&
+          serverConsumer.user) ||
         existingAcc ||
         hasMemberCard
       ) {
@@ -980,6 +980,7 @@ class MockApi implements ToqueApi {
         const account = await this.recognizeAccount(cleanEmail);
         return {
           verified: true,
+          accountExists: true,
           account: {
             ...account,
             recognized: true,
@@ -991,6 +992,7 @@ class MockApi implements ToqueApi {
       // No tiene cuenta todavía: debe completar el registro (nombre, fecha de nacimiento >= 18)
       return {
         verified: true,
+        accountExists: false,
         account: {
           recognized: false,
           accountExists: false,
@@ -1311,14 +1313,17 @@ class MockApi implements ToqueApi {
     };
   }
 
-  async deleteAccount(): Promise<{ deleted: boolean }> {
+  async deleteAccount(code?: string): Promise<{ deleted: boolean }> {
     const bizId = this.getActiveBusinessId();
-    try {
-      await fetch(`/api/merchant/account?tenantId=${encodeURIComponent(bizId)}`, {
-        method: 'DELETE',
-      });
-    } catch {
-      // ignore network error
+    const res = await fetch('/api/merchant/account', {
+      method: 'DELETE',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code }),
+    });
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({}));
+      throw new Error(errData?.error || 'No se pudo eliminar la cuenta.');
     }
     this.businesses.delete(bizId);
     this.businessClubConfigs.delete(bizId);
@@ -1345,19 +1350,7 @@ class MockApi implements ToqueApi {
 
   async cleanOrphanData(): Promise<{ cleaned: boolean; message: string }> {
     this.loadPersistedState();
-    let serverMessage = 'Datos mezclados y registros huérfanos depurados correctamente.';
-    try {
-      const res = await fetch('/api/debug/clean-orphans', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-      });
-      if (res.ok) {
-        const data = await res.json().catch(() => ({}));
-        if (data?.message) serverMessage = data.message;
-      }
-    } catch {
-      // ignore network error
-    }
+    const serverMessage = 'Cuenta sincronizada.';
 
     const activeBizId = this.getActiveBusinessId();
     const activeBiz = this.businesses.get(activeBizId) || this.businessProfile;
@@ -1642,12 +1635,12 @@ class MockApi implements ToqueApi {
     try {
       const regRes = await fetch('/api/consumer/register', {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           email: cleanEmail,
           fullName: derivedName,
           birthDate: data.birthDate,
-          tenantId: pub.businessId,
         }),
       });
       if (regRes.ok) {
@@ -2393,21 +2386,12 @@ class MockApi implements ToqueApi {
     try {
       await fetch('/api/merchant/stamp', {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           memberId: member.id,
           barcodeToken: member.barcodeToken || member.shortCode || member.memberCode,
           shortCode: member.shortCode || member.barcodeToken,
-          tenantId: stampedBizId,
-          businessName: member.businessName || this.businessProfile.name,
-          memberName: member.name,
-          stamps: prevStamps,
-          stampsRequired: 10,
-          rewardText: member.rewardText || this.clubConfig.rewardText,
-          colorPreset: member.colorPreset || this.clubConfig.colorPreset || 'dark',
-          color: member.customColor || this.clubConfig.customColor,
-          logoURL: member.logoUrl || this.clubConfig.logoUrl,
-          walletSerial: member.walletSerial,
         }),
       });
     } catch {
@@ -3180,7 +3164,7 @@ class MockApi implements ToqueApi {
     expirationPolicy?: string;
     logoText?: string;
     organizationName?: string;
-    barcodeFormat?: 'QR' | 'CODE128' | 'PDF417' | 'AZTEC';
+    barcodeFormat?: 'QR' | 'CODE128' | 'Code128' | 'PDF417' | 'AZTEC' | 'Aztec';
     barcodeValue?: string;
     barcodeAltText?: string;
     colorPreset?: 'dark' | 'blue' | 'green' | 'red' | 'purple' | 'orange';
@@ -3860,9 +3844,9 @@ class MockApi implements ToqueApi {
 
     fetch('/api/merchant/hub-config', {
       method: 'PUT',
+      credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        tenantId: bizId,
         businessName: this.businessProfile.name,
         logoUrl: this.clubConfig.logoUrl || this.hubConfig.logoUrl,
         brandColor: this.clubConfig.customColor || this.clubConfig.brandColor,
@@ -4373,7 +4357,7 @@ class MockApi implements ToqueApi {
     logoText?: string;
     organizationName?: string;
     rewardText?: string;
-    barcodeFormat?: 'QR' | 'CODE128' | 'PDF417' | 'AZTEC';
+    barcodeFormat?: 'QR' | 'CODE128' | 'Code128' | 'PDF417' | 'AZTEC' | 'Aztec';
     barcodeValue?: string;
     barcodeAltText?: string;
     colorPreset?: 'dark' | 'blue' | 'green' | 'red' | 'purple' | 'orange';
@@ -4461,6 +4445,7 @@ class MockApi implements ToqueApi {
     try {
       const response = await fetch('/api/wallet/pass', {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
@@ -4476,7 +4461,7 @@ class MockApi implements ToqueApi {
       }
 
       if (!response.ok || passRes.success === false) {
-        const errMsg = 'No pudimos crear tu tarjeta. Probá de nuevo.';
+        const errMsg = passRes.error || 'No pudimos crear tu tarjeta. Probá de nuevo.';
         if (member) {
           member.walletSyncError = errMsg;
           this.persistClubData();
@@ -4493,18 +4478,20 @@ class MockApi implements ToqueApi {
       if (business.id === this.businessProfile.id) {
         this.businessProfile.walletPassesIssued = business.walletPassesIssued;
       }
+      const resolvedAppleUrl =
+        passRes.appleWalletUrl || `/api/wallet/pass/${encodeURIComponent(immutableCode)}.pkpass`;
       if (member) {
         member.passId = passRes.serialNumber || passRes.passId;
         member.walletSerial = passRes.serialNumber || passRes.passId;
-        member.shareUrl = passRes.shareUrl || passRes.appleWalletUrl;
-        member.appleWalletUrl = `/api/wallet/pass/${encodeURIComponent(immutableCode)}.pkpass`;
+        member.shareUrl = passRes.shareUrl || resolvedAppleUrl;
+        member.appleWalletUrl = resolvedAppleUrl;
         member.googleWalletUrl = passRes.googleWalletUrl || passRes.shareUrl;
         member.walletSyncError = passRes.walletSyncError || undefined;
         this.persistClubData();
       }
       return {
         ...passRes,
-        appleWalletUrl: `/api/wallet/pass/${encodeURIComponent(immutableCode)}.pkpass`,
+        appleWalletUrl: resolvedAppleUrl,
         barcodeValue: immutableCode,
         configured: true,
       };
@@ -4602,9 +4589,9 @@ class MockApi implements ToqueApi {
 
     fetch('/api/merchant/pos-sale', {
       method: 'POST',
+      credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        tenantId: sale.businessId,
         localCode: cartel.code,
         merchantName: this.businessProfile.name,
         amountArs: sale.amount,
@@ -5020,10 +5007,9 @@ class MockApi implements ToqueApi {
 
     fetch('/api/merchant/hub-config', {
       method: 'PUT',
+      credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        tenantId: bizId,
-        businessId: bizId,
         businessName: this.businessProfile.name,
         logoUrl: this.clubConfig.logoUrl || this.hubConfig.logoUrl,
         brandColor: this.clubConfig.customColor || this.clubConfig.brandColor,
@@ -5263,6 +5249,387 @@ class MockApi implements ToqueApi {
       throw new Error('No se puede eliminar la cuenta raíz principal de Super Admin (fedeeeloiss@gmail.com).');
     }
     this.toqueAdmins = this.toqueAdmins.filter((a) => a.email.toLowerCase() !== cleanEmail);
+  }
+
+  // ==========================================
+  // Toque Carta — Estado en memoria y métodos
+  // ==========================================
+  private tenantFeatures: Map<string, Record<string, boolean>> = new Map([
+    ['comercio-activo', { menu: true, club: true, stats: true }],
+    ['comercio-cafe-ejemplo', { menu: false, club: true, stats: true }],
+  ]);
+
+  private menuCategories: MenuCategory[] = [
+    { id: 'cat-cafeteria', tenantId: 'comercio-activo', name: 'Cafetería (Ejemplo)', sortOrder: 1, active: true },
+    { id: 'cat-pasteleria', tenantId: 'comercio-activo', name: 'Pastelería (Ejemplo)', sortOrder: 2, active: true },
+    { id: 'cat-almuerzos', tenantId: 'comercio-activo', name: 'Almuerzos (Ejemplo)', sortOrder: 3, active: true },
+  ];
+
+  private menuItems: MenuItem[] = [
+    {
+      id: 'item-1',
+      tenantId: 'comercio-activo',
+      categoryId: 'cat-cafeteria',
+      name: 'Café Flat White (Ejemplo)',
+      description: 'Doble shot de espresso con leche texturizada sedosa',
+      price: 3400,
+      available: true,
+    },
+    {
+      id: 'item-2',
+      tenantId: 'comercio-activo',
+      categoryId: 'cat-cafeteria',
+      name: 'Espresso Doble (Ejemplo)',
+      description: 'Granos de especialidad tostados en origen',
+      price: 2800,
+      available: true,
+    },
+    {
+      id: 'item-3',
+      tenantId: 'comercio-activo',
+      categoryId: 'cat-pasteleria',
+      name: 'Medialuna rellena de jamón y queso (Ejemplo)',
+      description: 'Horneada en el día con manteca pura',
+      price: 2900,
+      available: true,
+    },
+    {
+      id: 'item-4',
+      tenantId: 'comercio-activo',
+      categoryId: 'cat-pasteleria',
+      name: 'Cookie con chips de chocolate (Ejemplo)',
+      description: 'Masa tierna con chocolate belga semi amargo',
+      price: 2500,
+      available: false,
+    },
+    {
+      id: 'item-5',
+      tenantId: 'comercio-activo',
+      categoryId: 'cat-almuerzos',
+      name: 'Tostón de palta y huevo poché (Ejemplo)',
+      description: 'Pan de masa madre, palta fresca, semillas y oliva',
+      price: 5900,
+      available: true,
+    },
+  ];
+
+  private menuBrandingMap: Map<string, MenuBranding> = new Map([
+    ['comercio-activo', { colorPreset: 'dark' }],
+  ]);
+
+  private restaurantTables: RestaurantTable[] = [
+    { id: 'tbl-1', tenantId: 'comercio-activo', code: 'MESA-01', label: 'Mesa 1', active: true },
+    { id: 'tbl-2', tenantId: 'comercio-activo', code: 'MESA-02', label: 'Mesa 2', active: true },
+    { id: 'tbl-3', tenantId: 'comercio-activo', code: 'MESA-03', label: 'Mesa 3', active: true },
+    { id: 'tbl-4', tenantId: 'comercio-activo', code: 'MESA-04', label: 'Mesa 4', active: true },
+  ];
+
+  private orderSlips: OrderSlip[] = [
+    {
+      id: 'ord-1',
+      tenantId: 'comercio-activo',
+      tableCode: 'MESA-01',
+      tableLabel: 'Mesa 1',
+      items: [
+        {
+          itemId: 'item-1',
+          name: 'Café Flat White (Ejemplo)',
+          qty: 2,
+          unitPrice: 3400,
+          subtotal: 6800,
+        },
+        {
+          itemId: 'item-3',
+          name: 'Medialuna rellena de jamón y queso (Ejemplo)',
+          qty: 1,
+          unitPrice: 2900,
+          subtotal: 2900,
+          note: 'bien caliente',
+        },
+      ],
+      totalArs: 9700,
+      status: 'nuevo',
+      createdAt: new Date(Date.now() - 3 * 60000).toISOString(),
+      updatedAt: new Date(Date.now() - 3 * 60000).toISOString(),
+      area: 'salon',
+    },
+  ];
+
+  private getActiveTenantId(): string {
+    return this.businessProfile?.id || 'comercio-activo';
+  }
+
+  async getFeatures(): Promise<Record<string, boolean>> {
+    const tid = this.getActiveTenantId();
+    return this.tenantFeatures.get(tid) || { menu: true, club: true, stats: true };
+  }
+
+  async listTenantsFeatures(): Promise<TenantFeaturesRecord[]> {
+    const records: TenantFeaturesRecord[] = [];
+    const mainTid = this.getActiveTenantId();
+    const mainBiz = this.businessProfile;
+    records.push({
+      tenantId: mainTid,
+      businessName: mainBiz?.name || 'Mi comercio',
+      features: this.tenantFeatures.get(mainTid) || { menu: true, club: true, stats: true },
+    });
+
+    records.push({
+      tenantId: 'comercio-cafe-ejemplo',
+      businessName: 'Café de Especialidad (Ejemplo sin Carta)',
+      features: this.tenantFeatures.get('comercio-cafe-ejemplo') || { menu: false, club: true, stats: true },
+    });
+
+    return records;
+  }
+
+  async setTenantFeature(tenantId: string, key: string, enabled: boolean): Promise<void> {
+    const current = this.tenantFeatures.get(tenantId) || { menu: true, club: true, stats: true };
+    this.tenantFeatures.set(tenantId, {
+      ...current,
+      [key]: enabled,
+    });
+  }
+
+  async listMenu(): Promise<{ categories: MenuCategory[]; items: MenuItem[]; branding?: MenuBranding }> {
+    const tid = this.getActiveTenantId();
+    const categories = this.menuCategories
+      .filter((c) => c.tenantId === tid && c.active)
+      .sort((a, b) => a.sortOrder - b.sortOrder);
+    const items = this.menuItems.filter((i) => i.tenantId === tid);
+    const branding = this.menuBrandingMap.get(tid) || { colorPreset: 'dark' };
+    return { categories, items, branding };
+  }
+
+  async createCategory(data: { name: string }): Promise<MenuCategory> {
+    const tid = this.getActiveTenantId();
+    const count = this.menuCategories.filter((c) => c.tenantId === tid).length;
+    const newCat: MenuCategory = {
+      id: `cat-${Date.now().toString(36)}`,
+      tenantId: tid,
+      name: data.name.trim(),
+      sortOrder: count + 1,
+      active: true,
+    };
+    this.menuCategories.push(newCat);
+    return newCat;
+  }
+
+  async updateCategory(id: string, patch: Partial<MenuCategory>): Promise<MenuCategory> {
+    const cat = this.menuCategories.find((c) => c.id === id);
+    if (!cat) throw new Error('Categoría no encontrada');
+    Object.assign(cat, patch);
+    return { ...cat };
+  }
+
+  async deleteCategory(id: string): Promise<void> {
+    const cat = this.menuCategories.find((c) => c.id === id);
+    if (cat) cat.active = false;
+  }
+
+  async createItem(data: {
+    categoryId: string;
+    name: string;
+    description?: string;
+    price: number;
+    available?: boolean;
+    imageUrl?: string;
+  }): Promise<MenuItem> {
+    const tid = this.getActiveTenantId();
+    const newItem: MenuItem = {
+      id: `item-${Date.now().toString(36)}`,
+      tenantId: tid,
+      categoryId: data.categoryId,
+      name: data.name.trim(),
+      description: data.description?.trim() || '',
+      price: Math.max(0, Math.round(data.price || 0)),
+      available: data.available !== false,
+      imageUrl: data.imageUrl,
+    };
+    this.menuItems.push(newItem);
+    return newItem;
+  }
+
+  async updateItem(id: string, patch: Partial<MenuItem>): Promise<MenuItem> {
+    const item = this.menuItems.find((i) => i.id === id);
+    if (!item) throw new Error('Plato no encontrado');
+    if (patch.price !== undefined) {
+      patch.price = Math.max(0, Math.round(patch.price));
+    }
+    Object.assign(item, patch);
+    return { ...item };
+  }
+
+  async deleteItem(id: string): Promise<void> {
+    this.menuItems = this.menuItems.filter((i) => i.id !== id);
+  }
+
+  async updateMenuBranding(patch: Partial<MenuBranding>): Promise<MenuBranding> {
+    const tid = this.getActiveTenantId();
+    const current = this.menuBrandingMap.get(tid) || { colorPreset: 'dark' };
+    const updated = { ...current, ...patch };
+    this.menuBrandingMap.set(tid, updated);
+    return updated;
+  }
+
+  async listTables(): Promise<RestaurantTable[]> {
+    const tid = this.getActiveTenantId();
+    return this.restaurantTables.filter((t) => t.tenantId === tid && t.active);
+  }
+
+  async createTables(data: { labels: string[] }): Promise<RestaurantTable[]> {
+    const tid = this.getActiveTenantId();
+    const created: RestaurantTable[] = [];
+    for (const label of data.labels) {
+      const cleanLabel = label.trim();
+      if (!cleanLabel) continue;
+      const code = `MESA-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
+      const tbl: RestaurantTable = {
+        id: `tbl-${Date.now().toString(36)}-${Math.random().toString(36).substring(2, 5)}`,
+        tenantId: tid,
+        code,
+        label: cleanLabel,
+        active: true,
+      };
+      this.restaurantTables.push(tbl);
+      created.push(tbl);
+    }
+    return created;
+  }
+
+  async updateTable(id: string, patch: Partial<RestaurantTable>): Promise<RestaurantTable> {
+    const tbl = this.restaurantTables.find((t) => t.id === id);
+    if (!tbl) throw new Error('Mesa no encontrada');
+    Object.assign(tbl, patch);
+    return { ...tbl };
+  }
+
+  async deleteTable(id: string): Promise<void> {
+    const tbl = this.restaurantTables.find((t) => t.id === id);
+    if (tbl) tbl.active = false;
+  }
+
+  async getPublicMenu(tableCode: string): Promise<PublicMenuData> {
+    const cleanCode = (tableCode || '').trim().toUpperCase();
+    const tbl = this.restaurantTables.find(
+      (t) => t.code.toUpperCase() === cleanCode && t.active
+    );
+    if (!tbl) {
+      throw new Error('Esta carta no está disponible.');
+    }
+    const features = this.tenantFeatures.get(tbl.tenantId) || { menu: true, club: true, stats: true };
+    if (!features.menu) {
+      throw new Error('Esta carta no está disponible.');
+    }
+    const biz = this.businessProfile?.id === tbl.tenantId ? this.businessProfile : null;
+    const businessName = biz?.name || 'Local Gastronómico';
+    const branding = this.menuBrandingMap.get(tbl.tenantId) || { colorPreset: 'dark' };
+    const categories = this.menuCategories
+      .filter((c) => c.tenantId === tbl.tenantId && c.active)
+      .sort((a, b) => a.sortOrder - b.sortOrder);
+    const items = this.menuItems.filter((i) => i.tenantId === tbl.tenantId);
+
+    return {
+      tenantId: tbl.tenantId,
+      businessName,
+      logoUrl: branding.logoUrl || biz?.cardThemeColor,
+      accentColor: branding.customColor,
+      tableCode: tbl.code,
+      tableLabel: tbl.label,
+      categories,
+      items,
+    };
+  }
+
+  async createOrder(data: {
+    tableCode: string;
+    items: Array<{ itemId: string; qty: number; note?: string }>;
+    note?: string;
+  }): Promise<OrderSlip> {
+    const cleanCode = (data.tableCode || '').trim().toUpperCase();
+    const tbl = this.restaurantTables.find(
+      (t) => t.code.toUpperCase() === cleanCode && t.active
+    );
+    if (!tbl) throw new Error('Esta carta no está disponible.');
+    const features = this.tenantFeatures.get(tbl.tenantId) || { menu: true, club: true, stats: true };
+    if (!features.menu) throw new Error('Esta carta no está disponible.');
+
+    // Validaciones de seguridad
+    if (!data.items || data.items.length === 0) {
+      throw new Error('El pedido no contiene platos.');
+    }
+    if (data.items.length > 30) {
+      throw new Error('El pedido supera el máximo permitido de 30 platos.');
+    }
+
+    const slipItems: OrderSlip['items'] = [];
+    let totalArs = 0;
+
+    for (const itemRequest of data.items) {
+      const qty = Math.min(20, Math.max(1, Math.round(itemRequest.qty || 1)));
+      const dish = this.menuItems.find((i) => i.id === itemRequest.itemId && i.tenantId === tbl.tenantId);
+      if (!dish) continue;
+      if (!dish.available) {
+        throw new Error(`El plato "${dish.name}" ya no está disponible.`);
+      }
+      const unitPrice = dish.price;
+      const subtotal = unitPrice * qty;
+      totalArs += subtotal;
+      slipItems.push({
+        itemId: dish.id,
+        name: dish.name,
+        qty,
+        unitPrice,
+        subtotal,
+        note: itemRequest.note?.trim() || undefined,
+      });
+    }
+
+    if (slipItems.length === 0) {
+      throw new Error('No se pudieron procesar los platos solicitados.');
+    }
+
+    const orderSlip: OrderSlip = {
+      id: `ord-${Date.now().toString(36)}-${Math.random().toString(36).substring(2, 5)}`,
+      tenantId: tbl.tenantId,
+      tableCode: tbl.code,
+      tableLabel: tbl.label,
+      items: slipItems,
+      totalArs,
+      status: 'nuevo',
+      note: data.note?.trim() || undefined,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      area: 'salon',
+    };
+
+    this.orderSlips.unshift(orderSlip);
+    return orderSlip;
+  }
+
+  async listOrders(filter?: { area?: 'salon' | 'cocina' }): Promise<OrderSlip[]> {
+    const tid = this.getActiveTenantId();
+    return this.orderSlips
+      .filter((o) => o.tenantId === tid)
+      .filter((o) => (filter?.area ? o.area === filter.area : true))
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  }
+
+  async setOrderStatus(orderId: string, status: OrderStatus, reason?: string): Promise<OrderSlip> {
+    const slip = this.orderSlips.find((o) => o.id === orderId);
+    if (!slip) throw new Error('Comanda no encontrada');
+    slip.status = status;
+    slip.updatedAt = new Date().toISOString();
+    if (reason) slip.cancelReason = reason;
+    return { ...slip };
+  }
+
+  async payOrder(orderId: string): Promise<OrderSlip> {
+    const slip = this.orderSlips.find((o) => o.id === orderId);
+    if (!slip) throw new Error('Comanda no encontrada');
+    slip.status = 'cobrado';
+    slip.updatedAt = new Date().toISOString();
+    return { ...slip };
   }
 }
 

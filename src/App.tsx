@@ -8,6 +8,8 @@ import { RoleRouteGuard } from './components/auth/RoleRouteGuard';
 import { SECURITY_LOCKDOWN } from './lib/lockdown';
 import { CookieBanner } from './features/public/CookieBanner';
 
+import { FeaturesProvider } from './lib/features';
+
 // Lazy loading de todas las vistas para carga ultra rápida en móvil y desktop
 const LandingView = lazy(() =>
   import('./features/public/LandingView').then((m) => ({ default: m.LandingView }))
@@ -52,6 +54,27 @@ const PublicHubView = lazy(() =>
 );
 const ReceiptDetailView = lazy(() =>
   import('./features/hub/ReceiptDetailView').then((m) => ({ default: m.ReceiptDetailView }))
+);
+const PublicMenuView = lazy(() =>
+  import('./features/menu/PublicMenuView').then((m) => ({ default: m.PublicMenuView }))
+);
+const MenuPanelLayout = lazy(() =>
+  import('./features/menu/MenuPanelLayout').then((m) => ({ default: m.MenuPanelLayout }))
+);
+const MenuHomeView = lazy(() =>
+  import('./features/menu/MenuHomeView').then((m) => ({ default: m.MenuHomeView }))
+);
+const MenuOrdersView = lazy(() =>
+  import('./features/menu/MenuOrdersView').then((m) => ({ default: m.MenuOrdersView }))
+);
+const MenuTablesView = lazy(() =>
+  import('./features/menu/MenuTablesView').then((m) => ({ default: m.MenuTablesView }))
+);
+const MenuEditorView = lazy(() =>
+  import('./features/menu/MenuEditorView').then((m) => ({ default: m.MenuEditorView }))
+);
+const MenuMoreView = lazy(() =>
+  import('./features/menu/MenuMoreView').then((m) => ({ default: m.MenuMoreView }))
 );
 const CashierView = lazy(() =>
   import('./features/cashier/CashierView').then((m) => ({ default: m.CashierView }))
@@ -146,7 +169,8 @@ export const App: React.FC = () => {
   return (
     <ThemeProvider>
       <AuthProvider>
-        <ToastProvider>
+        <FeaturesProvider>
+          <ToastProvider>
           <BrowserRouter>
             <Suspense fallback={<PageLoader />}>
               <Routes>
@@ -202,6 +226,9 @@ export const App: React.FC = () => {
 
                     {/* Comprobante Digital de Compra o Redirección Smart Hub */}
                     <Route path="/r/:id" element={<ReceiptDetailView />} />
+
+                    {/* Toque Carta — Carta Digital Pública por QR de Mesa */}
+                    <Route path="/m/:code" element={<PublicMenuView />} />
 
                     {/* 2. Caja (POS) — Accesible para Cajero, Encargado, Dueño y SuperAdmin */}
                     <Route
@@ -333,8 +360,23 @@ export const App: React.FC = () => {
                           </RoleRouteGuard>
                         }
                       />
-                      {/* Red de Beneficios eliminada: redirige a Resumen */}
-                      <Route path="red" element={<Navigate to="/panel/resumen" replace />} />
+                      {/* Toque Carta — Panel Gastronómico */}
+                      <Route
+                        path="carta"
+                        element={
+                          <RoleRouteGuard
+                            allowedRoles={['owner', 'manager', 'cashier', 'superadmin']}
+                          >
+                            <MenuPanelLayout />
+                          </RoleRouteGuard>
+                        }
+                      >
+                        <Route index element={<MenuHomeView />} />
+                        <Route path="comandas" element={<MenuOrdersView />} />
+                        <Route path="mesas" element={<MenuTablesView />} />
+                        <Route path="platos" element={<MenuEditorView />} />
+                        <Route path="mas" element={<MenuMoreView />} />
+                      </Route>
 
                       {/* 5. Equipo y Cuenta (Unifica colaboradores, roles y Plan/Suscripción) */}
                       <Route
@@ -375,6 +417,7 @@ export const App: React.FC = () => {
             </Suspense>
           </BrowserRouter>
         </ToastProvider>
+        </FeaturesProvider>
       </AuthProvider>
     </ThemeProvider>
   );

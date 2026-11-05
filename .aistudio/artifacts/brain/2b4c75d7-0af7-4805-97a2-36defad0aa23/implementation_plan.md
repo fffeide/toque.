@@ -72,7 +72,7 @@ Transformaremos **TOQUE** de un prototipo en memoria volátil a una plataforma e
 
 - **Decision 2: Proxy Backend para WalletWallet API y Variables de Entorno**
   - *Chosen Approach*: Almacenar `WALLETWALLET_API_KEY` exclusivamente en el entorno del servidor Express y exponer un endpoint interno `/api/wallet/pass` que realiza la petición autenticada hacia `https://api.walletwallet.dev`.
-  - *Why*: Cumple con la regla estricta de esconder siempre todas las APIs y evita que la clave privada `ww_live_...` pueda ser inspeccionada desde el navegador.
+  - *Why*: Cumple con la regla estricta de esconder siempre todas las APIs y evita que la clave privada pueda ser inspeccionada desde el navegador.
   - *Alternatives Considered*: Llamadas directas desde el navegador (`fetch` en el cliente), descartadas por exponer la credencial en el tráfico de red del cliente.
 
 - **Decision 3: Seguridad RLS (Row-Level Security) en Dos Capas (Reglas de Base de Datos + Guardián de Vistas)**

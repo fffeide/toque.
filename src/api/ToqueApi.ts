@@ -42,6 +42,14 @@ import {
   ConsumerUser,
   ConsumerReceipt,
   CashierMemberLookupResult,
+  TenantFeaturesRecord,
+  MenuCategory,
+  MenuItem,
+  RestaurantTable,
+  OrderSlip,
+  OrderStatus,
+  MenuBranding,
+  PublicMenuData,
 } from './types';
 
 export interface ToqueApi {
@@ -246,7 +254,7 @@ export interface ToqueApi {
     expirationPolicy?: string;
     logoText?: string;
     organizationName?: string;
-    barcodeFormat?: 'QR' | 'Code128' | 'PDF417' | 'AZTEC';
+    barcodeFormat?: 'QR' | 'CODE128' | 'Code128' | 'PDF417' | 'AZTEC' | 'Aztec';
     barcodeValue?: string;
     barcodeAltText?: string;
     colorPreset?: 'dark' | 'blue' | 'green' | 'red' | 'purple' | 'orange';
@@ -423,7 +431,7 @@ export interface ToqueApi {
     logoText?: string;
     organizationName?: string;
     rewardText?: string;
-    barcodeFormat?: 'QR' | 'Code128' | 'PDF417' | 'AZTEC' | 'Aztec';
+    barcodeFormat?: 'QR' | 'CODE128' | 'Code128' | 'PDF417' | 'AZTEC' | 'Aztec';
     barcodeValue?: string;
     barcodeAltText?: string;
     colorPreset?: 'dark' | 'blue' | 'green' | 'red' | 'purple' | 'orange';
@@ -536,7 +544,7 @@ export interface ToqueApi {
 
   updateAccountEmail(newEmail: string): Promise<{ user: User; business: BusinessProfile }>;
 
-  deleteAccount(): Promise<{ deleted: boolean }>;
+  deleteAccount(code?: string): Promise<{ deleted: boolean }>;
 
   cleanOrphanData(): Promise<{ cleaned: boolean; message: string }>;
 
@@ -557,6 +565,64 @@ export interface ToqueApi {
   }): Promise<import('./types').ToqueAdminStaff>;
 
   removeToqueAdmin(idOrEmail: string): Promise<void>;
+
+  // ==========================================
+  // Toque Carta — Funciones por comercio y flags
+  // ==========================================
+  getFeatures(): Promise<Record<string, boolean>>;
+
+  listTenantsFeatures(): Promise<TenantFeaturesRecord[]>;
+
+  setTenantFeature(tenantId: string, key: string, enabled: boolean): Promise<void>;
+
+  // Toque Carta — Gestión de Carta
+  listMenu(): Promise<{ categories: MenuCategory[]; items: MenuItem[]; branding?: MenuBranding }>;
+
+  createCategory(data: { name: string }): Promise<MenuCategory>;
+
+  updateCategory(id: string, patch: Partial<MenuCategory>): Promise<MenuCategory>;
+
+  deleteCategory(id: string): Promise<void>;
+
+  createItem(data: {
+    categoryId: string;
+    name: string;
+    description?: string;
+    price: number;
+    available?: boolean;
+    imageUrl?: string;
+  }): Promise<MenuItem>;
+
+  updateItem(id: string, patch: Partial<MenuItem>): Promise<MenuItem>;
+
+  deleteItem(id: string): Promise<void>;
+
+  updateMenuBranding(patch: Partial<MenuBranding>): Promise<MenuBranding>;
+
+  // Toque Carta — Gestión de Mesas
+  listTables(): Promise<RestaurantTable[]>;
+
+  createTables(data: { labels: string[] }): Promise<RestaurantTable[]>;
+
+  updateTable(id: string, patch: Partial<RestaurantTable>): Promise<RestaurantTable>;
+
+  deleteTable(id: string): Promise<void>;
+
+  // Toque Carta — Vista Pública del Cliente
+  getPublicMenu(tableCode: string): Promise<PublicMenuData>;
+
+  createOrder(data: {
+    tableCode: string;
+    items: Array<{ itemId: string; qty: number; note?: string }>;
+    note?: string;
+  }): Promise<OrderSlip>;
+
+  // Toque Carta — Comandas
+  listOrders(filter?: { area?: 'salon' | 'cocina' }): Promise<OrderSlip[]>;
+
+  setOrderStatus(orderId: string, status: OrderStatus, reason?: string): Promise<OrderSlip>;
+
+  payOrder(orderId: string): Promise<OrderSlip>;
 }
 
 

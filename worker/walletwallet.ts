@@ -17,6 +17,15 @@ export interface Env {
 
 export type ColorPreset = 'dark' | 'blue' | 'green' | 'red' | 'purple' | 'orange';
 
+export const COLOR_PRESET_HEX: Record<ColorPreset, string> = {
+  dark: '#141414',
+  blue: '#1E3A8A',
+  green: '#14532D',
+  red: '#7F1D1D',
+  purple: '#4C1D95',
+  orange: '#D95B26',
+};
+
 export interface CardInput {
   businessName: string;
   memberName?: string;
@@ -69,6 +78,8 @@ export function generateBarcodeToken(): string {
   return String(Math.floor(10000000 + Math.random() * 90000000));
 }
 
+export const generateSecureBarcodeToken = generateBarcodeToken;
+
 export function buildBody(c: CardInput): Record<string, unknown> {
   const body: Record<string, unknown> = {
     barcodeValue: c.barcodeToken,
@@ -101,8 +112,7 @@ export function buildBody(c: CardInput): Record<string, unknown> {
 }
 
 function headers(env: Env): Record<string, string> {
-  const apiKey = (env.WALLETWALLET_API_KEY || '').trim();
-  if (!apiKey) {
+  if (!env.WALLETWALLET_API_KEY || !env.WALLETWALLET_API_KEY.trim()) {
     throw new WalletError(
       503,
       'not_configured',
@@ -111,7 +121,7 @@ function headers(env: Env): Record<string, string> {
   }
   return {
     'Content-Type': 'application/json',
-    Authorization: `Bearer ${apiKey}`,
+    Authorization: `Bearer ${env.WALLETWALLET_API_KEY.trim()}`,
   };
 }
 

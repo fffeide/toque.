@@ -36,7 +36,9 @@ import {
   Factory,
 } from 'lucide-react';
 
-type AdminTab = 'overview' | 'users' | 'carteles' | 'waitlist' | 'toque_team';
+import { TenantFeaturesAdminView } from './TenantFeaturesAdminView';
+
+type AdminTab = 'overview' | 'features' | 'users' | 'carteles' | 'waitlist' | 'toque_team';
 
 const MASTER_ADMIN_EMAIL = 'fedeeeloiss@gmail.com';
 
@@ -319,6 +321,18 @@ export const SuperAdminView: React.FC = () => {
 
               <button
                 type="button"
+                onClick={() => setActiveTab('features')}
+                className={`px-4 py-2 rounded-xl text-xs font-bold transition-colors cursor-pointer shrink-0 ${
+                  activeTab === 'features'
+                    ? 'bg-[#D95B26] text-white'
+                    : 'bg-[#141418] text-[#A1A1AA] hover:text-[#F4F4F0]'
+                }`}
+              >
+                Funciones por comercio
+              </button>
+
+              <button
+                type="button"
                 onClick={() => setActiveTab('toque_team')}
                 className={`px-4 py-2 rounded-xl text-xs font-bold transition-colors cursor-pointer shrink-0 flex items-center gap-1.5 ${
                   activeTab === 'toque_team'
@@ -576,6 +590,9 @@ export const SuperAdminView: React.FC = () => {
                 </div>
               </div>
             )}
+
+            {/* TAB: FUNCIONES POR COMERCIO */}
+            {activeTab === 'features' && <TenantFeaturesAdminView />}
 
             {/* TAB 2: DIRECTORIO DE USUARIOS */}
             {activeTab === 'users' && (

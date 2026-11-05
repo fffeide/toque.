@@ -62,9 +62,12 @@ function sanitizeExternalNavigationUrl(url?: string | null): string | null {
   if (!url) return null;
   const trimmed = url.trim();
   if (!trimmed) return null;
+  if (trimmed.startsWith('/api/wallet/')) {
+    return trimmed;
+  }
   try {
     const parsed = new URL(trimmed, window.location.origin);
-    if (parsed.protocol !== 'https:') return null;
+    if (parsed.protocol !== 'https:' && parsed.origin !== window.location.origin) return null;
     return parsed.toString();
   } catch {
     return null;
@@ -214,9 +217,9 @@ export const PublicHubView: React.FC = () => {
 
       const res = await fetch('/api/consumer/cards/claim', {
         method: 'POST',
+        credentials: 'include',
         headers: {
           'Content-Type': 'application/json',
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
         body: JSON.stringify({
           code: params.hubData.cartel.code,
@@ -745,15 +748,6 @@ export const PublicHubView: React.FC = () => {
     if (emailAlreadyVerifiedInLogin) {
       try {
         setSubmitting(true);
-        const d1Claim = hub
-          ? await claimCardInD1({
-              hubData: hub,
-              customerName: cleanName,
-              customerEmail: cleanEmail,
-              customerBirthDate: birthDate,
-            })
-          : {};
-
         const reg = await api.registerMember({
           localCode: hub?.cartel.code || targetCode,
           name: cleanName,
@@ -763,6 +757,15 @@ export const PublicHubView: React.FC = () => {
           birthMonth: ageCheck.birthMonth,
           marketingConsent,
         });
+
+        const d1Claim = hub
+          ? await claimCardInD1({
+              hubData: hub,
+              customerName: cleanName,
+              customerEmail: cleanEmail,
+              customerBirthDate: birthDate,
+            })
+          : {};
 
         const mergedMember: ClubMember = {
           ...reg.member,
@@ -819,17 +822,17 @@ export const PublicHubView: React.FC = () => {
     try {
       setSubmitting(true);
       const verifyRes = await api.verifyOtp(cleanEmail, cleanCode);
-      const d1Claim = hub
-        ? await claimCardInD1({
-            hubData: hub,
-            customerName: name.trim(),
-            customerEmail: cleanEmail,
-            customerBirthDate: birthDate,
-          })
-        : {};
 
       // Si el correo ya existía en otra cuenta, nunca forzar nuevo registro
       if (verifyRes.account?.accountExists) {
+        const d1Claim = hub
+          ? await claimCardInD1({
+              hubData: hub,
+              customerName: name.trim(),
+              customerEmail: cleanEmail,
+              customerBirthDate: birthDate,
+            })
+          : {};
         const res = await api.addCardToAccount({
           localCode: hub?.cartel.code || targetCode,
           marketingConsent,
@@ -861,6 +864,15 @@ export const PublicHubView: React.FC = () => {
         birthMonth: ageCheck.birthMonth,
         marketingConsent,
       });
+
+      const d1Claim = hub
+        ? await claimCardInD1({
+            hubData: hub,
+            customerName: name.trim(),
+            customerEmail: cleanEmail,
+            customerBirthDate: birthDate,
+          })
+        : {};
 
       const mergedMember: ClubMember = {
         ...reg.member,
