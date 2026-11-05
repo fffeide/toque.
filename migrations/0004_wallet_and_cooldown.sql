@@ -1,5 +1,5 @@
 -- ============================================================
--- TOQUE D1 MIGRATION 0003: WALLETWALLET & 24H COOLDOWN
+-- TOQUE D1 MIGRATION 0004: WALLETWALLET & 24H COOLDOWN
 -- ============================================================
 
 -- 1. Columnas requeridas en loyalty_members para flujo real de WalletWallet y Cooldown de 24h
