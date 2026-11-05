@@ -74,7 +74,6 @@ function persistMerchantSession(nextToken: string | null, nextUser: User | null)
     if (nextToken && nextUser) {
       localStorage.setItem(MERCHANT_TOKEN_KEY, nextToken);
       localStorage.setItem(MERCHANT_USER_KEY, JSON.stringify(nextUser));
-      document.cookie = `toque_merchant_session=${nextToken}; path=/; max-age=31536000; SameSite=Lax`;
     } else {
       localStorage.removeItem(MERCHANT_TOKEN_KEY);
       localStorage.removeItem(MERCHANT_USER_KEY);
@@ -234,28 +233,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     category?: string;
   }) => {
     const res = await api.register(data);
-    let nextToken = res.token || `sess-${res.user.id}-${Date.now().toString(36)}`;
-    try {
-      const serverAuth = await fetch('/api/auth/register', {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          email: res.user.email,
-          name: res.user.name,
-          businessName: data.businessName,
-        }),
-      });
-      if (serverAuth.ok) {
-        const srv = await serverAuth.json();
-        if (srv?.token) nextToken = srv.token;
-        if (srv?.user?.businessId) {
-          res.user.businessId = srv.user.businessId;
-        }
-      }
-    } catch {
-      // ignore
-    }
+    // La cookie HttpOnly la establece el Worker. No crear una segunda cookie
+    // desde JavaScript ni repetir el POST de registro (el OTP ya fue consumido).
+    const nextToken = res.token || `sess-${res.user.id}-${Date.now().toString(36)}`;
 
     setToken(nextToken);
     setUser(res.user);
