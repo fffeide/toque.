@@ -74,11 +74,9 @@ function persistMerchantSession(nextToken: string | null, nextUser: User | null)
     if (nextToken && nextUser) {
       localStorage.setItem(MERCHANT_TOKEN_KEY, nextToken);
       localStorage.setItem(MERCHANT_USER_KEY, JSON.stringify(nextUser));
-      document.cookie = `toque_merchant_session=${nextToken}; path=/; max-age=31536000; SameSite=Lax`;
     } else {
       localStorage.removeItem(MERCHANT_TOKEN_KEY);
       localStorage.removeItem(MERCHANT_USER_KEY);
-      document.cookie = 'toque_merchant_session=; path=/; max-age=0; SameSite=Lax';
     }
   } catch {
     // ignore storage error
@@ -145,14 +143,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
       }
 
-      const u = await api.getCurrentUser();
-      const effectiveUser = u || savedUser;
+      const authenticatedUser = await api.getCurrentUser();
 
-      if (effectiveUser) {
-        const effectiveToken = savedToken || `sess-${effectiveUser.id}`;
+      if (authenticatedUser) {
+        const effectiveToken = savedToken || `sess-${authenticatedUser.id}`;
         setToken(effectiveToken);
-        setUser(effectiveUser);
-        persistMerchantSession(effectiveToken, effectiveUser);
+        setUser(authenticatedUser);
+        persistMerchantSession(effectiveToken, authenticatedUser);
         try {
           const b = await api.getBusinessProfile();
           setBusiness(b);
@@ -160,9 +157,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           // ignore
         }
       } else {
+        // No conservar una identidad local si el servidor no reconoce la sesión.
         setToken(null);
         setUser(null);
         setBusiness(null);
+        persistMerchantSession(null, null);
       }
     } catch {
       if (savedUser) {
@@ -234,28 +233,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     category?: string;
   }) => {
     const res = await api.register(data);
-    let nextToken = res.token || `sess-${res.user.id}-${Date.now().toString(36)}`;
-    try {
-      const serverAuth = await fetch('/api/auth/register', {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          email: res.user.email,
-          name: res.user.name,
-          businessName: data.businessName,
-        }),
-      });
-      if (serverAuth.ok) {
-        const srv = await serverAuth.json();
-        if (srv?.token) nextToken = srv.token;
-        if (srv?.user?.businessId) {
-          res.user.businessId = srv.user.businessId;
-        }
-      }
-    } catch {
-      // ignore
-    }
+    // La cookie HttpOnly la establece el Worker. No crear una segunda cookie
+    // desde JavaScript ni repetir el POST de registro (el OTP ya fue consumido).
+    const nextToken = res.token || `sess-${res.user.id}-${Date.now().toString(36)}`;
 
     setToken(nextToken);
     setUser(res.user);
@@ -270,10 +250,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const logout = async () => {
     try {
-      await fetch('/api/auth/logout', {
-        method: 'POST',
-        credentials: 'include',
-      }).catch(() => {});
       await api.logout();
     } finally {
       setToken(null);

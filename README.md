@@ -105,7 +105,7 @@ La aplicación implementa el patrón **Repository / Adapter** mediante la interf
 2. En `.env`, configurá:
    ```env
    VITE_API_MODE="http"
-   VITE_API_BASE_URL="https://tu-api.toque.com.ar/api"
+   # Solo para forzar el modo demo local: VITE_API_MODE="mock"
    ```
 3. **No es necesario modificar ningún componente ni pantalla** del frontend; la exportación en `src/api/index.ts` conmuta automáticamente al adaptador `httpApi`.
 4. El adaptador HTTP realiza peticiones fetch estándar con:
@@ -120,8 +120,8 @@ La aplicación implementa el patrón **Repository / Adapter** mediante la interf
 | Variable | Descripción | Valor por defecto |
 | :--- | :--- | :--- |
 | `APP_URL` | URL pública donde está alojada la aplicación | `http://localhost:3000` |
-| `VITE_API_MODE` | Modo de la capa de datos (`mock` o `http`) | `mock` |
-| `VITE_API_BASE_URL` | Prefijo para llamadas al backend REST | `/api` |
+| `VITE_API_MODE` | Modo de la capa de datos (`mock` o `http`) | `http` en producción; `mock` en desarrollo |
+
 
 ---
 
