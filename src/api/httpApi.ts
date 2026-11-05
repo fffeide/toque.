@@ -762,8 +762,32 @@ class HttpApi implements ToqueApi {
     });
   }
 
-  async getWalletStatus(): Promise<{ configured: boolean; emailConfigured?: boolean; provider: string; passesIssuedCount?: number }> {
-    return this.request('/wallet/status');
+  async getWalletStatus(): Promise<{
+    configured: boolean;
+    emailConfigured?: boolean;
+    provider: string;
+    passesIssuedCount?: number;
+    count?: number;
+    limit?: number;
+    remaining?: number;
+    plan?: string;
+    error?: string;
+    code?: string;
+  }> {
+    const usage = await this.request<{
+      configured: boolean;
+      count?: number;
+      limit?: number;
+      remaining?: number;
+      plan?: string;
+      error?: string;
+      code?: string;
+    }>('/wallet/usage');
+    return {
+      ...usage,
+      provider: 'WalletWallet',
+      passesIssuedCount: usage.count,
+    };
   }
 
   async createWalletPass(data: {
