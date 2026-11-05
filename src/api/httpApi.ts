@@ -128,17 +128,28 @@ class HttpApi implements ToqueApi {
       businessEmail?: string;
       teamSize?: 'Solo yo' | '2 a 5' | '6 a 15' | '16 o más';
       category?: string;
+      purpose?: 'merchant' | 'consumer';
     }
   ) {
-    return this.request<{
+    const response = await this.request<{
       verified: boolean;
       user?: User;
       account?: RecognizedClientAccount;
       accountExists?: boolean;
+      needsRegistration?: boolean;
     }>('/auth/verify-otp', {
       method: 'POST',
       body: JSON.stringify({ email, code, ...extra }),
     });
+    const accountExists = Boolean(response.accountExists ?? response.account?.accountExists);
+    const account = response.account || (response.user ? {
+      recognized: accountExists,
+      accountExists,
+      accountId: response.user.id,
+      name: response.user.name,
+      email: response.user.email,
+    } : { recognized: false, accountExists });
+    return { ...response, account };
   }
 
   async register(data: {
