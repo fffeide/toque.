@@ -171,10 +171,13 @@ class HttpApi implements ToqueApi {
     email: string;
     code?: string;
   }): Promise<{ user: User; token: string }> {
-    return this.request('/auth/login', {
+    if (!credentials.code) throw new Error('Ingresá el código de verificación.');
+    const response = await this.request<{ user?: User; error?: string }>('/auth/verify-otp', {
       method: 'POST',
-      body: JSON.stringify(credentials),
+      body: JSON.stringify({ email: credentials.email, code: credentials.code, purpose: 'merchant' }),
     });
+    if (!response.user) throw new Error('No pudimos iniciar sesión con ese código.');
+    return { user: response.user, token: '' };
   }
 
   async logout(): Promise<void> {
