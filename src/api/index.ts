@@ -11,6 +11,10 @@ import { httpApi } from './httpApi';
 export * from './types';
 export * from './ToqueApi';
 
-const useHttp = import.meta.env.VITE_USE_HTTP_API === 'true';
+const configuredMode = import.meta.env.VITE_API_MODE;
+const useHttp =
+  configuredMode === 'http' ||
+  (configuredMode !== 'mock' &&
+    (import.meta.env.VITE_USE_HTTP_API === 'true' || import.meta.env.PROD));
 
 export const api: ToqueApi = useHttp ? httpApi : mockApi;
