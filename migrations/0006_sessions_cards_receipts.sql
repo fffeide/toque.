@@ -1,5 +1,5 @@
 -- ============================================================
--- TOQUE D1 MIGRATION 0005: PERSISTENT SESSIONS, SINGLE CARD LIMIT & SECURE RECEIPTS
+-- TOQUE D1 MIGRATION 0006: PERSISTENT SESSIONS, SINGLE CARD LIMIT & SECURE RECEIPTS
 -- ============================================================
 
 -- 1. Tabla users para sesiones persistentes de comercios y administradores en D1 (cero Map en memoria)
